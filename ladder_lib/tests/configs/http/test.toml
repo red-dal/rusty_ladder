@@ -1,0 +1,65 @@
+# required no auth
+[[inbounds]]
+addr = "127.0.0.1:10000"
+protocol = "http"
+
+# required auth
+[[inbounds]]
+addr = "127.0.0.1:10001"
+protocol = "http"
+    [inbounds.users]
+    user1 = "user1password"
+    user2 = "user2password"
+    user3 = "user3password"
+
+# required no auth, provide no auth
+[[inbounds]]
+tag = "to-out-http"
+addr = "127.0.0.1:10002"
+protocol = "http"
+
+# required no auth, provide an auth
+[[inbounds]]
+tag = "to-out-http-auth"
+addr = "127.0.0.1:10003"
+protocol = "http"
+
+# required an auth, provide an auth
+[[inbounds]]
+tag = "to-out-http-auth2"
+addr = "127.0.0.1:10004"
+protocol = "http"
+
+[[outbounds]]
+protocol = "freedom"
+
+[[outbounds]]
+protocol = "http"
+tag = "out-http"
+addr = "127.0.0.1:11000"
+
+[[outbounds]]
+protocol = "http"
+tag = "out-http-auth"
+addr = "127.0.0.1:11000"
+user = "user1"
+pass = "user1password"
+
+[[outbounds]]
+protocol = "http"
+tag = "out-http-auth2"
+addr = "127.0.0.1:11001"
+user = "user1"
+pass = "user1password"
+
+[[router.rules]]
+inbound_tags = ["to-out-http"]
+outbound_tag = "out-http"
+
+[[router.rules]]
+inbound_tags = ["to-out-http-auth"]
+outbound_tag = "out-http-auth"
+
+[[router.rules]]
+inbound_tags = ["to-out-http-auth2"]
+outbound_tag = "out-http-auth2"

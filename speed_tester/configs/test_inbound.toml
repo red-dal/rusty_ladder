@@ -1,0 +1,36 @@
+[[inbounds]]
+addr = "127.0.0.1:22220"
+protocol = "shadowsocks"
+password = "super-complicated-password"
+method = "none"
+
+[[inbounds]]
+addr = "127.0.0.1:22221"
+protocol = "shadowsocks"
+password = "super-complicated-password"
+method = "aes-128-gcm"
+
+[[inbounds]]
+addr = "127.0.0.1:22222"
+protocol = "shadowsocks"
+password = "super-complicated-password"
+method = "aes-256-gcm"
+
+[[inbounds]]
+addr = "127.0.0.1:22223"
+protocol = "shadowsocks"
+password = "super-complicated-password"
+method = "chacha20-poly1305"
+
+[[inbounds]]
+addr = "127.0.0.1:22224"
+protocol = "vmess"
+users = [{ id = "a379c0c7-8337-4f95-bc9f-c462bd63c7a7", num_alter_ids = 0 }]
+
+
+[[outbounds]]
+protocol = "freedom"
+
+
+[log]
+level = "info"

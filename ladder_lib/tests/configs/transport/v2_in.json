@@ -1,0 +1,79 @@
+{
+    "log": {
+        "loglevel": "debug"
+    },
+    "inbounds": [
+        {
+            "listen": "127.0.0.1",
+            "port": 11000,
+            "protocol": "vmess",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                        "level": 0,
+                        "alterId": 0
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "ws",
+                "security": "none",
+                "wsSettings": {
+                    "path": "/27848739-7e62-4138-9fd3-098a63964b6b"
+                }
+            }
+        },
+        {
+            "listen": "127.0.0.1",
+            "port": 11001,
+            "protocol": "vmess",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                        "level": 0,
+                        "alterId": 0
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "tcp",
+                "security": "tls",
+                "tlsSettings": {
+                    "certificates": [
+                        {
+                            "certificateFile": "localhost.crt",
+                            "keyFile": "localhost.key"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "listen": "127.0.0.1",
+            "port": 11002,
+            "protocol": "vmess",
+            "settings": {
+                "clients": [
+                    {
+                        "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                        "level": 0,
+                        "alterId": 0
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "h2",
+                "httpSettings": {
+                    "path": "/helloworld"
+                }
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "freedom"
+        }
+    ]
+}

@@ -1,0 +1,143 @@
+{
+    "log": {
+        "loglevel": "trace"
+    },
+    "inbounds": [
+        {
+            "tag": "to-vmess-aead-ws",
+            "listen": "127.0.0.1",
+            "port": 10000,
+            "protocol": "socks"
+        },
+        {
+            "tag": "to-vmess-aead-tls",
+            "listen": "127.0.0.1",
+            "port": 10001,
+            "protocol": "socks"
+        },
+        {
+            "tag": "to-vmess-aead-h2",
+            "listen": "127.0.0.1",
+            "port": 10002,
+            "protocol": "socks"
+        }
+    ],
+    "outbounds": [
+        {
+            "tag": "vmess-aead-ws",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11000,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "chacha20-poly1305"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "ws",
+                "wsSettings": {
+                    "path": "/helloworld"
+                }
+            }
+        },
+        {
+            "tag": "vmess-aead-tls",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11001,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "chacha20-poly1305"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "streamSettings": {
+                "security": "tls",
+                "tlsSettings": {
+                    "allowInsecure": true,
+                    "certificates": [
+                        {
+                            "certificateFile": "localhost.crt",
+                            "keyFile": "localhost.key"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "tag": "vmess-aead-h2",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11002,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "chacha20-poly1305"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "streamSettings": {
+                "network": "h2",
+                "security": "tls",
+                "httpSettings": {
+                    "path": "/helloworld"
+                },
+                "tlsSettings": {
+                    "allowInsecure": true,
+                    "certificates": [
+                        {
+                            "certificateFile": "localhost.crt",
+                            "keyFile": "localhost.key"
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "routing": {
+        "rules": [
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-ws"
+                ],
+                "outboundTag": "vmess-aead-ws"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-tls"
+                ],
+                "outboundTag": "vmess-aead-tls"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-h2"
+                ],
+                "outboundTag": "vmess-aead-h2"
+            }
+        ]
+    }
+}

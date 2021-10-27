@@ -1,0 +1,66 @@
+{
+  "log": {
+    "loglevel": "debug"
+  },
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "protocol": "shadowsocks",
+      "port": 22220,
+      "settings": {
+        "method": "none",
+        "password": "complicated-password",
+        "network": "tcp"
+      }
+    },
+    {
+      "listen": "127.0.0.1",
+      "protocol": "shadowsocks",
+      "port": 22221,
+      "settings": {
+        "method": "aes-128-gcm",
+        "password": "complicated-password",
+        "network": "tcp"
+      }
+    },
+    {
+      "listen": "127.0.0.1",
+      "protocol": "shadowsocks",
+      "port": 22222,
+      "settings": {
+        "method": "aes-256-gcm",
+        "password": "complicated-password",
+        "network": "tcp"
+      }
+    },
+    {
+      "listen": "127.0.0.1",
+      "protocol": "shadowsocks",
+      "port": 22223,
+      "settings": {
+        "method": "chacha20-ietf-poly1305",
+        "password": "complicated-password",
+        "network": "tcp"
+      }
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 22224,
+      "protocol": "vmess",
+      "settings": {
+        "clients": [
+          {
+            "id": "a379c0c7-8337-4f95-bc9f-c462bd63c7a7",
+            "level": 0,
+            "alterId": 0
+          }
+        ]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    }
+  ]
+}

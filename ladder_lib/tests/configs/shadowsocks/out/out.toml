@@ -1,0 +1,55 @@
+[[inbounds]]
+tag = "to-aes-256"
+protocol = "socks5"
+addr = "127.0.0.1:10000"
+
+[[inbounds]]
+tag = "to-aes-128"
+protocol = "socks5"
+addr = "127.0.0.1:10001"
+
+[[inbounds]]
+tag = "to-chacha20"
+protocol = "socks5"
+addr = "127.0.0.1:10002"
+
+[[inbounds]]
+tag = "to-none"
+protocol = "socks5"
+addr = "127.0.0.1:10003"
+
+[[outbounds]]
+tag = "aes-256"
+protocol = "shadowsocks"
+addr = "127.0.0.1:11000"
+password = "ThisIsPassword"
+method = "aes-256-gcm"
+
+[[outbounds]]
+tag = "aes-128"
+protocol = "shadowsocks"
+addr = "127.0.0.1:11001"
+password = "ThisIsPassword"
+method = "aes-128-gcm"
+
+[[outbounds]]
+tag = "chacha20"
+protocol = "shadowsocks"
+addr = "127.0.0.1:11002"
+password = "ThisIsPassword"
+method = "chacha20-poly1305"
+
+[[outbounds]]
+tag = "none"
+protocol = "shadowsocks"
+addr = "127.0.0.1:11003"
+password = "ThisIsPassword"
+method = "none"
+
+[router]
+rules = [
+    { inbound_tags = ["to-aes-256"], outbound_tag = "aes-256" },
+    { inbound_tags = ["to-aes-128"], outbound_tag = "aes-128" },
+    { inbound_tags = ["to-chacha20"], outbound_tag = "chacha20" },
+    { inbound_tags = ["to-none"], outbound_tag = "none" },
+]

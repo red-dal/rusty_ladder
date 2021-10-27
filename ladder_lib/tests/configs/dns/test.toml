@@ -1,0 +1,18 @@
+inbounds = []
+
+[dns]
+# https://dns.quad9.net:443 is blocked by GFW
+bind_addr = "127.0.0.1:30000"
+tag = "to-out-socks"
+
+[[outbounds]]
+tag = "tag"
+protocol = "vmess"
+addr = "127.0.0.1:14000"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "chacha20-poly1305"
+
+[[outbounds]]
+tag = "to-out-socks"
+addr = "127.0.0.1:10090"
+protocol = "socks5"

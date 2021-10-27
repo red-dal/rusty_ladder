@@ -1,0 +1,32 @@
+{
+    "log": {
+        "loglevel": "debug"
+    },
+    "inbounds": [
+        {
+            "tag": "no-auth",
+            "listen": "127.0.0.1",
+            "port": 11000,
+            "protocol": "http"
+        },
+        {
+            "tag": "auth",
+            "listen": "127.0.0.1",
+            "port": 11001,
+            "protocol": "http",
+            "settings": {
+                "accounts": [
+                    {
+                        "user": "user1",
+                        "pass": "user1password"
+                    }
+                ]
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "freedom"
+        }
+    ]
+}

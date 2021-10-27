@@ -1,0 +1,142 @@
+{
+    "log": {
+        "loglevel": "debug"
+    },
+    "inbounds": [
+        {
+            "tag": "to-vmess-aead-chacha",
+            "listen": "127.0.0.1",
+            "port": 10000,
+            "protocol": "socks"
+        },
+        {
+            "tag": "to-vmess-aead-none",
+            "listen": "127.0.0.1",
+            "port": 10001,
+            "protocol": "socks"
+        },
+        {
+            "tag": "to-vmess-aead-aes",
+            "listen": "127.0.0.1",
+            "port": 10002,
+            "protocol": "socks"
+        },
+        {
+            "tag": "to-vmess-aead-zero",
+            "listen": "127.0.0.1",
+            "port": 10003,
+            "protocol": "socks"
+        }
+    ],
+    "outbounds": [
+        {
+            "tag": "vmess-aead-chacha",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11000,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "chacha20-poly1305"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "tag": "vmess-aead-none",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11000,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "none"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "tag": "vmess-aead-aes",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11000,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "aes-128-gcm"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "tag": "vmess-aead-zero",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11000,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "zero"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    ],
+    "routing": {
+        "rules": [
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-chacha",
+                    "to-vmess-aead-chacha-udp"
+                ],
+                "outboundTag": "vmess-aead-chacha"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-none"
+                ],
+                "outboundTag": "vmess-aead-none"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-aes"
+                ],
+                "outboundTag": "vmess-aead-aes"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-zero"
+                ],
+                "outboundTag": "vmess-aead-zero"
+            }
+        ]
+    }
+}

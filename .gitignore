@@ -1,0 +1,7 @@
+/target
+/build/output
+*.log
+/*.sh
+**/*.log
+flamegraph.svg
+perf.data

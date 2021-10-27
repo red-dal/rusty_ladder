@@ -1,0 +1,121 @@
+{
+    "log": {
+        "loglevel": "info"
+    },
+    "inbounds": [
+        {
+            "tag": "to-aes-256",
+            "listen": "127.0.0.1",
+            "port": 10000,
+            "protocol": "socks"
+        },
+        {
+            "tag": "to-aes-128",
+            "listen": "127.0.0.1",
+            "port": 10001,
+            "protocol": "socks"
+        },
+        {
+            "tag": "to-chacha",
+            "listen": "127.0.0.1",
+            "port": 10002,
+            "protocol": "socks"
+        },
+        {
+            "tag": "to-none",
+            "listen": "127.0.0.1",
+            "port": 10003,
+            "protocol": "socks"
+        }
+    ],
+    "outbounds": [
+        {
+            "tag": "aes-256",
+            "protocol": "shadowsocks",
+            "settings": {
+                "servers": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11000,
+                        "method": "aes-256-gcm",
+                        "password": "ThisIsPassword"
+                    }
+                ]
+            }
+        },
+        {
+            "tag": "aes-128",
+            "protocol": "shadowsocks",
+            "settings": {
+                "servers": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11001,
+                        "method": "aes-128-gcm",
+                        "password": "ThisIsPassword"
+                    }
+                ]
+            }
+        },
+        {
+            "tag": "chacha",
+            "protocol": "shadowsocks",
+            "settings": {
+                "servers": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11002,
+                        "method": "chacha20-poly1305",
+                        "password": "ThisIsPassword"
+                    }
+                ]
+            }
+        },
+        {
+            "tag": "none",
+            "protocol": "shadowsocks",
+            "settings": {
+                "servers": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11003,
+                        "method": "none",
+                        "password": "ThisIsPassword"
+                    }
+                ]
+            }
+        }
+    ],
+    "routing": {
+        "rules": [
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-aes-256"
+                ],
+                "outboundTag": "aes-256"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-aes-128"
+                ],
+                "outboundTag": "aes-128"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-chacha"
+                ],
+                "outboundTag": "chacha"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-none"
+                ],
+                "outboundTag": "none"
+            }
+        ]
+    }
+}

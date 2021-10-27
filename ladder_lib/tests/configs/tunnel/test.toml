@@ -1,0 +1,8 @@
+[[inbounds]]
+protocol = "tunnel"
+addr = "127.0.0.1:32211"
+dst = "127.0.0.1:9876"
+network = "udp"
+
+[[outbounds]]
+protocol = "freedom"

@@ -1,0 +1,296 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package]
+name = "ladder_lib"
+version = "0.0.1"
+authors = ["reddal"]
+edition = "2018"
+
+[features]
+default = []
+
+# Enable protobuf for router rules.
+use-protobuf = ["protobuf", "protobuf-codegen-pure"]
+use-router-regex = ["regex"]
+use-webapi = ["warp", "serde", "serde_json", "http"]
+
+
+# Enable all transport.
+all-transports-openssl = [
+	"h2-transport-openssl",
+	"ws-transport-openssl",
+	"tls-transport-openssl",
+]
+
+all-transports-rustls = [
+	"h2-transport-rustls",
+	"ws-transport-rustls",
+	"tls-transport-rustls",
+]
+
+# Enable h2 transport.
+# This will also enable `tls-transport-openssl` or `tls-transport-rustls` feature.
+h2-transport-openssl = ["h2", "tls-transport-openssl", "http"]
+h2-transport-rustls = ["h2", "tls-transport-rustls", "http"]
+
+# Enable websocket transport.
+# This will also enable `tls-transport-openssl` or `tls-transport-rustls` feature.
+ws-transport-openssl = ["async-tungstenite", "tls-transport-openssl", "http"]
+ws-transport-rustls = ["async-tungstenite", "tls-transport-rustls", "http"]
+
+# Enable TLS transport.
+# Requires OpenSSL.
+tls-transport-openssl = ["__tls_openssl"]
+tls-transport-rustls = ["__tls_rustls"]
+
+# Enable browser transport.
+# This can be unstable.
+browser-transport = ["serde_json", "async-tungstenite", "base64", "serde"]
+
+
+# Enable all proxies.
+all-proxies-openssl = [
+	"socks5",
+	"http-proxy",
+	"shadowsocks-openssl",
+	"chain-outbound",
+	"trojan-outbound",
+	"vmess-openssl",
+]
+all-proxies-ring = [
+	"socks5",
+	"http-proxy",
+	"shadowsocks-ring",
+	"chain-outbound",
+	"trojan-outbound",
+	"vmess-ring",
+]
+
+# Enable SOCKS5 proxy.
+socks5 = ["socks5-inbound", "socks5-outbound"]
+socks5-inbound = ["__transport-inbound"]
+socks5-outbound = ["__transport-outbound"]
+
+# Enable http proxy.
+http-proxy = ["http-inbound", "http-outbound"]
+http-inbound = ["base64", "http", "httparse", "__transport-inbound"]
+http-outbound = ["base64", "http", "httparse", "__transport-outbound"]
+
+# Enable shadowsocks proxy.
+# Requires OpenSSL for crypto.
+shadowsocks-openssl = [
+	"shadowsocks-inbound-openssl",
+	"shadowsocks-outbound-openssl",
+]
+shadowsocks-ring = ["shadowsocks-inbound-ring", "shadowsocks-outbound-ring"]
+shadowsocks-inbound-openssl = [
+	"md-5",
+	"hkdf",
+	"sha-1",
+	"__crypto_openssl",
+	"__transport-inbound",
+	"__codec",
+]
+shadowsocks-outbound-openssl = [
+	"md-5",
+	"hkdf",
+	"sha-1",
+	"__crypto_openssl",
+	"__transport-outbound",
+	"__codec",
+]
+shadowsocks-inbound-ring = [
+	"md-5",
+	"hkdf",
+	"sha-1",
+	"__crypto_crypto_ring",
+	"__transport-inbound",
+	"__codec",
+]
+shadowsocks-outbound-ring = [
+	"md-5",
+	"hkdf",
+	"sha-1",
+	"__crypto_crypto_ring",
+	"__transport-outbound",
+	"__codec",
+]
+
+# Enable vmess proxy.
+# Requires OpenSSL for crypto.
+vmess-openssl = ["vmess-inbound-openssl", "vmess-outbound-openssl"]
+vmess-ring = ["vmess-inbound-ring", "vmess-outbound-ring"]
+vmess-inbound-ring = [
+	"md-5",
+	"uuid",
+	"hmac",
+	"sha2",
+	"sha3",
+	"crc",
+	"__crypto_crypto_ring",
+	"__transport-inbound",
+	"__codec",
+]
+vmess-outbound-ring = [
+	"md-5",
+	"uuid",
+	"hmac",
+	"sha2",
+	"sha3",
+	"crc",
+	"__crypto_crypto_ring",
+	"__transport-outbound",
+	"__codec",
+]
+vmess-inbound-openssl = [
+	"md-5",
+	"uuid",
+	"hmac",
+	"sha2",
+	"sha3",
+	"crc",
+	"__crypto_openssl",
+	"__transport-inbound",
+	"__codec",
+]
+vmess-outbound-openssl = [
+	"md-5",
+	"uuid",
+	"hmac",
+	"sha2",
+	"sha3",
+	"crc",
+	"__crypto_openssl",
+	"__transport-outbound",
+	"__codec",
+]
+vmess-legacy-auth = []
+
+chain-outbound = []
+trojan-outbound = ["sha2", "__transport-outbound"]
+
+# Enable local DNS server.
+dns = [
+	"trust-dns-server",
+	"trust-dns-client",
+	"tokio-rustls",
+	"webpki-roots",
+	"trust-dns-https",
+	"lru",
+]
+
+# Enable serde support for configuration builder.
+use_serde = ["serde"]
+
+# **Private feature, do not enable manually.
+# 
+# Enable some cryptography functions for proxies 
+# like shadowsocks and VMess.
+__crypto_openssl = ["openssl"]
+__crypto_crypto_ring = ["ring", "aes", "cfb-mode"]
+__tls_openssl = ["openssl", "tokio-openssl"]
+__tls_rustls = ["tokio-rustls", "webpki", "webpki-roots"]
+
+# **Private feature, do not enable manually.
+# Use transport.
+__transport-inbound = []
+__transport-outbound = []
+__codec = []
+
+
+[dependencies]
+futures = "0.3"
+idna = "0.2"
+tokio = { version = "1.0", default-features = false, features = [
+	"rt-multi-thread",
+	"net",
+	"io-util",
+	"sync",
+	"time",
+] }
+log = { version = "0.4", default-features = false, features = [
+	"std",
+	"release_max_level_info",
+] }
+async-trait = "0.1"
+bytes = "1.0"
+rand = { version = "0.8" }
+smol_str = { version = "0.1", features = ["serde"] }
+serde = { version = "1.0", optional = true, default-features = false, features = [
+	"derive",
+] }
+num_enum = "0.5"
+parking_lot = "0.11"
+lazy_static = "1.4"
+thiserror = "1.0"
+ahash = "0.7"
+
+# Web API
+warp = { version = "0.3", optional = true, default-features = false, features = [
+	"compression",
+] }
+
+# Router
+protobuf = { version = "2.24", optional = true }
+regex = { version = "1.5", optional = true }
+
+# DNS
+trust-dns-server = { version = "0.20", optional = true }
+trust-dns-client = { version = "0.20", optional = true, features = [
+	"dns-over-https-rustls",
+] }
+trust-dns-https = { version = "0.20", optional = true }
+lru = { version = "0.6", optional = true, default-features = false }
+
+# H2
+h2 = { version = "0.3", features = ["stream"], optional = true }
+
+# TLS
+tokio-openssl = { version = "0.6", optional = true }
+tokio-rustls = { version = "0.22", optional = true }
+webpki = { version = "0.21", optional = true }
+webpki-roots = { version = "0.21", optional = true }
+
+# browser
+serde_json = { version = "1.0", optional = true }
+
+async-tungstenite = { version = "0.12", default-features = false, features = [
+	"tokio-runtime",
+], optional = true }
+http = { version = "0.2", optional = true }
+httparse = { version = "1.3", optional = true }
+base64 = { version = "0.13", optional = true }
+
+# crypto
+md-5 = { version = "0.9", optional = true }
+sha2 = { version = "0.9", optional = true }
+hkdf = { version = "0.11", optional = true }
+sha-1 = { version = "0.9", optional = true }
+crc = { version = "1.8", optional = true }
+aes = { version = "0.7", optional = true }
+cfb-mode = { version = "0.7.1", optional = true }
+ring = { version = "0.16", optional = true }
+openssl = { version = "0.10", optional = true }
+rustls = { version = "0.20", optional = true }
+
+# vmess
+hmac = { version = "0.11", optional = true }
+uuid = { version = "0.8", optional = true, default-features = false, features = [
+	"serde",
+	"v4",
+] }
+sha3 = { version = "0.9", optional = true }
+
+[dev-dependencies]
+env_logger = "0.8"
+reqwest = { version = "0.11", features = ["socks"] }
+toml = "0.5"
+hyper = { version = "0.14", features = ["server"] }
+criterion = "0.3"
+
+[build-dependencies]
+protobuf-codegen-pure = { version = "2.24", optional = true }
+
+
+[[bench]]
+name = "router_benchmark"
+harness = false

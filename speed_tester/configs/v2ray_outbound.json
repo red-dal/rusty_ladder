@@ -1,0 +1,295 @@
+{
+  "log": {
+    "loglevel": "debug"
+  },
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11110,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    },
+    {
+      "tag": "to-ss-none",
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11111,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    },
+    {
+      "tag": "to-ss-aes-128",
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11112,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    },
+    {
+      "tag": "to-ss-aes-256",
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11113,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    },
+    {
+      "tag": "to-ss-chacha20",
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11114,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    },
+    {
+      "tag": "to-vmess-aes",
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11115,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    },
+    {
+      "tag": "to-vmess-chacha",
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11116,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    },
+    {
+      "tag": "to-vmess-none",
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11117,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    },
+    {
+      "tag": "to-vmess-zero",
+      "listen": "127.0.0.1",
+      "protocol": "dokodemo-door",
+      "port": 11118,
+      "settings": {
+        "address": "10.42.0.1",
+        "port": 33333
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom"
+    },
+    {
+      "tag": "ss-none",
+      "protocol": "shadowsocks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 22220,
+            "method": "none",
+            "password": "complicated-password"
+          }
+        ]
+      }
+    },
+    {
+      "tag": "ss-aes-128",
+      "protocol": "shadowsocks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 22221,
+            "method": "aes-128-gcm",
+            "password": "complicated-password"
+          }
+        ]
+      }
+    },
+    {
+      "tag": "ss-aes-256",
+      "protocol": "shadowsocks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 22222,
+            "method": "aes-256-gcm",
+            "password": "complicated-password"
+          }
+        ]
+      }
+    },
+    {
+      "tag": "ss-chacha20",
+      "protocol": "shadowsocks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 22223,
+            "method": "chacha20-ietf-poly1305",
+            "password": "complicated-password"
+          }
+        ]
+      }
+    },
+    {
+      "tag": "vmess-aes",
+      "protocol": "vmess",
+      "settings": {
+        "vnext": [
+          {
+            "address": "127.0.0.1",
+            "port": 22224,
+            "users": [
+              {
+                "id": "a379c0c7-8337-4f95-bc9f-c462bd63c7a7",
+                "alterId": 0,
+                "security": "aes-128-gcm"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "tag": "vmess-chacha",
+      "protocol": "vmess",
+      "settings": {
+        "vnext": [
+          {
+            "address": "127.0.0.1",
+            "port": 22224,
+            "users": [
+              {
+                "id": "a379c0c7-8337-4f95-bc9f-c462bd63c7a7",
+                "alterId": 0,
+                "security": "chacha20-poly1305"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "tag": "vmess-none",
+      "protocol": "vmess",
+      "settings": {
+        "vnext": [
+          {
+            "address": "127.0.0.1",
+            "port": 22224,
+            "users": [
+              {
+                "id": "a379c0c7-8337-4f95-bc9f-c462bd63c7a7",
+                "alterId": 0,
+                "security": "none"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "tag": "vmess-aes",
+      "protocol": "vmess",
+      "settings": {
+        "vnext": [
+          {
+            "address": "127.0.0.1",
+            "port": 22224,
+            "users": [
+              {
+                "id": "a379c0c7-8337-4f95-bc9f-c462bd63c7a7",
+                "alterId": 0,
+                "security": "zero"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "to-ss-none"
+        ],
+        "outboundTag": "ss-none"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "to-ss-aes-128"
+        ],
+        "outboundTag": "ss-aes-128"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "to-ss-aes-256"
+        ],
+        "outboundTag": "ss-aes-256"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "to-ss-chacha20"
+        ],
+        "outboundTag": "ss-chacha20"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "to-vmess-aes"
+        ],
+        "outboundTag": "vmess-aes"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "to-vmess-chacha"
+        ],
+        "outboundTag": "vmess-chacha"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "to-vmess-none"
+        ],
+        "outboundTag": "vmess-none"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "to-vmess-zero"
+        ],
+        "outboundTag": "vmess-zero"
+      }
+    ],
+    "balancers": []
+  }
+}

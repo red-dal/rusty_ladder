@@ -1,0 +1,46 @@
+# *****
+# Please DO NOT use any key or password shown in this file
+# in your environment.
+# ****
+
+# HTTP proxy entrance.
+[[inbounds]]
+addr = "127.0.0.1:1081"
+protocol = "http"
+
+# SOCKS5 proxy entrance.
+[[inbounds]]
+addr = "127.0.0.1:1080"
+protocol = "socks5"
+
+
+# VMess proxy exit.
+# First outbound is used as exit by default.
+[[outbounds]]
+addr = "server-address.com:443"
+protocol = "vmess"
+sec = "aes-128-gcm"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+    [outbounds.transport]
+    type = "ws"
+    path = "/27848739-7e62-4138-9fd3-098a63964b6b"
+    # Enable TLS.
+    tls = { ca_file = "examples/ca.crt" }
+
+
+# Direct exit for all LAN connections.
+[[outbounds]]
+tag = "direct"
+protocol = "freedom"
+
+# Let connections to localhost or LAN bypass proxy.
+[[router.rules]]
+dst = [
+    "192.168.0.0/16",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "127.0.0.0/8",
+    "lan",
+    "localhost",
+]
+outbound_tag = "direct"

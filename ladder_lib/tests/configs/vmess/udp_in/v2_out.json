@@ -1,0 +1,86 @@
+{
+    "log": {
+        "loglevel": "debug"
+    },
+    "inbounds": [
+        {
+            "tag": "to-vmess-aead-chacha-udp",
+            "listen": "127.0.0.1",
+            "port": 32211,
+            "protocol": "dokodemo-door",
+            "settings": {
+                "address": "127.0.0.1",
+                "port": 9876,
+                "network": "udp"
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "tag": "vmess-aead-chacha",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 27564,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "chacha20-poly1305"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    ],
+    "routing": {
+        "rules": [
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aes"
+                ],
+                "outboundTag": "vmess-aes"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-none"
+                ],
+                "outboundTag": "vmess-none"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-chacha20"
+                ],
+                "outboundTag": "vmess-chacha20"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-chacha",
+                    "to-vmess-aead-chacha-udp"
+                ],
+                "outboundTag": "vmess-aead-chacha"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-none"
+                ],
+                "outboundTag": "vmess-aead-none"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-aes"
+                ],
+                "outboundTag": "vmess-aead-aes"
+            }
+        ]
+    }
+}

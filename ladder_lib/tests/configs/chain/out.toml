@@ -1,0 +1,28 @@
+[[inbounds]]
+tag = "socks"
+addr = "127.0.0.1:10000"
+protocol = "socks5"
+
+[[outbounds]]
+protocol = "chain"
+chain = ["a", "b", "c", "d"]
+
+[[outbounds]]
+tag = "a"
+protocol = "socks5"
+addr = "127.0.0.1:11000"
+
+[[outbounds]]
+tag = "b"
+protocol = "http"
+addr = "127.0.0.1:11001"
+
+[[outbounds]]
+tag = "c"
+protocol = "socks5"
+addr = "127.0.0.1:11002"
+
+[[outbounds]]
+tag = "d"
+protocol = "http"
+addr = "127.0.0.1:11003"

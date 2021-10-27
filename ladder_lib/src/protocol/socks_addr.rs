@@ -1,0 +1,910 @@
+/**********************************************************************
+
+Copyright (C) 2021 by reddal
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+**********************************************************************/
+
+use crate::prelude::*;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+use smol_str::SmolStr;
+use std::{
+	borrow::Borrow,
+	fmt::{self, Display},
+	io,
+	num::{NonZeroU16, ParseIntError},
+	str::FromStr,
+	string,
+};
+
+// See more at <https://tools.ietf.org/html/rfc1928>
+#[derive(Debug, Clone, Copy, IntoPrimitive, TryFromPrimitive)]
+#[repr(u8)]
+pub enum AddrType {
+	Ipv4 = 1,
+	Name = 3,
+	Ipv6 = 4,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+	#[error("string is not utf8 ({0})")]
+	StringUtf8(string::FromUtf8Error),
+	#[error("str is not utf8 ({0})")]
+	StrUtf8(std::str::Utf8Error),
+	#[error("unknown address type {0}")]
+	UnknownAddressType(u8),
+	#[error("'{0}' is not an IP ({1}) and not a valid name ({2})")]
+	InvalidDomain(String, std::net::AddrParseError, idna::Errors),
+	#[error("empty domain name")]
+	EmptyDomainName,
+	#[error("domain name length larger than 255")]
+	DomainNameTooLong,
+	#[error("invalid port {0} ({1})")]
+	InvalidPort(String, ParseIntError),
+	#[error("'{0}' is missing the port section")]
+	MissingPort(String),
+	#[error("invalid address {0}")]
+	InvalidFormat(String),
+	#[error("buffer of {buf_len:?} bytes is too small, which required at least {exp_len:?} bytes")]
+	BufferTooSmall { buf_len: usize, exp_len: usize },
+	#[error("IO error ({0})")]
+	Io(#[from] io::Error),
+}
+
+impl ReadError {
+	#[must_use]
+	pub fn into_io_err(self) -> io::Error {
+		if let Self::Io(e) = self {
+			e
+		} else {
+			io::Error::new(io::ErrorKind::InvalidData, self)
+		}
+	}
+}
+
+// -------------------------- SocksDestination --------------------------
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SocksDestination {
+	/// Must be a valid domain name.
+	Name(DomainName),
+	Ip(IpAddr),
+}
+
+impl SocksDestination {
+	#[inline]
+	#[must_use]
+	/// Create a new `SocksDestination` from [`IpAddr`].
+	pub fn new_ip(ip: impl Into<IpAddr>) -> Self {
+		Self::Ip(ip.into())
+	}
+
+	#[inline]
+	#[must_use]
+	/// Create a new `SocksDestination` from [`str`].
+	///
+	/// # Panics
+	/// Panics if the length of `name` is larger than 255.
+	pub fn new_domain_str(name: &str) -> Self {
+		Self::Name(DomainName::new_from_str(name).expect("domain length cannot be larger than 255"))
+	}
+
+	#[inline]
+	#[must_use]
+	/// Create a new `SocksDestination` from [`SmolStr`].
+	///
+	/// # Panics
+	/// Panics if the length of `name` is larger than 255.
+	pub fn new_domain_smol(name: SmolStr) -> Self {
+		Self::Name(
+			DomainName::new_from_smol(name).expect("domain length cannot be larger than 255"),
+		)
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn atyp(&self) -> AddrType {
+		match self {
+			SocksDestination::Name(_) => AddrType::Name,
+			SocksDestination::Ip(IpAddr::V4(_)) => AddrType::Ipv4,
+			SocksDestination::Ip(IpAddr::V6(_)) => AddrType::Ipv6,
+		}
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn to_str(&self) -> Cow<'_, str> {
+		#[cfg(debug_assertions)]
+		if let Self::Name(name) = self {
+			debug_assert!(!name.is_empty(), "SocksDestination name cannot be empty!");
+		}
+
+		match self {
+			SocksDestination::Name(name) => Cow::Borrowed(name.as_str()),
+			SocksDestination::Ip(ip) => Cow::Owned(ip.to_string()),
+		}
+	}
+
+	// ***Deserialize
+
+	/// Creates a [`SocksDestination`] from address type `atyp` and byte stream `r`.
+	///
+	/// The format for each address type are as following:
+	/// - [`AddrType::Ipv4`]: | 4 bytes |
+	/// - [`AddrType::Ipv4`]: | 16 bytes |
+	/// - [`AddrType::Name`]: | n, 1 byte | n bytes |
+	///
+	///
+	/// # Errors
+	///
+	/// [`ReadError`] will be returned if error occurred.
+	pub fn read_from_atyp<R>(r: &mut R, atyp: AddrType) -> Result<Self, ReadError>
+	where
+		R: std::io::Read,
+	{
+		Ok(match atyp {
+			AddrType::Ipv4 => {
+				let mut buf = [0_u8; 4];
+				r.read_exact(&mut buf)?;
+				Ipv4Addr::from(buf).into()
+			}
+			AddrType::Ipv6 => {
+				let mut buf = [0_u8; 16];
+				r.read_exact(&mut buf)?;
+				Ipv6Addr::from(buf).into()
+			}
+			AddrType::Name => {
+				let mut len = [0_u8; 1];
+				r.read_exact(&mut len)?;
+				let len = len[0];
+				if len == 0 {
+					return Err(ReadError::EmptyDomainName);
+				}
+				// Domain length is a u8, which will never be larger than 256.
+				let mut buffer = [0_u8; 256];
+				let buffer = &mut buffer[..len as usize];
+				r.read_exact(buffer)?;
+				let name = std::str::from_utf8(buffer).map_err(ReadError::StrUtf8)?;
+				SocksDestination::Name(DomainName(name.into()))
+			}
+		})
+	}
+
+	/// This is the async version of [`Self::read_from_atyp`].
+	///
+	/// # Errors
+	/// This function returns the same error as [`Self::read_from_atyp`].
+	///
+	/// [`Self::read_from_atyp`]: crate::utils::socks_addr::SocksDestination::read_from_atyp()
+	pub async fn async_read_from_atyp(
+		r: &mut (impl AsyncRead + Unpin),
+		atyp: AddrType,
+	) -> Result<Self, ReadError> {
+		let dest: SocksDestination = match atyp {
+			AddrType::Ipv4 => Ipv4Addr::from(r.read_u32().await?).into(),
+			AddrType::Ipv6 => Ipv6Addr::from(r.read_u128().await?).into(),
+			AddrType::Name => {
+				let len = r.read_u8().await?;
+				if len == 0 {
+					return Err(ReadError::EmptyDomainName);
+				}
+				// Domain length is a u8, which will never be larger than 256.
+				let mut buffer = [0_u8; 256];
+				let buffer = &mut buffer[..len as usize];
+				r.read_exact(buffer).await?;
+				let name = std::str::from_utf8(buffer).map_err(ReadError::StrUtf8)?;
+				SocksDestination::from_str(name)?
+			}
+		};
+		Ok(dest)
+	}
+
+	// ***Serialize
+
+	pub fn write_to_no_atyp(&self, buf: &mut impl BufMut) {
+		match self {
+			SocksDestination::Name(name) => {
+				buf.put_u8(name.len());
+				buf.put(name.as_bytes());
+			}
+			SocksDestination::Ip(ip) => match ip {
+				IpAddr::V4(ipv4) => {
+					buf.put(&ipv4.octets()[..]);
+				}
+				IpAddr::V6(ipv6) => {
+					buf.put(&ipv6.octets()[..]);
+				}
+			},
+		}
+	}
+
+	#[inline]
+	#[must_use]
+	/// Get the minimal length of buffer needed to store the serialized data.
+	pub fn serialized_len_atyp(&self) -> usize {
+		// ATYP (1 byte) + ADDR
+		1 + match self {
+			SocksDestination::Ip(ip) => match ip {
+				IpAddr::V4(_) => 4,
+				IpAddr::V6(_) => 16,
+			},
+			// N (1 byte) + NAME (N bytes)
+			SocksDestination::Name(name) => 1 + name.len() as usize,
+		}
+	}
+}
+
+// -------------------------- Traits --------------------------
+
+impl FromStr for SocksDestination {
+	type Err = ReadError;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		if s.is_empty() {
+			return Err(ReadError::EmptyDomainName);
+		}
+		let ip_err = match IpAddr::from_str(s) {
+			Ok(ip) => return Ok(Self::Ip(ip)),
+			Err(e) => e,
+		};
+		let name_err = match idna::domain_to_ascii_strict(s) {
+			Ok(name) => {
+				return Ok(Self::Name(
+					DomainName::new_from_string(name).ok_or(ReadError::DomainNameTooLong)?,
+				))
+			}
+			Err(e) => e,
+		};
+		Err(ReadError::InvalidDomain(s.to_owned(), ip_err, name_err))
+	}
+}
+
+impl From<Ipv4Addr> for SocksDestination {
+	#[inline]
+	fn from(ip: Ipv4Addr) -> Self {
+		Self::Ip(ip.into())
+	}
+}
+
+impl From<Ipv6Addr> for SocksDestination {
+	#[inline]
+	fn from(ip: Ipv6Addr) -> Self {
+		Self::Ip(ip.into())
+	}
+}
+
+impl From<IpAddr> for SocksDestination {
+	#[inline]
+	fn from(ip: IpAddr) -> Self {
+		Self::Ip(ip)
+	}
+}
+
+impl fmt::Display for SocksDestination {
+	#[inline]
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Ip(ip) => ip.fmt(f),
+			Self::Name(name) => name.fmt(f),
+		}
+	}
+}
+
+// -------------------------- SocksAddr --------------------------
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SocksAddr {
+	pub dest: SocksDestination,
+	pub port: u16,
+}
+
+impl SocksAddr {
+	#[inline]
+	#[must_use]
+	pub fn new(dest: SocksDestination, port: u16) -> Self {
+		Self { dest, port }
+	}
+
+	// ***Deserialize
+
+	/// Creates a [`SocksAddr`] from byte stream `r`.
+	///
+	/// This function will try to read in the following format:
+	/// ```not_rust
+	/// +------+----------------+----------------+
+	/// | ATYP |  Destination   |     Port       |
+	/// +------+----------------+----------------+
+	/// | u8   | various bytes  |   2 bytes      |
+	/// |      |                | big endian u16 |
+	/// +------+----------------+----------------+
+	/// ```
+	///
+	/// Reading will be done in the following steps:
+	///
+	/// 1) 1 byte will be read to determined the address type `atyp`. See more at [`AddrType`].
+	/// 2) a [`SocksDestination`] will be read using `atyp`
+	///    ( See more at [`SocksDestination::read_from_atyp`] ).
+	/// 3) 2 bytes will be read into a u16 as port.
+	///
+	/// By default [`AddrType`]'s value will be used to determined address type.
+	/// For custom values, use [`SocksDestination::read_from_atyp`] manually.
+	///
+	/// # Errors
+	///
+	/// If there is any error, an [`ReadError`] will be returned.
+	///
+	///[`SocksDestination::read_from_atyp`]: SocksDestination::read_from_atyp()
+	pub fn read_from<R>(r: &mut R) -> Result<Self, ReadError>
+	where
+		R: std::io::Read,
+	{
+		let atyp_num = read_arr::<_, 1>(r)?[0];
+		let atyp =
+			AddrType::try_from(atyp_num).map_err(|_| ReadError::UnknownAddressType(atyp_num))?;
+		let dest = SocksDestination::read_from_atyp(r, atyp)?;
+		let port = u16::from_be_bytes(read_arr::<_, 2>(r)?);
+		Ok(Self::new(dest, port))
+	}
+
+	/// This is a helper function for reading from bytes instead of a stream.
+	///
+	/// It is the same as `Self::read_from(std::io::Cursor::new(buf))`.
+	///
+	/// # Errors
+	///
+	/// This function returns the same error as [`Self::read_from`].
+	#[inline]
+	pub fn read_from_bytes(buf: &[u8]) -> Result<(Self, NonZeroU16), ReadError> {
+		let mut cur = std::io::Cursor::new(buf);
+		let addr = Self::read_from(&mut cur)?;
+		let n = u16::try_from(cur.position()).expect("Read more bytes than u16 can hold, wtf");
+		let n = NonZeroU16::new(n).expect("0 byte is read while reading SocksAddr");
+		Ok((addr, n))
+	}
+
+	/// This is the async version of [`Self::read_from`].
+	///
+	/// # Errors
+	///
+	/// This function returns the same error as [`Self::read_from`].
+	pub async fn async_read_from<R>(r: &mut R) -> Result<Self, ReadError>
+	where
+		R: AsyncRead + Unpin,
+	{
+		let atyp_num = r.read_u8().await?;
+		let atyp =
+			AddrType::try_from(atyp_num).map_err(|_| ReadError::UnknownAddressType(atyp_num))?;
+		let dest: SocksDestination = SocksDestination::async_read_from_atyp(r, atyp).await?;
+		let port = r.read_u16().await?;
+		Ok(Self::new(dest, port))
+	}
+
+	// ***Serialize
+
+	/// Return the number of bytes it will take to store the seralized address.
+	#[inline]
+	#[must_use]
+	pub fn serialized_len_atyp(&self) -> usize {
+		// length of port(u16) plus the other parts
+		self.dest.serialized_len_atyp() + 2
+	}
+
+	/// Write the address into `buf` in [SOCKS5 address format].
+	///
+	/// Data will be written into `buf` in the following format:
+	/// ```not_rust
+	/// +------+----------------+----------------+
+	/// | ATYP |  Destination   |     Port       |
+	/// +------+----------------+----------------+
+	/// | u8   | various bytes  |   2 bytes      |
+	/// |      |                | big endian u16 |
+	/// +------+----------------+----------------+
+	/// ```
+	/// [`AddrType`]'s value will be used in ATYP field.
+	/// If you want to use custom ATYP value or serialize in other format,
+	/// write each parts into `buf` manually.
+	///
+	/// [SOCKS5 address format]: https://tools.ietf.org/html/rfc1928#section-5
+	#[inline]
+	pub fn write_to<B: BufMut>(&self, buf: &mut B) {
+		buf.put_u8(self.dest.atyp() as u8);
+		self.dest.write_to_no_atyp(buf);
+		buf.put_u16(self.port);
+	}
+
+	/// Parse an string `s` with an optional default port `default_port` and returns an address.
+	///
+	/// If `default_port` is [`None`],
+	/// string like 'domain:port' is acceptable.
+	///
+	/// If `default_port` is not [`None`],
+	/// string like 'domain:port' and 'domain' is acceptable.
+	/// When the port section is not in string `s`,
+	/// the value in `default_port` will be used instead.
+	///
+	/// # Errors
+	///
+	/// If `default_port` is [`None`] and there are no port in `s`, or the string is invalid,
+	/// a [`ReadError`] will be returned.
+	pub fn parse_str(s: &str, default_port: Option<u16>) -> Result<Self, ReadError> {
+		if let Ok(addr) = s.parse::<SocketAddr>() {
+			return Ok(addr.into());
+		}
+
+		let mut split = s.split_terminator(':');
+
+		let host_str = split.next().ok_or(ReadError::EmptyDomainName)?;
+
+		let port_str = split.next();
+
+		let dest = SocksDestination::from_str(host_str)?;
+
+		let port = if let Some(port_str) = port_str {
+			port_str
+				.parse::<u16>()
+				.map_err(|err| ReadError::InvalidPort(s.to_owned(), err))?
+		} else {
+			// There are no port in the str.
+			default_port.ok_or_else(|| ReadError::MissingPort(s.to_owned()))?
+		};
+
+		Ok(Self { dest, port })
+	}
+}
+
+// --------------------------- Traits ---------------------------
+
+impl FromStr for SocksAddr {
+	type Err = ReadError;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Self::parse_str(s, None)
+	}
+}
+
+impl fmt::Display for SocksAddr {
+	#[inline]
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}:{}", self.dest, self.port)
+	}
+}
+
+impl From<SocketAddr> for SocksAddr {
+	#[inline]
+	fn from(addr: SocketAddr) -> Self {
+		Self {
+			dest: addr.ip().into(),
+			port: addr.port(),
+		}
+	}
+}
+
+impl From<(SocksDestination, u16)> for SocksAddr {
+	#[inline]
+	fn from((dest, port): (SocksDestination, u16)) -> Self {
+		Self { dest, port }
+	}
+}
+
+impl From<(IpAddr, u16)> for SocksAddr {
+	#[inline]
+	fn from((ip, port): (IpAddr, u16)) -> Self {
+		Self {
+			dest: SocksDestination::Ip(ip),
+			port,
+		}
+	}
+}
+
+impl From<(Ipv4Addr, u16)> for SocksAddr {
+	#[inline]
+	fn from((ip, port): (Ipv4Addr, u16)) -> Self {
+		Self {
+			dest: SocksDestination::Ip(ip.into()),
+			port,
+		}
+	}
+}
+
+impl From<(Ipv6Addr, u16)> for SocksAddr {
+	#[inline]
+	fn from((ip, port): (Ipv6Addr, u16)) -> Self {
+		Self {
+			dest: SocksDestination::Ip(ip.into()),
+			port,
+		}
+	}
+}
+
+#[cfg(feature = "use_serde")]
+mod serde_internal {
+	use super::SocksAddr;
+	use serde::{de::Visitor, Deserialize, Serialize};
+	use std::{
+		fmt::{self, Formatter},
+		str::FromStr,
+	};
+
+	impl<'de> Deserialize<'de> for SocksAddr {
+		fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+		where
+			D: serde::Deserializer<'de>,
+		{
+			struct AddressVisitor;
+
+			impl<'de> Visitor<'de> for AddressVisitor {
+				type Value = SocksAddr;
+
+				fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
+					formatter.write_str("[IP/Domain]:[Port]")
+				}
+
+				fn visit_str<E>(self, value: &str) -> Result<SocksAddr, E>
+				where
+					E: serde::de::Error,
+				{
+					SocksAddr::from_str(value).map_err(serde::de::Error::custom)
+				}
+			}
+
+			deserializer.deserialize_str(AddressVisitor)
+		}
+	}
+
+	impl<'de> Serialize for SocksAddr {
+		fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+		where
+			S: serde::Serializer,
+		{
+			let val = self.to_string();
+			serializer.serialize_str(&val)
+		}
+	}
+}
+
+// --------------------------- DomainName ---------------------------
+
+/// A domain string that's guaranteed to be at most 255 bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+pub struct DomainName(SmolStr);
+
+impl DomainName {
+	#[must_use]
+	pub fn new_from_str(val: &str) -> Option<Self> {
+		if u8::try_from(val.len()).is_ok() {
+			Some(Self(SmolStr::from(val)))
+		} else {
+			None
+		}
+	}
+
+	#[must_use]
+	pub fn new_from_smol(val: SmolStr) -> Option<Self> {
+		if u8::try_from(val.len()).is_ok() {
+			Some(Self(val))
+		} else {
+			None
+		}
+	}
+
+	#[must_use]
+	pub fn new_from_string(val: String) -> Option<Self> {
+		if u8::try_from(val.len()).is_ok() {
+			Some(Self(SmolStr::from(val)))
+		} else {
+			None
+		}
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn as_str(&self) -> &str {
+		self.0.as_str()
+	}
+
+	#[allow(clippy::cast_possible_truncation)]
+	#[inline]
+	#[must_use]
+	pub fn len(&self) -> u8 {
+		// Length is guaranteed to be u8
+		self.0.len() as u8
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn is_empty(&self) -> bool {
+		self.0.is_empty()
+	}
+}
+
+impl std::ops::Deref for DomainName {
+	type Target = SmolStr;
+
+	#[inline]
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+impl AsRef<str> for DomainName {
+	#[inline]
+	fn as_ref(&self) -> &str {
+		self.0.as_ref()
+	}
+}
+
+impl AsRef<SmolStr> for DomainName {
+	#[inline]
+	fn as_ref(&self) -> &SmolStr {
+		&self.0
+	}
+}
+
+impl Borrow<str> for DomainName {
+	#[inline]
+	fn borrow(&self) -> &str {
+		self.0.as_str()
+	}
+}
+
+impl Borrow<SmolStr> for DomainName {
+	#[inline]
+	fn borrow(&self) -> &SmolStr {
+		&self.0
+	}
+}
+
+impl Display for DomainName {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		Display::fmt(&self.0, f)
+	}
+}
+
+// --------------------------- Utils ---------------------------
+
+#[inline]
+fn read_arr<R, const N: usize>(r: &mut R) -> io::Result<[u8; N]>
+where
+	R: std::io::Read,
+{
+	let mut res = [0_u8; N];
+	r.read_exact(&mut res)?;
+	Ok(res)
+}
+
+// --------------------------- Tests ---------------------------
+
+#[cfg(test)]
+mod host_tests {
+	use super::*;
+	use std::io::Cursor;
+
+	#[test]
+	fn test_dest_write_to_v4() {
+		let ip = Ipv4Addr::new(1, 2, 3, 4);
+
+		let mut expected_buffer = vec![];
+		expected_buffer.put_slice(&ip.octets());
+
+		let mut result = vec![];
+		SocksDestination::Ip(ip.into()).write_to_no_atyp(&mut result);
+		assert_eq!(expected_buffer, result);
+	}
+
+	#[test]
+	fn test_dest_write_to_v6() {
+		let ip = Ipv6Addr::new(1, 1, 2, 2, 3, 3, 4, 4);
+
+		let mut expected_buffer = vec![];
+		expected_buffer.put_slice(&ip.octets());
+
+		let mut result = vec![];
+		SocksDestination::Ip(ip.into()).write_to_no_atyp(&mut result);
+		assert_eq!(expected_buffer, result);
+	}
+
+	#[test]
+	fn test_dest_write_to_name() {
+		let name = "hello.world";
+
+		let mut expected_buffer = vec![];
+		expected_buffer.put_u8(name.len() as u8);
+		expected_buffer.put_slice(name.as_bytes());
+
+		let mut result = vec![];
+		SocksDestination::new_domain_str(name).write_to_no_atyp(&mut result);
+		assert_eq!(expected_buffer, result);
+	}
+
+	#[test]
+	fn test_dest_async_read_from_v4() {
+		let ip = Ipv4Addr::new(1, 2, 3, 4);
+
+		let mut input = vec![];
+		input.put_slice(&ip.octets());
+
+		let rt = tokio::runtime::Runtime::new().unwrap();
+		rt.block_on(async move {
+			let result =
+				SocksDestination::async_read_from_atyp(&mut Cursor::new(input), AddrType::Ipv4)
+					.await
+					.unwrap();
+			assert_eq!(result, SocksDestination::Ip(ip.into()));
+		});
+	}
+
+	#[test]
+	fn test_dest_async_read_from_v6() {
+		let ip = Ipv6Addr::new(1, 1, 2, 2, 3, 3, 4, 4);
+
+		let mut input = vec![];
+		input.put_slice(&ip.octets());
+
+		let rt = tokio::runtime::Runtime::new().unwrap();
+		rt.block_on(async move {
+			let result =
+				SocksDestination::async_read_from_atyp(&mut Cursor::new(input), AddrType::Ipv6)
+					.await
+					.unwrap();
+			assert_eq!(result, SocksDestination::Ip(ip.into()));
+		});
+	}
+
+	#[test]
+	fn test_dest_async_read_from_name() {
+		let name = "helloworld";
+
+		let mut input = vec![];
+		input.put_u8(name.as_bytes().len() as u8);
+		input.put_slice(name.as_bytes());
+
+		let rt = tokio::runtime::Runtime::new().unwrap();
+		rt.block_on(async move {
+			let result =
+				SocksDestination::async_read_from_atyp(&mut Cursor::new(input), AddrType::Name)
+					.await
+					.unwrap();
+			assert_eq!(result, SocksDestination::new_domain_str(name));
+		});
+	}
+
+	#[test]
+	fn test_dest_read_from_v4() {
+		let ip = Ipv4Addr::new(1, 2, 3, 4);
+		let atyp = AddrType::Ipv4;
+
+		let mut input = vec![];
+		input.put_slice(&ip.octets());
+
+		let result = SocksDestination::read_from_atyp(&mut Cursor::new(&input), atyp).unwrap();
+		assert_eq!(result, SocksDestination::Ip(ip.into()));
+		assert_eq!(result.serialized_len_atyp() - 1, input.len());
+	}
+
+	#[test]
+	fn test_dest_read_from_v6() {
+		let ip = Ipv6Addr::new(1, 1, 2, 2, 3, 3, 4, 4);
+		let atyp = AddrType::Ipv6;
+
+		let mut input = vec![];
+		input.put_slice(&ip.octets());
+
+		let result = SocksDestination::read_from_atyp(&mut Cursor::new(&input), atyp).unwrap();
+		assert_eq!(result, SocksDestination::Ip(ip.into()));
+		assert_eq!(result.serialized_len_atyp() - 1, input.len());
+	}
+
+	#[test]
+	fn test_dest_read_from_name() {
+		let name = "helloworld";
+		let atyp = AddrType::Name;
+
+		let mut input = vec![];
+		input.put_u8(name.as_bytes().len() as u8);
+		input.put_slice(name.as_bytes());
+
+		let result = SocksDestination::read_from_atyp(&mut Cursor::new(&input), atyp).unwrap();
+		assert_eq!(result, SocksDestination::new_domain_str(name));
+		assert_eq!(result.serialized_len_atyp() - 1, input.len());
+	}
+
+	#[test]
+	fn test_dest_parse_ipv4() {
+		let ip = Ipv4Addr::new(1, 2, 3, 4);
+		assert_eq!(
+			SocksDestination::Ip(ip.into()),
+			SocksDestination::from_str(&ip.to_string()).unwrap()
+		)
+	}
+
+	#[test]
+	fn test_dest_parse_ipv6() {
+		let ip = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+		assert_eq!(
+			SocksDestination::Ip(ip.into()),
+			SocksDestination::from_str(&ip.to_string()).unwrap()
+		)
+	}
+
+	#[test]
+	fn test_dest_parse_name() {
+		let name = "hello.world";
+		assert_eq!(
+			SocksDestination::new_domain_str(name),
+			SocksDestination::from_str(name).unwrap()
+		)
+	}
+
+	#[test]
+	fn test_dest_parse_error_empty() {
+		assert!(matches!(
+			SocksDestination::from_str("").unwrap_err(),
+			ReadError::EmptyDomainName
+		));
+	}
+
+	#[test]
+	fn test_dest_parse_error_invalid() {
+		assert!(
+			matches!(
+				SocksDestination::from_str("bad.host_name").unwrap_err(),
+				ReadError::InvalidDomain(_, _, _)
+			),
+			"'_' should not be accepted"
+		);
+		assert!(
+			matches!(
+				SocksDestination::from_str("bad*.domain").unwrap_err(),
+				ReadError::InvalidDomain(_, _, _)
+			),
+			"'*' should not be accepted"
+		);
+	}
+
+	#[test]
+	fn test_dest_display_ipv4() {
+		let ip = Ipv4Addr::new(1, 2, 3, 4);
+		assert_eq!(ip.to_string(), SocksDestination::Ip(ip.into()).to_string());
+	}
+
+	#[test]
+	fn test_dest_display_ipv6() {
+		let ip = Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8);
+		assert_eq!(ip.to_string(), SocksDestination::Ip(ip.into()).to_string());
+	}
+
+	#[test]
+	fn test_dest_display_name() {
+		let name = "hello.world";
+		assert_eq!(name, SocksDestination::new_domain_str(name).to_string());
+	}
+
+	#[test]
+	fn test_dest_to_str_ipv4() {
+		let ip = Ipv4Addr::new(1, 2, 3, 4);
+		assert_eq!(ip.to_string(), SocksDestination::Ip(ip.into()).to_str());
+	}
+
+	#[test]
+	fn test_dest_to_str_ipv6() {
+		let ip = Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8);
+		assert_eq!(ip.to_string(), SocksDestination::Ip(ip.into()).to_str());
+	}
+
+	#[test]
+	fn test_dest_to_str_name() {
+		let name = "hello.world";
+		assert_eq!(name, SocksDestination::new_domain_str(name).to_str());
+	}
+}

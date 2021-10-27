@@ -1,0 +1,13 @@
+# *****
+# Please DO NOT use any key or password shown in this file
+# in your environment.
+# ****
+
+[[inbounds]]
+addr = "127.0.0.1:10000"
+protocol = "http"
+
+[[outbounds]]
+addr = "127.0.0.1:1080"
+protocol = "socks5"
+

@@ -1,0 +1,33 @@
+
+[[inbounds]]
+tag = "aes-256"
+protocol = "shadowsocks"
+addr = "127.0.0.1:11000"
+method = "aes-256-gcm"
+password = "ThisIsPassword"
+
+[[inbounds]]
+tag = "aes-128"
+protocol = "shadowsocks"
+addr = "127.0.0.1:11001"
+method = "aes-128-gcm"
+password = "ThisIsPassword"
+
+[[inbounds]]
+tag = "chacha20"
+protocol = "shadowsocks"
+addr = "127.0.0.1:11002"
+method = "chacha20-poly1305"
+password = "ThisIsPassword"
+
+[[inbounds]]
+tag = "none"
+protocol = "shadowsocks"
+addr = "127.0.0.1:11003"
+method = "none"
+password = "ThisIsPassword"
+
+
+
+[[outbounds]]
+protocol = "freedom"

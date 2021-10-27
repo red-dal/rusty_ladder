@@ -1,0 +1,48 @@
+{
+    "log": {
+        "loglevel": "info"
+    },
+    "inbounds": [
+        {
+            "listen": "127.0.0.1",
+            "port": 11000,
+            "protocol": "shadowsocks",
+            "settings": {
+                "method": "aes-256-gcm",
+                "password": "ThisIsPassword"
+            }
+        },
+        {
+            "listen": "127.0.0.1",
+            "port": 11001,
+            "protocol": "shadowsocks",
+            "settings": {
+                "method": "aes-128-gcm",
+                "password": "ThisIsPassword"
+            }
+        },
+        {
+            "listen": "127.0.0.1",
+            "port": 11002,
+            "protocol": "shadowsocks",
+            "settings": {
+                "method": "chacha20-poly1305",
+                "password": "ThisIsPassword"
+            }
+        },
+        {
+            "listen": "127.0.0.1",
+            "port": 11003,
+            "protocol": "shadowsocks",
+            "settings": {
+                "method": "none",
+                "password": "ThisIsPassword"
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "freedom"
+        }
+    ]
+}

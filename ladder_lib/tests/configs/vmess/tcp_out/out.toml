@@ -1,0 +1,66 @@
+# ----- Entrance for outbounds ------
+[[inbounds]]
+tag = "to-aes-128"
+protocol = "socks5"
+addr = "127.0.0.1:10000"
+
+[[inbounds]]
+tag = "to-none"
+protocol = "socks5"
+addr = "127.0.0.1:10001"
+
+[[inbounds]]
+tag = "to-chacha20"
+protocol = "socks5"
+addr = "127.0.0.1:10002"
+
+[[inbounds]]
+tag = "to-zero"
+protocol = "socks5"
+addr = "127.0.0.1:10003"
+
+# ----- Outbounds -----
+[[outbounds]]
+tag = "aes-128"
+protocol = "vmess"
+addr = "127.0.0.1:11000"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "aes-128-gcm"
+
+[[outbounds]]
+tag = "none"
+protocol = "vmess"
+addr = "127.0.0.1:11000"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "none"
+
+[[outbounds]]
+tag = "chacha20"
+protocol = "vmess"
+addr = "127.0.0.1:11000"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "chacha20-poly1305"
+
+[[outbounds]]
+tag = "zero"
+protocol = "vmess"
+addr = "127.0.0.1:11000"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "zero"
+
+# ----- Router -----
+[[router.rules]]
+inbound_tags = ["to-aes-128"]
+outbound_tag = "aes-128"
+
+[[router.rules]]
+inbound_tags = ["to-none"]
+outbound_tag = "none"
+
+[[router.rules]]
+inbound_tags = ["to-chacha20"]
+outbound_tag = "chacha20"
+
+[[router.rules]]
+inbound_tags = ["to-zero"]
+outbound_tag = "zero"

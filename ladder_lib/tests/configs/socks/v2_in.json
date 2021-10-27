@@ -1,0 +1,33 @@
+{
+    "log": {
+        "loglevel": "debug"
+    },
+    "inbounds": [
+        {
+            "tag": "no-auth",
+            "listen": "127.0.0.1",
+            "port": 11000,
+            "protocol": "socks"
+        },
+        {
+            "tag": "auth",
+            "listen": "127.0.0.1",
+            "port": 11001,
+            "protocol": "socks",
+            "settings": {
+                "auth": "password",
+                "accounts": [
+                    {
+                        "user": "my-user",
+                        "pass": "my-pass"
+                    }
+                ]
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "freedom"
+        }
+    ]
+}

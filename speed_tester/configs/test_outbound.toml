@@ -1,0 +1,149 @@
+[[inbounds]]
+addr = "10.42.0.208:11110"
+protocol = "tunnel"
+dst = "10.42.0.1:33333"
+
+[[inbounds]]
+tag = "to-ss-none"
+protocol = "tunnel"
+addr = "10.42.0.208:11111"
+dst = "10.42.0.1:33333"
+
+[[inbounds]]
+tag = "to-ss-aes128"
+protocol = "tunnel"
+addr = "10.42.0.208:11112"
+dst = "10.42.0.1:33333"
+
+[[inbounds]]
+tag = "to-ss-aes256"
+protocol = "tunnel"
+addr = "10.42.0.208:11113"
+dst = "10.42.0.1:33333"
+
+[[inbounds]]
+tag = "to-ss-chacha"
+protocol = "tunnel"
+addr = "10.42.0.208:11114"
+dst = "10.42.0.1:33333"
+
+[[inbounds]]
+tag = "to-vmess-aes128"
+protocol = "tunnel"
+addr = "10.42.0.208:11115"
+dst = "10.42.0.1:33333"
+
+
+[[inbounds]]
+tag = "to-vmess-chacha"
+protocol = "tunnel"
+addr = "10.42.0.208:11116"
+dst = "10.42.0.1:33333"
+
+[[inbounds]]
+tag = "to-vmess-none"
+protocol = "tunnel"
+addr = "10.42.0.208:11117"
+dst = "10.42.0.1:33333"
+
+[[inbounds]]
+tag = "to-vmess-zero"
+protocol = "tunnel"
+addr = "10.42.0.208:11118"
+dst = "10.42.0.1:33333"
+
+
+[[outbounds]]
+protocol = "freedom"
+
+[[outbounds]]
+tag = "ss-out-none"
+protocol = "shadowsocks"
+addr = "127.0.0.1:22220"
+password = "super-complicated-password"
+method = "none"
+
+[[outbounds]]
+tag = "ss-out-aes128"
+protocol = "shadowsocks"
+addr = "127.0.0.1:22221"
+password = "super-complicated-password"
+method = "aes-128-gcm"
+
+[[outbounds]]
+tag = "ss-out-aes256"
+protocol = "shadowsocks"
+addr = "127.0.0.1:22222"
+password = "super-complicated-password"
+method = "aes-256-gcm"
+
+[[outbounds]]
+tag = "ss-out-chacha"
+protocol = "shadowsocks"
+addr = "127.0.0.1:22223"
+password = "super-complicated-password"
+method = "chacha20-poly1305"
+
+[[outbounds]]
+tag = "vmess-aes128"
+protocol = "vmess"
+addr = "127.0.0.1:22224"
+id = "a379c0c7-8337-4f95-bc9f-c462bd63c7a7"
+sec = "aes-128-gcm"
+
+[[outbounds]]
+tag = "vmess-chacha"
+protocol = "vmess"
+addr = "127.0.0.1:22224"
+id = "a379c0c7-8337-4f95-bc9f-c462bd63c7a7"
+sec = "chacha20-poly1305"
+
+[[outbounds]]
+tag = "vmess-none"
+protocol = "vmess"
+addr = "127.0.0.1:22224"
+id = "a379c0c7-8337-4f95-bc9f-c462bd63c7a7"
+sec = "none"
+
+[[outbounds]]
+tag = "vmess-zero"
+protocol = "vmess"
+addr = "127.0.0.1:22224"
+id = "a379c0c7-8337-4f95-bc9f-c462bd63c7a7"
+sec = "zero"
+
+[[router.rules]]
+inbound_tags = ["to-ss-none"]
+outbound_tag = "ss-out-none"
+
+[[router.rules]]
+inbound_tags = ["to-ss-aes128"]
+outbound_tag = "ss-out-aes128"
+
+[[router.rules]]
+inbound_tags = ["to-ss-aes256"]
+outbound_tag = "ss-out-aes256"
+
+[[router.rules]]
+inbound_tags = ["to-ss-chacha"]
+outbound_tag = "ss-out-chacha"
+
+[[router.rules]]
+inbound_tags = ["to-vmess-aes128"]
+outbound_tag = "vmess-aes128"
+
+[[router.rules]]
+inbound_tags = ["to-vmess-chacha"]
+outbound_tag = "vmess-chacha"
+
+[[router.rules]]
+inbound_tags = ["to-vmess-none"]
+outbound_tag = "vmess-none"
+
+[[router.rules]]
+inbound_tags = ["to-vmess-zero"]
+outbound_tag = "vmess-zero"
+
+[log]
+level = "info"
+

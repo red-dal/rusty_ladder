@@ -1,0 +1,68 @@
+# ------ Inbounds ------
+# Inbound Tests 
+[[inbounds]]
+tag = "socks"
+protocol = "socks5"
+addr = "127.0.0.1:10000"
+
+[[inbounds]]
+tag = "socks-auth"
+addr = "127.0.0.1:10001"
+protocol = "socks5"
+    [inbounds.users]
+    user1 = "user1password"
+    user2 = "user2password"
+    user3 = "user3password"
+
+# Entrance for outbound tests 
+[[inbounds]]
+tag = "to-out-socks"
+addr = "127.0.0.1:10002"
+protocol = "socks5"
+
+[[inbounds]]
+tag = "to-out-socks-auth"
+addr = "127.0.0.1:10003"
+protocol = "socks5"
+
+[[inbounds]]
+tag = "to-out-socks-auth2"
+addr = "127.0.0.1:10004"
+protocol = "socks5"
+
+# ------ Outbounds ------
+
+[[outbounds]]
+protocol = "freedom"
+
+# No authentication.
+[[outbounds]]
+tag = "out-socks"
+protocol = "socks5"
+addr = "127.0.0.1:11000"
+
+# No authentication needed on server, but 
+# client provides one anyway.
+[[outbounds]]
+tag = "out-socks-auth"
+protocol = "socks5"
+addr = "127.0.0.1:11000"
+user = "my-user"
+pass = "my-pass"
+
+# Server requires authentication, and 
+# client provides one.
+[[outbounds]]
+tag = "out-socks-auth2"
+protocol = "socks5"
+addr = "127.0.0.1:11001"
+user = "my-user"
+pass = "my-pass"
+
+# ----- Routing -----
+[router]
+rules = [
+    { inbound_tags = ["to-out-socks"], outbound_tag = "out-socks" },
+    { inbound_tags = ["to-out-socks-auth"], outbound_tag = "out-socks-auth" },
+    { inbound_tags = ["to-out-socks-auth2"], outbound_tag = "out-socks-auth2" },
+]

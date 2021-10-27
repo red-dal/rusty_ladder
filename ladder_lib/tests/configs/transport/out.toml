@@ -1,0 +1,55 @@
+[[inbounds]]
+tag = "to-ws"
+protocol = "socks5"
+addr = "127.0.0.1:10000"
+
+[[inbounds]]
+tag = "to-tls"
+protocol = "socks5"
+addr = "127.0.0.1:10001"
+
+[[inbounds]]
+tag = "to-h2"
+protocol = "socks5"
+addr = "127.0.0.1:10002"
+
+[[outbounds]]
+tag = "freedom"
+protocol = "freedom"
+
+[[outbounds]]
+tag = "ws"
+protocol = "vmess"
+addr = "127.0.0.1:11000"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "aes-128-gcm"
+    [outbounds.transport]
+    type = "ws"
+    path = "/27848739-7e62-4138-9fd3-098a63964b6b"
+
+[[outbounds]]
+tag = "tls"
+protocol = "vmess"
+addr = "localhost:11001"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "aes-128-gcm"
+    [outbounds.transport]
+    type = "tls"
+    ca_file = "tests/configs/transport/ca.crt"
+
+[[outbounds]]
+tag = "h2"
+protocol = "vmess"
+addr = "localhost:11002"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "aes-128-gcm"
+    [outbounds.transport]
+    type = "h2"
+    path = "/helloworld"
+
+[router]
+rules = [
+    { inbound_tags = ["to-ws"], outbound_tag = "ws" }, 
+    { inbound_tags = ["to-tls"], outbound_tag = "tls" }, 
+    { inbound_tags = ["to-h2"], outbound_tag = "h2" }
+]

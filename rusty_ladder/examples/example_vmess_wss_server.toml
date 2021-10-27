@@ -1,0 +1,34 @@
+# *****
+# Please DO NOT use any key or password shown in this file
+# in your environment.
+# ****
+
+# VMess entrance.
+[[inbounds]]
+addr = "0.0.0.0:33333"
+protocol = "vmess"
+sec = "aes-128-gcm"
+users = [{ id = "27848739-7e62-4138-9fd3-098a63964b6b", num_alter_ids = 0 }]
+    [inbounds.transport]
+    type = "ws"
+    path = "/helloworld"
+    # Enable TLS.
+    [inbounds.transport.tls]
+        cert_file = "examples/localhost.crt"
+        key_file = "examples/localhost.key"
+
+# Direct exit.
+[[outbounds]]
+protocol = "freedom"
+
+# Block connections to localhost or LAN.
+[[router.rules]]
+dst = [
+    "192.168.0.0/16",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "127.0.0.0/8",
+    "lan",
+    "localhost",
+]
+outbound_tag = "$blocked"

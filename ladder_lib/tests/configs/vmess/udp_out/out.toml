@@ -1,0 +1,15 @@
+# Inbound port 32211
+# Proxy port   27564
+# Server port  9876
+
+[[inbounds]]
+protocol = "tunnel"
+addr = "127.0.0.1:32211"
+dst = "127.0.0.1:9876"
+network = "udp"
+
+[[outbounds]]
+protocol = "vmess"
+addr = "127.0.0.1:27564"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "aes-128-gcm"

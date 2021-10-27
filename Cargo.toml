@@ -1,0 +1,7 @@
+[profile.release]
+lto = true
+panic = "abort"
+
+[workspace]
+members = ["rusty_ladder", "ladder_lib", "speed_tester"]
+default-members = ["rusty_ladder"]

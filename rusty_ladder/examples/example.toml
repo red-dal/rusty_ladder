@@ -1,0 +1,501 @@
+## Logging settings.
+## Optional.
+[log]
+    ## Log level.
+    ## Optional. 'warn' will be used by default.
+    ##
+    ## Valid options: trace, debug, info, warn
+    ## 'trace' is not available on release build.
+    level = "warn"
+
+    ## Output log to this file.
+    ## Optional. STDOUT will be used if empty.
+    # ---
+    # output = "routing.log"
+    # ---
+
+## Optional.
+## Currently only none type.
+[api]
+    type = "none"
+
+
+## *****
+## Please DO NOT use any key or password shown in this file
+## in your environment.
+## ****
+
+## ==================== Inbounds ====================
+## A list of inbounds.
+## This list must contains at least one inbound.
+
+
+## --- A simple SOCKS5 inbound with authentication ---
+[[inbounds]]
+# Name of the protocol. Must be lowercase.
+protocol = "socks5"
+# Optional.
+# If not empty, this must be unique among all tags.
+tag = "socks5-inbound"
+# Address that this inbound will bind on.
+# This must be unique among all inbounds.
+#
+# An inbound can be bound on multiple address like this
+# addr: ["127.0.0.1:1080", "127.0.0.1:1081"]
+addr = "127.0.0.1:1080"
+# What to do when there is an protocol error. Must be lowercase.
+# Optional. 'drop' will be used if empty.
+#
+# 'drop': the connection will be dropped immediately.
+#
+# 'unlimited_timeout': do nothing util the remote dropped
+# the connection.
+err_policy = "drop"
+
+# SOCKS5 inbound specific settings
+
+# A map of username: password.
+# Optional. No authentication will be required if empty.
+[inbounds.users]
+    username = "password"
+    "username2" = "password2"
+
+# A transport layer.
+# Optional. 'none' will be used by default.
+#
+# For inbound, available options are:
+# 'none' for no transport layer;
+# 'tls' for TLS layer;
+# 'ws' for websocket layer;
+# 'h2' for http2 layer;
+[inbounds.transport]
+    # Type name for the transport layer.
+    # Must be lowercase.
+    type = "none"
+
+
+# --- SOCKS5 inbound with TLS transport ---
+[[inbounds]]
+protocol = "socks5"
+addr = "127.0.0.1:1081"
+[inbounds.transport]
+    type = "tls"
+    # A list of alpns.
+    # Optional. An empty list will be used by default.
+    alpns = []
+    # Certificate file and key file path.
+    cert_file = "examples/localhost.crt"
+    key_file = "examples/localhost.key"
+
+
+# --- SOCKS5 inbound with websocket transport ---
+[[inbounds]]
+protocol = "socks5"
+addr = "127.0.0.1:1082"
+[inbounds.transport]
+    type = "ws"
+    # Path for the websocket connection.
+    # Optional. If not empty, this must starts with '/'.
+    # Only if remote connects with the correct path will be accepted.
+    path = "/websocket"
+    # TLS settings, same as the TLS settings.
+    # Optional.
+    # If not set, unsecure websocket will be used.
+    [inbounds.transport.tls]
+        cert_file = "examples/localhost.crt"
+        key_file = "examples/localhost.key"
+
+
+# --- SOCKS5 inbound with h2 transport ---
+[[inbounds]]
+protocol = "socks5"
+addr = "127.0.0.1:1083"
+[inbound.transport]
+    type = "h2"
+    # Path for the h2 connection.
+    # Empty by default.
+    # Optional. If NOT empty, this must starts with '/'.
+    #
+    # Only if remote connects with the correct path will be accepted.
+    path = ""
+    # TLS settings, same as the TLS settings.
+    # Optional.
+    # If not set, unsecure h2 will be used.
+    [inbound.transport.tls]
+        cert_file = "examples/localhost.crt"
+        key_file = "examples/localhost.key"
+
+# --- A Tunnel inbound ---
+[[inbounds]]
+protocol = "tunnel"
+addr = "127.0.0.1:10000"
+# All data to this inbound will be piped to this address.
+dst = "123.123.123.123:1234"
+# Tunnel TCP or UDP data.
+# Optional. If empty, 'tcp' will be used.
+#
+# Available options are:
+# 'tcp': only tunnel TCP traffic
+# 'udp': only tunnel UDP traffic
+# 'tcp_udp': tunnel both TCP and UDP traffic
+network = "tcp_udp"
+
+# --- HTTP proxy inbound ---
+[[inbounds]]
+protocol = "http"
+addr = "127.0.0.1:10001"
+# A map of "username": "password".
+# Optional. If empty or not set, authentication will not be required.
+[inbounds.users]
+    username = "password"
+# Transport layer. Optional.
+[inbounds.transport]
+    type = "none"
+    
+
+# --- Shadowsocks proxy inbound ---
+[[inbounds]]
+protocol = "shadowsocks"
+addr = "127.0.0.1:10002"
+# What encryption method to use.
+#
+# All available options are:
+# 'none': No encryption and no authentication.
+#         DO NOT use this in untrusted network.
+#
+# 'aes-128-gcm', or 'aes-256-gcm': Suitable for most cases.
+#
+# 'chacha20-poly1305': Suitable for platform with no
+#                      AES hardware acceleration.
+method = "aes-256-gcm"
+# Password for the shadowsocks proxy.
+password = "password"
+
+# --- VMess inbound ---
+[[inbounds]]
+protocol = "vmess"
+addr = "127.0.0.1:10003"
+# A list of uuids of users.
+# This list cannot be empty.
+users = [
+    # Number of alternative IDs.
+    # Optional. 0 will be used by default.
+    #
+    # You dont need to set this unless legacy authentication
+    # is required.
+    # If 0, AEAD authentication will be used.
+    { id = "9982b968-5aca-4976-bf39-71ad80242578", num_alter_ids = 0 },
+    { id = "032f2f27-d103-47f7-b561-d3f79c916c4e" },
+]
+# Transport layer, same as above.
+transport = { type = "none" }
+# If you want to use the deprecated legacy authentication method.
+# Enable 'vmess-legacy-auth' feature and compile,
+# then uncomment the following line and change 'false' into 'true'.
+# ---
+# enable_legacy_auth = false
+# ---
+
+# ================= Outbounds =================
+
+# A list of outbounds.
+# This list must contains at least one outbound.
+#
+# The first outbound will be used as the default exit for
+# all inbounds, unless specific router rules are set up.
+#
+# Currently supported outbounds:
+#
+# - 'freedom': send traffic to destination directly.
+#
+# - 'socks5': send traffic to a SOCKS5 proxy.
+#
+# - 'http': send traffic to an HTTP proxy.
+#
+# - 'shadowsocks': send traffic to a Shadowsocks proxy.
+#
+# - 'trojan': send traffic to a trojan proxy.
+#
+# - 'vmess': send traffic to a VMess proxy.
+#
+# - 'chain': send traffic to a proxy chain with existing outbounds.
+
+# Send traffic directly from this server.
+#
+# If freedom outbound is used, router rules should be set up
+# to prevent anyone from accessing localhost or LAN.
+[[outbounds]]
+protocol = "freedom"
+
+# --- A SOCKS5 outbound ---
+[[outbounds]]
+tag = "socks5-outbound"
+protocol = "socks5"
+# Address of the remote SOCKS5 server.
+addr = "192.168.1.1:10000"
+# Username and password for authentication.
+# Optional.
+# If not set, no authentication will be sent to remote server.
+user = "username"
+pass = "password"
+# A transport layer.
+# Optional.
+# 'none' type will be used by default.
+#
+# Outbound transport layer is similar to inbound's.
+# And some outbounds may not have a transport layer.
+transport = { type = "none" }
+
+# --- A SOCKS5 outbound with TLS transport ---
+[[outbounds]]
+protocol = "socks5"
+addr = "192.168.1.1:10000"
+[outbounds.transport]
+    type = "tls"
+    # A list of alpns.
+    # Optional.
+    # An empty list will be used by default.
+    alpns = []
+    # Certificate authority file the remote server uses.
+    # Useful if the remote server is using self sign certificate.
+    # Optional.
+    # If not set, the default settings will be used.
+    ca_file = "examples/ca.crt"
+
+# --- A SOCKS5 outbound with websocket transport ---
+[[outbounds]]
+protocol = "socks5"
+addr = "192.168.1.1:10000"
+[outbounds.transport]
+    type = "ws"
+    # HTTP path for the websocket.
+    # Optional.
+    # If set, this must starts with '/'.
+    path = "/hello"
+    # 'host' in HTTP headers.
+    # Optional.
+    # If not set, the 'host' part in 'addr' field will be used instead.
+    host = ""
+    # TLS settings, same as above.
+    # Optional.
+    # If not set, TLS will not be used.
+    tls = {}
+
+
+# --- A SOCKS5 outbound with h2 transport ---
+[[outbounds]]
+protocol = "socks5"
+addr = "192.168.1.1:10000"
+[outbounds.transport]
+    type = "h2"
+    # HTTP path for the h2 connection.
+    # Optional.
+    # If set, this must starts with '/'.
+    path = "/hello"
+    # TLS settings, same as above.
+    # Optional.
+    # If not set, TLS will not be used.
+    tls = {}
+
+
+# --- An HTTP proxy outbound ---
+[[outbounds]]
+protocol = "http"
+addr = "192.168.1.1:10000"
+# Username and password for authentication.
+# Optional.
+# If not set, no authentication will be sent.
+user = "username"
+pass = "password"
+# Transport layer.
+# Optional.
+transport = { type = "none" }
+
+
+# --- A Shadowsocks outbound ---
+[[outbounds]]
+protocol = "shadowsocks"
+addr = "192.168.1.1:10000"
+# Optional.
+# In this case, 
+# this will be used in proxy chain later in the file.
+tag = "shadowsocks-outbound"
+# Encryption method.
+# This must be the same as the one on the remote server.
+#
+# All available options are:
+# 'none': No encryption and no authentication.
+#         DO NOT use this in untrusted network.
+#
+# 'aes-128-gcm', or 'aes-256-gcm': Suitable for most cases.
+#
+# 'chacha20-poly1305': Suitable for platform with no
+#                      AES hardware acceleration.
+method = "aes-256-gcm"
+# Password for the shadowsocks proxy.
+# This must be the same as the one on the remote server.
+password = "password"
+# Transport layer.
+# Optional.
+transport = { type = "none" }
+
+
+# --- A Trojan proxy outbound ---
+[[outbounds]]
+protocol = "trojan"
+addr = "192.168.1.1:10000"
+# Password for the Trojan proxy.
+password = "password"
+# Transport layer.
+# Optional.
+# Trojan proxy should be used with a TLS transport.
+transport = { type = "tls" }
+
+
+# --- A VMess proxy outbound ---
+[[outbounds]]
+protocol = "vmess"
+addr = "192.168.1.1:10000"
+# Optional.
+# This will be used in proxy chain later in the file.
+tag = "vmess-outbound"
+# VMess use an UUID as user id.
+id = "557aed20-8c43-4c36-aaac-80acbed11e13"
+# What encryption algorithm to use.
+# Optional.
+# Use 'auto' by default.
+#
+# All available options are:
+# - 'aes-128-cfb': stream cipher,
+#       should not be used any more. No longer supported.
+#
+# - 'aes-128-gcm': suitable for most cases.
+#
+# - 'chacha20-poly1305': suitable for platform that have no
+#       AES hardware acceleration.
+#
+# - 'none': no encryption. Only use this in trusted network
+#       or when using a secure transport layer.
+#
+# - 'auto': 'aes-128-gcm' on x86 platform,
+#       'chacha20-poly1305' otherwise.
+sec = "auto"
+# Optional.
+# 'false' by default.
+#
+# Legacy authentication header is deprecated.
+#
+# If it is required,
+# compiled with feature 'vmess-legacy-auth' enabled and
+# set this option to 'true'
+# --- 
+# use_legacy_header = false
+# ---
+
+# Transport layer.
+# Optional.
+transport = { type = "none" }
+
+
+# --- A proxy chain outbound ---
+[[outbounds]]
+protocol = "chain"
+# A list of tags of outbounds for the proxy chain.
+#
+# 'freedom' and 'chain' outbound cannot be used in the chain.
+#
+# Currently only supports TCP.
+#
+# In this case,
+# traffic will first go to 'shadowsocks-outbound',
+# then go to 'vmess-outbound'.
+chain = ["shadowsocks-outbound", "vmess-outbound"]
+
+
+# Router settings.
+# Optional.
+#
+# If not set, no routing will be used,
+# and ll inbounds will use the first outbound as exit.
+[[router.rules]]
+# Only inbounds in this list can match this rule.
+# Optional. Empty by default.
+#
+# If empty, all inbounds are valid.
+inbound_tags = ["socks5-inbound"]
+# Only connections come from one of these sources are valid.
+# Optional. Empty by default.
+#
+# Source can be an IP or a CIDR.
+#
+# If empty, all ips are valid.
+srcs = ["192.168.1.1", "192.168.1.0/24"]
+# Only connections come from one of these ports are valid.
+# Optional. Empty by default.
+#
+# If empty, all ports are valid.
+src_ports = [10000, 10001]
+# Only connections that go to one of these destinations are valid.
+# Optional. Empty by default.
+#
+# If empty, all destinations are valid.
+# 
+# The target of a connection is either an IP or a domain.
+# A destination can only match a target if they are the same type.
+dst = [
+    # --- IP type destinations ---
+
+    # Connections whose target IP is 192.168.1.1 are valid.
+    #
+    # Domain target like 'google.com' will not matched this.
+    "192.168.1.1",
+
+    # Connections whose target IP matches CIDR 192.168.1.0/24 are valid.
+    "192.168.1.0/24",
+
+    # --- Domain type destinations ---
+
+    # Connections whose target domain is 'com' or its child domains are valid.
+    # For example, 'com', 'google.com', 'g.com', 'www.google.com' are valid, 
+    # but 'cn', 'baidu.cn', and 'google.hk' are not.
+    #
+    # IP target like '192.168.1.1' will not matched this.
+    "com",
+
+    # Connections whose target domain is exactly 'duckduckgo.com' are valid.
+    "full:duckduckgo.com",
+
+    # Connections whose domain matches the
+    # regular expression ^go+gle\.com$ are valid.
+    "regexp:^go+gle\\.com$",
+
+    # Connections whose target domain contains 
+    # the substring 'google.com' are valid.
+    "substr:google.com", 
+
+    # Connections whose target domain matches one of the conditions
+    # in v2ray geosite file 'examples/geosites.dat' with tag 'cn' are valid.
+    #
+    # To use geosite, you must compile with feature 'use-protobuf'.
+    # ----
+    # "geosite:examples/geosites.dat:cn",
+    # ----
+
+    # Connections whose target IP matches one of the conditions in
+    # v2ray geoip file 'geoips' with tag 'tag' are valid.
+    #
+    # To use geoip, you must compile with feature 'use-protobuf'.
+    # ----
+    # "geoip:examples/geoip.dat:private",
+    # ----
+]
+# Only connections that go to one of these ports are valid.
+# Optional. Empty by default.
+#
+# If empty, all ports are valid.
+dst_ports = []
+# Which outbound should the traffic go.
+#
+# If this is '$blocked',
+# no outbound will be chosen and the connection will be dropped.
+outbound_tag = "shadowsocks-outbound"

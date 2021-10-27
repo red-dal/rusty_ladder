@@ -1,0 +1,94 @@
+[package]
+name = "rusty_ladder"
+version = "0.1.0"
+authors = ["reddal"]
+edition = "2018"
+license = "GPL-3.0"
+
+[features]
+default = ["use-tui", "all-transports-openssl", "all-proxies-openssl"]
+
+use-tui = ["tui", "crossterm"]
+use-webapi = ["ladder_lib/use-webapi"]
+# Enable reading geosite file of v2ray for router rules.
+#
+# Some geosite file may contain regex, you will need 
+# to enable feature `use-router-regex` to decode.
+use-protobuf = ["ladder_lib/use-protobuf"]
+# Enable using regex as router rule.
+use-router-regex = ["ladder_lib/use-router-regex"]
+
+############## Transport ##############
+all-transports-openssl = ["ladder_lib/all-transports-openssl"]
+all-transports-rustls = ["ladder_lib/all-transports-rustls"]
+
+ws-transport-openssl = ["ladder_lib/ws-transport-openssl"]
+tls-transport-openssl = ["ladder_lib/tls-transport-openssl"]
+h2-transport-openssl = ["ladder_lib/h2-transport-openssl"]
+
+ws-transport-rustls = ["ladder_lib/ws-transport-rustls"]
+tls-transport-rustls = ["ladder_lib/tls-transport-rustls"]
+h2-transport-rustls = ["ladder_lib/h2-transport-rustls"]
+
+############## Proxies ##############
+all-proxies-openssl = ["ladder_lib/all-proxies-openssl"]
+all-proxies-ring = ["ladder_lib/all-proxies-ring"]
+
+# ------------ SOCKS5 ------------
+socks5 = ["ladder_lib/socks5"]
+socks5-inbound = ["ladder_lib/socks5-inbound"]
+socks5-outbound = ["ladder_lib/socks5-outbound"]
+
+# ------------ HTTP ------------
+http-proxy = ["ladder_lib/http-proxy"]
+http-inbound = ["ladder_lib/http-inbound"]
+http-outbound = ["ladder_lib/http-outbound"]
+
+# ------------ Shadowsocks ------------
+shadowsocks-openssl = ["ladder_lib/shadowsocks-openssl"]
+shadowsocks-inbound-openssl = ["ladder_lib/shadowsocks-inbound-openssl"]
+shadowsocks-outbound-openssl = ["ladder_lib/shadowsocks-outbound-openssl"]
+
+shadowsocks-ring = ["ladder_lib/shadowsocks-ring"]
+shadowsocks-inbound-ring = ["ladder_lib/shadowsocks-inbound-ring"]
+shadowsocks-outbound-ring = ["ladder_lib/shadowsocks-outbound-ring"]
+
+# ------------ VMess ------------
+vmess-legacy-auth = ["ladder_lib/vmess-legacy-auth"]
+
+vmess-openssl = ["ladder_lib/vmess-openssl"]
+vmess-inbound-openssl = ["ladder_lib/vmess-inbound-openssl"]
+vmess-outbound-openssl = ["ladder_lib/vmess-outbound-openssl"]
+
+vmess-ring = ["ladder_lib/vmess-ring"]
+vmess-inbound-ring = ["ladder_lib/vmess-inbound-ring"]
+vmess-outbound-ring = ["ladder_lib/vmess-outbound-ring"]
+
+# ------------ Other proxies ------------
+chain-outbound = ["ladder_lib/chain-outbound"]
+trojan-outbound = ["ladder_lib/trojan-outbound"]
+
+[dependencies]
+ladder_lib = { version = "*", path = "../ladder_lib", default-features = false, features = [
+    "use_serde",
+] }
+serde = { version = "1.0" }
+serde_json = "1.0"
+toml = "0.5"
+gumdrop = "0.8"
+log = { version = "0.4", default-features = false, features = [
+    "std",
+    "release_max_level_info",
+    "serde",
+] }
+tokio = { version = "1.0" }
+tui = { version = "0.15", optional = true, default-features = false, features = [
+    "crossterm",
+] }
+crossterm = { version = "0.19", optional = true }
+futures = "0.3"
+lazy_static = "1.4"
+
+# Logging
+fern = { version = "0.6", features = ["colored"] }
+time = { version = "0.3", features = ["formatting"] }
