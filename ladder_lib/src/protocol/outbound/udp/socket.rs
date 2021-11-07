@@ -23,23 +23,23 @@ use crate::prelude::*;
 use std::io;
 
 #[async_trait]
-pub trait UdpRecv: Unpin + Send + Sync {
+pub trait RecvPacket: Unpin + Send + Sync {
 	async fn recv_src(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocksAddr)>;
 }
 
 #[async_trait]
-pub trait UdpSend: Unpin + Send + Sync {
+pub trait SendPacket: Unpin + Send + Sync {
 	async fn send_dst(&mut self, dst: &SocksAddr, buf: &[u8]) -> io::Result<usize>;
 	async fn shutdown(&mut self) -> io::Result<()>;
 }
 
-pub struct UdpProxyStream {
-	pub read_half: Box<dyn UdpRecv>,
-	pub write_half: Box<dyn UdpSend>,
+pub struct PacketStream {
+	pub read_half: Box<dyn RecvPacket>,
+	pub write_half: Box<dyn SendPacket>,
 }
 
 #[async_trait]
-impl UdpRecv for UdpProxyStream {
+impl RecvPacket for PacketStream {
 	#[inline]
 	async fn recv_src(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocksAddr)> {
 		return self.read_half.recv_src(buf).await;
@@ -47,7 +47,7 @@ impl UdpRecv for UdpProxyStream {
 }
 
 #[async_trait]
-impl UdpSend for UdpProxyStream {
+impl SendPacket for PacketStream {
 	#[inline]
 	async fn send_dst(&mut self, dst: &SocksAddr, buf: &[u8]) -> io::Result<usize> {
 		return self.write_half.send_dst(dst, buf).await;
@@ -72,7 +72,7 @@ impl UdpSocketWrapper {
 }
 
 #[async_trait]
-impl UdpRecv for UdpSocketWrapper {
+impl RecvPacket for UdpSocketWrapper {
 	async fn recv_src(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocksAddr)> {
 		let (len, remote) = self.0.recv_from(buf).await?;
 		trace!(
@@ -85,7 +85,7 @@ impl UdpRecv for UdpSocketWrapper {
 }
 
 #[async_trait]
-impl UdpSend for UdpSocketWrapper {
+impl SendPacket for UdpSocketWrapper {
 	async fn send_dst(&mut self, dst: &SocksAddr, buf: &[u8]) -> io::Result<usize> {
 		trace!(
 			"UdpSocket on {} sending packet to remote server {}",

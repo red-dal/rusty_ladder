@@ -24,11 +24,13 @@ use super::{
 	},
 	Error,
 };
+#[cfg(feature = "use-udp")]
+use crate::protocol::outbound::udp::{Connector, GetConnector};
 use crate::{
 	prelude::*,
 	protocol::{
-		GetConnector, GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector,
-		TcpStreamConnector, UdpConnector,
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		BytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 };
@@ -93,9 +95,9 @@ impl Settings {
 
 	async fn priv_connect<'a>(
 		&'a self,
-		mut stream: ProxyStream,
+		mut stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		debug!(
 			"Creating SOCKS5 connection to '{}', dst: '{}'",
 			&self.addr, dst
@@ -188,10 +190,10 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		self.priv_connect(stream, dst).await
 	}
@@ -208,14 +210,15 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		self.priv_connect(stream, dst).await
 	}
 }
 
+#[cfg(feature = "use-udp")]
 impl GetConnector for Settings {
-	fn get_udp_connector(&self) -> Option<UdpConnector<'_>> {
+	fn get_udp_connector(&self) -> Option<Connector<'_>> {
 		None
 	}
 }

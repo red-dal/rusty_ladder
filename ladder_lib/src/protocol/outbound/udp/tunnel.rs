@@ -22,23 +22,23 @@ use std::io;
 use tokio::net::{ToSocketAddrs, UdpSocket};
 
 #[async_trait]
-pub trait UdpRecv: Unpin + Send + Sync {
+pub trait RecvPacket: Unpin + Send + Sync {
 	async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize>;
 }
 
 #[async_trait]
-pub trait UdpSend: Unpin + Send + Sync {
+pub trait SendPacket: Unpin + Send + Sync {
 	async fn send(&mut self, payload: &[u8]) -> io::Result<usize>;
 	async fn shutdown(&mut self) -> io::Result<()>;
 }
 
-pub struct UdpProxyStream {
-	pub read_half: Box<dyn UdpRecv>,
-	pub write_half: Box<dyn UdpSend>,
+pub struct PacketStream {
+	pub read_half: Box<dyn RecvPacket>,
+	pub write_half: Box<dyn SendPacket>,
 }
 
 #[async_trait]
-impl UdpRecv for UdpProxyStream {
+impl RecvPacket for PacketStream {
 	#[inline]
 	async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		return self.read_half.recv(buf).await;
@@ -46,7 +46,7 @@ impl UdpRecv for UdpProxyStream {
 }
 
 #[async_trait]
-impl UdpSend for UdpProxyStream {
+impl SendPacket for PacketStream {
 	#[inline]
 	async fn send(&mut self, buf: &[u8]) -> io::Result<usize> {
 		return self.write_half.send(buf).await;
@@ -72,14 +72,14 @@ impl UdpSocketWrapper {
 }
 
 #[async_trait]
-impl UdpRecv for UdpSocketWrapper {
+impl RecvPacket for UdpSocketWrapper {
 	async fn recv(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		self.0.recv(buf).await
 	}
 }
 
 #[async_trait]
-impl UdpSend for UdpSocketWrapper {
+impl SendPacket for UdpSocketWrapper {
 	async fn send(&mut self, payload: &[u8]) -> io::Result<usize> {
 		self.0.send(payload).await
 	}

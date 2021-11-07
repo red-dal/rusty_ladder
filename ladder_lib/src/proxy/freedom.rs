@@ -20,13 +20,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::socket::{UdpProxyStream, UdpSocketWrapper},
-		ConnectUdpSocket, GetConnector, GetProtocolName, OutboundError, ProxyContext, ProxyStream,
-		TcpConnector, UdpConnector as ProtoConnector, UdpSocketOrTunnelStream,
+		outbound::{Error as OutboundError, TcpConnector},
+		BytesStream, GetProtocolName, ProxyContext,
 	},
 };
 use async_trait::async_trait;
-use std::net::SocketAddr;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -44,39 +42,54 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = context.dial_tcp(dst).await?;
 		Ok(stream.into())
 	}
 }
 
-impl GetConnector for Settings {
-	fn get_udp_connector(&self) -> Option<ProtoConnector<'_>> {
-		Some(ProtoConnector::Socket(Box::new(UdpConnector {})))
-	}
-}
+#[cfg(feature = "use-udp")]
+mod udp_impl {
+	use super::Settings;
+	use crate::protocol::{
+		outbound::{
+			udp::{socket, ConnectSocket, GetConnector, SocketOrTunnelStream, Connector},
+			Error as OutboundError,
+		},
+		ProxyContext,
+	};
+	use async_trait::async_trait;
+	use std::net::SocketAddr;
 
-struct UdpConnector {}
-
-#[async_trait]
-impl ConnectUdpSocket for UdpConnector {
-	async fn connect_socket(
-		&self,
-		_context: &dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, OutboundError> {
-		let read_half = UdpSocketWrapper::bind(SocketAddr::new([0, 0, 0, 0].into(), 0)).await?;
-		let write_half = read_half.clone();
-		Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
-			read_half: Box::new(read_half),
-			write_half: Box::new(write_half),
-		}))
+	impl GetConnector for Settings {
+		fn get_udp_connector(&self) -> Option<Connector<'_>> {
+			Some(Connector::Socket(Box::new(InnerConnector {})))
+		}
 	}
 
-	async fn connect_socket_stream<'a>(
-		&'a self,
-		_stream: UdpProxyStream,
-		_context: &'a dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, OutboundError> {
-		Err(OutboundError::CannotConnectOverStream)
+	struct InnerConnector {}
+
+	#[async_trait]
+	impl ConnectSocket for InnerConnector {
+		async fn connect_socket(
+			&self,
+			_context: &dyn ProxyContext,
+		) -> Result<SocketOrTunnelStream, OutboundError> {
+			let read_half =
+				socket::UdpSocketWrapper::bind(SocketAddr::new([0, 0, 0, 0].into(), 0)).await?;
+			let write_half = read_half.clone();
+			Ok(SocketOrTunnelStream::Socket(socket::PacketStream {
+				read_half: Box::new(read_half),
+				write_half: Box::new(write_half),
+			}))
+		}
+
+		async fn connect_socket_stream<'a>(
+			&'a self,
+			_stream: socket::PacketStream,
+			_context: &'a dyn ProxyContext,
+		) -> Result<SocketOrTunnelStream, OutboundError> {
+			Err(OutboundError::CannotConnectOverStream)
+		}
 	}
 }

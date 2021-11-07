@@ -17,11 +17,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
+#[cfg(feature = "use-udp")]
+use crate::protocol::outbound::udp::{Connector, GetConnector};
 use crate::{
 	prelude::*,
 	protocol::{
-		GetConnector, GetConnectorError, GetProtocolName, OutboundError, ProxyContext, ProxyStream,
-		TcpConnector, TcpStreamConnector, UdpConnector,
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		BytesStream, GetConnectorError, GetProtocolName, ProxyContext,
 	},
 };
 
@@ -47,7 +49,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		debug_assert!(!self.chain.is_empty());
 
 		let mut tag_iter = self.chain.iter();
@@ -82,8 +84,9 @@ impl TcpConnector for Settings {
 	}
 }
 
+#[cfg(feature = "use-udp")]
 impl GetConnector for Settings {
-	fn get_udp_connector(&self) -> Option<UdpConnector<'_>> {
+	fn get_udp_connector(&self) -> Option<Connector<'_>> {
 		None
 	}
 }

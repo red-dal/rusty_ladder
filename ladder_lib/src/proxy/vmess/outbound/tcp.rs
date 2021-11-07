@@ -18,17 +18,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::super::{
+	crypto,
 	response::{open_len, open_payload},
 	utils::{
 		aead_codec, generate_chacha20_key, new_response_key_and_iv, plain_codec, Error,
 		ShakeLengthReader, ShakeLengthWriter,
 	},
-	Request, Response, MAX_PAYLOAD_LENGTH, crypto
+	Request, Response, MAX_PAYLOAD_LENGTH,
 };
 use super::HeaderMode;
 use crate::{
 	prelude::*,
-	protocol::{OutboundError, ProxyStream},
+	protocol::{outbound::Error as OutboundError, BytesStream},
 	utils::{
 		codec::{Decode, Encode, FrameReader, FrameWriter},
 		crypto::aead::{Algorithm, Decrypt, Decryptor, Encrypt, Encryptor, Key as AeadKey},
@@ -123,11 +124,8 @@ impl ResponseHelper {
 						self.state = ReadResponseState::Done;
 						return eof("cannot read VMess legacy response because EOF");
 					}
-					crypto::Aes128CfbDecrypter::new(
-						&self.response_key,
-						&self.response_iv,
-					)
-					.decrypt(buf);
+					crypto::Aes128CfbDecrypter::new(&self.response_key, &self.response_iv)
+						.decrypt(buf);
 
 					let response = Response::parse(buf);
 
@@ -413,15 +411,15 @@ where
 	),
 }
 
-impl<R, W> From<PlainStream<R, W>> for ProxyStream
+impl<R, W> From<PlainStream<R, W>> for BytesStream
 where
 	R: 'static + AsyncRead + Unpin + Send + Sync,
 	W: 'static + AsyncWrite + Unpin + Send + Sync,
 {
 	fn from(s: PlainStream<R, W>) -> Self {
 		match s {
-			PlainStream::Masking((r, w)) => ProxyStream::new(Box::new(r), Box::new(w)),
-			PlainStream::NoMasking((r, w)) => ProxyStream::new(Box::new(r), Box::new(w)),
+			PlainStream::Masking((r, w)) => BytesStream::new(Box::new(r), Box::new(w)),
+			PlainStream::NoMasking((r, w)) => BytesStream::new(Box::new(r), Box::new(w)),
 		}
 	}
 }

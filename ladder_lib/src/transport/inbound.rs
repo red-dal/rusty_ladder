@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::prelude::BoxStdErr;
 #[allow(unused_imports)]
-use crate::protocol::ProxyStream;
+use crate::protocol::BytesStream;
 use std::io;
 
 #[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -48,7 +48,7 @@ impl Default for Settings {
 }
 
 impl Settings {
-	pub async fn accept(&self, stream: ProxyStream) -> io::Result<ProxyStream> {
+	pub async fn accept(&self, stream: BytesStream) -> io::Result<BytesStream> {
 		Ok(match self {
 			Settings::None => stream,
 			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]

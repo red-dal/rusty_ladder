@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::ConfigError;
-use crate::{prelude::*, protocol::ProxyStream};
+use crate::{prelude::*, protocol::BytesStream};
 use openssl::ssl::{self, Ssl, SslAcceptor, SslConnector, SslFiletype, SslMethod, SslRef};
 use std::io;
 use tokio_openssl::SslStream;
@@ -143,12 +143,12 @@ fn make_io_error(err: openssl::ssl::Error) -> io::Error {
 	}
 }
 
-impl<RW> From<SslStream<RW>> for ProxyStream
+impl<RW> From<SslStream<RW>> for BytesStream
 where
 	RW: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
 {
 	fn from(stream: SslStream<RW>) -> Self {
 		let (rh, wh) = tokio::io::split(stream);
-		ProxyStream::new(Box::new(rh), Box::new(wh))
+		BytesStream::new(Box::new(rh), Box::new(wh))
 	}
 }

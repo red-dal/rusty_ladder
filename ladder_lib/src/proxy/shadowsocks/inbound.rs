@@ -21,9 +21,9 @@ use super::{method_to_algo, tcp, utils::salt_len, Error, Method};
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult},
+		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, TcpAcceptor},
 		socks_addr::ReadError,
-		AsyncReadWrite, GetProtocolName, PlainHandshakeHandler, ProxyStream, TcpAcceptor,
+		AsyncReadWrite, BytesStream, GetProtocolName,
 	},
 	transport,
 	utils::crypto::aead::Algorithm,
@@ -77,7 +77,7 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		trace!("Accepting shadowsocks inbound");
 		let mut stream = self.transport.accept(stream).await?;
@@ -102,15 +102,15 @@ impl TcpAcceptor for Settings {
 				}
 				Err(e) => {
 					return invalid_request(
-						ProxyStream::new(Box::new(crypt_read), Box::new(crypt_write)),
+						BytesStream::new(Box::new(crypt_read), Box::new(crypt_write)),
 						e,
 					);
 				}
 			};
 			trace!("Shadowsocks target address: {}", addr);
-			let crypt_stream = ProxyStream::new(Box::new(crypt_read), Box::new(crypt_write));
+			let crypt_stream = BytesStream::new(Box::new(crypt_read), Box::new(crypt_write));
 
-			Ok(AcceptResult::new_tcp(
+			Ok(AcceptResult::Tcp(
 				Box::new(PlainHandshakeHandler(crypt_stream)),
 				addr,
 			))
@@ -129,7 +129,7 @@ impl TcpAcceptor for Settings {
 			};
 			trace!("Shadowsocks target address: {}", addr);
 
-			Ok(AcceptResult::new_tcp(
+			Ok(AcceptResult::Tcp(
 				Box::new(PlainHandshakeHandler(stream)),
 				addr,
 			))

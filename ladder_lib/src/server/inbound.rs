@@ -22,8 +22,8 @@ use crate::proxy::*;
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult},
-		GetProtocolName, Network, ProxyStream, TcpAcceptor, UdpAcceptor,
+		inbound::{AcceptError, AcceptResult, TcpAcceptor},
+		BytesStream, GetProtocolName, Network,
 	},
 	utils::OneOrMany,
 };
@@ -100,20 +100,20 @@ make_inbound! {
 	}
 }
 
+#[cfg(feature = "use-udp")]
 impl Details {
 	#[must_use]
-	pub fn get_udp_acceptor(&self) -> Option<&(dyn UdpAcceptor + Send + Sync)> {
+	pub fn get_udp_acceptor(
+		&self,
+	) -> Option<&(dyn crate::protocol::inbound::udp::Acceptor + Send + Sync)> {
 		#[allow(clippy::match_wildcard_for_single_variants)]
 		match self {
 			Self::Tunnel(_s) => {
-				#[cfg(feature = "use-udp")]
 				if _s.network().use_udp() {
 					Some(_s)
 				} else {
 					None
 				}
-				#[cfg(not(feature = "use-udp"))]
-				None
 			}
 			#[allow(unreachable_patterns)]
 			_ => None,
@@ -135,7 +135,7 @@ impl GetProtocolName for Details {
 impl TcpAcceptor for Details {
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		dispatch_inbound!(self, Self, s, { s.accept_tcp(stream).await })
 	}

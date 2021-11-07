@@ -23,8 +23,12 @@ use super::{Error, UDP_TIMEOUT_DURATION};
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{Session, UdpProxyStream},
-		GetConnector, OutboundError, ProxyContext, UdpConnector, UdpSocketOrTunnelStream,
+		inbound::udp::{PacketStream, Session},
+		outbound::{
+			udp::{GetConnector, Connector, SocketOrTunnelStream},
+			Error as OutboundError,
+		},
+		ProxyContext,
 	},
 };
 use bytes::{Bytes, BytesMut};
@@ -43,7 +47,7 @@ const UDP_BUFFER_SIZE: usize = 8 * 1024;
 const UDP_PACKET_BUFFER_SIZE: usize = 64;
 
 pub async fn dispatch(
-	stream: UdpProxyStream,
+	stream: PacketStream,
 	inbound_ind: usize,
 	inbound_bind_addr: SocketAddr,
 	server: &super::Server,
@@ -215,7 +219,7 @@ async fn create_stream<C>(
 	sess: &Session,
 	outbound: &C,
 	ctx: &dyn ProxyContext,
-) -> Result<UdpSocketOrTunnelStream, OutboundError>
+) -> Result<SocketOrTunnelStream, OutboundError>
 where
 	C: GetConnector + Send + Sync,
 {
@@ -223,10 +227,10 @@ where
 		.get_udp_connector()
 		.ok_or(OutboundError::UdpNotSupported)?;
 	let stream = match connector {
-		UdpConnector::Socket(c) => c.connect_socket(ctx).await,
-		UdpConnector::SocketOverTcp(c) => c.connect(ctx).await,
-		UdpConnector::Tunnel(c) => c.connect_tunnel(&sess.dst, ctx).await,
-		UdpConnector::TunnelOverTcp(c) => c.connect(&sess.dst, ctx).await,
+		Connector::Socket(c) => c.connect_socket(ctx).await,
+		Connector::SocketOverTcp(c) => c.connect(ctx).await,
+		Connector::Tunnel(c) => c.connect_tunnel(&sess.dst, ctx).await,
+		Connector::TunnelOverTcp(c) => c.connect(&sess.dst, ctx).await,
 	}?;
 	Ok(stream)
 }

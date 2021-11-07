@@ -24,8 +24,9 @@ use super::utils::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, HandshakeError},
-		AsyncReadWrite, FinishHandshake, GetProtocolName, OutboundError, ProxyStream, TcpAcceptor,
+		inbound::{AcceptError, AcceptResult, FinishHandshake, HandshakeError, TcpAcceptor},
+		outbound::Error as OutboundError,
+		AsyncReadWrite, BytesStream, GetProtocolName,
 	},
 	transport,
 };
@@ -94,7 +95,7 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		debug!("Accepting SOCKS5 handshake.");
 		let mut stream = self.transport.accept(stream).await?;
@@ -205,7 +206,7 @@ impl TcpAcceptor for Settings {
 		}
 		// Send reply later
 
-		Ok(AcceptResult::new_tcp(
+		Ok(AcceptResult::Tcp(
 			Box::new(HandshakeHandle { inner: stream }),
 			request.addr,
 		))
@@ -213,12 +214,12 @@ impl TcpAcceptor for Settings {
 }
 
 struct HandshakeHandle {
-	pub inner: ProxyStream,
+	pub inner: BytesStream,
 }
 
 #[async_trait]
 impl FinishHandshake for HandshakeHandle {
-	async fn finish(mut self: Box<Self>) -> Result<ProxyStream, HandshakeError> {
+	async fn finish(mut self: Box<Self>) -> Result<BytesStream, HandshakeError> {
 		write_reply(&mut self.inner, ReplyCode::Succeeded).await?;
 		Ok(self.inner)
 	}

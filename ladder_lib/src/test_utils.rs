@@ -168,7 +168,7 @@ where
 	};
 
 	match accept_result {
-		AcceptResult::Tcp((handshake_handler, dst_addr)) => {
+		AcceptResult::Tcp(handshake_handler, dst_addr) => {
 			let target_addr = match dst_addr.dest {
 				SocksDestination::Name(_) => {
 					return Err("Cannot use domain in this test".into());

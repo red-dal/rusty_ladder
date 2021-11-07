@@ -17,12 +17,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-pub mod socket;
-pub mod tunnel;
-
-use super::{common::ProxyStream, ProxyContext};
+use super::{common::BytesStream, ProxyContext};
 use crate::prelude::*;
 use std::io;
+
+#[cfg(feature = "use-udp")]
+pub mod udp;
 
 #[async_trait]
 pub trait TcpConnector: Send + Sync {
@@ -30,88 +30,21 @@ pub trait TcpConnector: Send + Sync {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, Error>;
+	) -> Result<BytesStream, Error>;
 }
 
 #[async_trait]
 pub trait TcpStreamConnector: Send + Sync {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
 		context: &'a dyn ProxyContext,
-	) -> Result<ProxyStream, Error>;
+	) -> Result<BytesStream, Error>;
 
 	fn addr(&self) -> &SocksAddr;
 }
 
-pub trait GetConnector {
-	fn get_udp_connector(&self) -> Option<UdpConnector<'_>>;
-}
-
-#[async_trait]
-pub trait ConnectUdpSocket: Send + Sync {
-	async fn connect_socket(
-		&self,
-		context: &dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, Error>;
-
-	async fn connect_socket_stream<'a>(
-		&'a self,
-		stream: socket::UdpProxyStream,
-		context: &'a dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, Error>;
-}
-
-#[async_trait]
-pub trait ConnectUdpOverTcpSocket: Send + Sync {
-	async fn connect(&self, context: &dyn ProxyContext) -> Result<UdpSocketOrTunnelStream, Error>;
-
-	async fn connect_stream<'a>(
-		&'a self,
-		stream: ProxyStream,
-		context: &'a dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, Error>;
-}
-
-#[async_trait]
-pub trait ConnectUdpTunnel: Send + Sync {
-	async fn connect_tunnel(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, Error>;
-
-	async fn connect_tunnel_stream<'a>(
-		&'a self,
-		dst: &'a SocksAddr,
-		stream: tunnel::UdpProxyStream,
-		context: &'a dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, Error>;
-}
-
-#[async_trait]
-pub trait ConnectUdpOverTcpTunnel: Send + Sync {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, Error>;
-
-	async fn connect_stream<'a>(
-		&'a self,
-		dst: &'a SocksAddr,
-		stream: ProxyStream,
-		context: &'a dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, Error>;
-}
-
-pub enum UdpConnector<'a> {
-	Socket(Box<dyn ConnectUdpSocket + 'a>),
-	SocketOverTcp(Box<dyn ConnectUdpOverTcpSocket + 'a>),
-	Tunnel(Box<dyn ConnectUdpTunnel + 'a>),
-	TunnelOverTcp(Box<dyn ConnectUdpOverTcpTunnel + 'a>),
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -165,9 +98,4 @@ impl From<io::Error> for Error {
 	fn from(err: io::Error) -> Self {
 		Self::Io(err)
 	}
-}
-
-pub enum UdpSocketOrTunnelStream {
-	Socket(socket::UdpProxyStream),
-	Tunnel(tunnel::UdpProxyStream),
 }

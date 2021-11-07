@@ -23,14 +23,14 @@ use super::{
 };
 use crate::{
 	prelude::*,
-	protocol::outbound::tunnel::{UdpProxyStream, UdpRecv, UdpSend},
+	protocol::outbound::udp::tunnel::{PacketStream, RecvPacket, SendPacket},
 	utils::codec::{self, FrameWriter},
 };
 
 pub fn new_udp_stream<R, W, E, D>(
 	read_half: tcp::ReadHalf<R, D>,
 	write_half: FrameWriter<E, W>,
-) -> UdpProxyStream
+) -> PacketStream
 where
 	R: 'static + AsyncRead + Unpin + Send + Sync,
 	W: 'static + AsyncWrite + Unpin + Send + Sync,
@@ -39,7 +39,7 @@ where
 {
 	let read_half = ReadHalf::new(read_half);
 	let write_half = WriteHalf::new(write_half);
-	UdpProxyStream {
+	PacketStream {
 		read_half: Box::new(read_half),
 		write_half: Box::new(write_half),
 	}
@@ -68,7 +68,7 @@ where
 }
 
 #[async_trait]
-impl<R, D> UdpRecv for ReadHalf<R, D>
+impl<R, D> RecvPacket for ReadHalf<R, D>
 where
 	R: AsyncRead + Unpin + Send + Sync,
 	D: codec::Decode,
@@ -104,7 +104,7 @@ where
 }
 
 #[async_trait]
-impl<W, E> UdpSend for WriteHalf<W, E>
+impl<W, E> SendPacket for WriteHalf<W, E>
 where
 	W: AsyncWrite + Unpin + Send + Sync,
 	E: codec::Encode,

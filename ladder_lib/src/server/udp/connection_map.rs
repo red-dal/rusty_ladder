@@ -24,9 +24,8 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::Session,
-		outbound::{socket, tunnel},
-		UdpSocketOrTunnelStream,
+		inbound::udp::Session,
+		outbound::udp::{socket, tunnel, SocketOrTunnelStream},
 	},
 };
 use bytes::BytesMut;
@@ -150,7 +149,7 @@ impl ConnectionsMap {
 		inbound_sender: DataSender,
 		sess: &Session,
 		outbound_ind: usize,
-		stream: UdpSocketOrTunnelStream,
+		stream: SocketOrTunnelStream,
 	) -> Result<DataSender, Error> {
 		// Make sure that sender does not exists
 		{
@@ -177,7 +176,7 @@ impl ConnectionsMap {
 		// Anything sent from this sender will be written into outbound stream.
 		let (outbound_sender, outbound_receiver) = mpsc::channel(UDP_PACKET_BUFFER_SIZE);
 		match stream {
-			UdpSocketOrTunnelStream::Socket(s) => {
+			SocketOrTunnelStream::Socket(s) => {
 				debug!(
 					"Creating UDP socket connection for (src: {}, outbound_ind: {})",
 					sess.src, outbound_ind
@@ -192,7 +191,7 @@ impl ConnectionsMap {
 				)
 				.await;
 			}
-			UdpSocketOrTunnelStream::Tunnel(stream) => {
+			SocketOrTunnelStream::Tunnel(stream) => {
 				debug!(
 					"Creating UDP tunnel connection for (src: {}, dst: {})",
 					sess.src, sess.dst
@@ -214,7 +213,7 @@ impl ConnectionsMap {
 		&self,
 		src: SocketAddr,
 		outbound_ind: usize,
-		stream: socket::UdpProxyStream,
+		stream: socket::PacketStream,
 		inbound_sender: DataSender,
 		outbound_sender: DataSender,
 		outbound_receiver: DataReceiver,
@@ -260,7 +259,7 @@ impl ConnectionsMap {
 	async fn spawn_tunnel<'a>(
 		&'a self,
 		sess: &'a Session,
-		stream: tunnel::UdpProxyStream,
+		stream: tunnel::PacketStream,
 		inbound_sender: DataSender,
 		outbound_sender: DataSender,
 		outbound_receiver: DataReceiver,
@@ -450,7 +449,7 @@ impl TunnelsMap {
 
 async fn socket_to_sender(
 	src: SocketAddr,
-	mut read_half: Box<dyn socket::UdpRecv>,
+	mut read_half: Box<dyn socket::RecvPacket>,
 	mut inbound_sender: DataSender,
 	last_active_time: ArcMutex<Instant>,
 ) -> Result<(), io::Error> {
@@ -480,7 +479,7 @@ async fn socket_to_sender(
 }
 
 async fn receiver_to_socket(
-	mut write_half: Box<dyn socket::UdpSend>,
+	mut write_half: Box<dyn socket::SendPacket>,
 	mut receiver: DataReceiver,
 	last_active_time: ArcMutex<Instant>,
 ) -> Result<(), io::Error> {
@@ -493,7 +492,7 @@ async fn receiver_to_socket(
 
 async fn tunnel_to_sender(
 	sess: Session,
-	mut read_half: Box<dyn tunnel::UdpRecv>,
+	mut read_half: Box<dyn tunnel::RecvPacket>,
 	mut inbound_sender: DataSender,
 	last_active_time: ArcMutex<Instant>,
 ) -> Result<(), io::Error> {
@@ -518,7 +517,7 @@ async fn tunnel_to_sender(
 }
 
 async fn receiver_to_tunnel(
-	mut write_half: Box<dyn tunnel::UdpSend>,
+	mut write_half: Box<dyn tunnel::SendPacket>,
 	mut receiver: DataReceiver,
 	last_active_time: ArcMutex<Instant>,
 ) -> Result<(), io::Error> {

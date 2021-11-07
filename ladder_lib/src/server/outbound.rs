@@ -22,8 +22,9 @@ use crate::proxy::*;
 use crate::{
 	prelude::*,
 	protocol::{
-		GetConnector, GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector,
-		TcpStreamConnector, UdpConnector,
+		self,
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		BytesStream,
 	},
 };
 
@@ -133,7 +134,7 @@ impl Details {
 	}
 }
 
-impl GetProtocolName for Details {
+impl protocol::GetProtocolName for Details {
 	#[inline]
 	fn protocol_name(&self) -> &'static str {
 		return dispatch_outbound!(self, Self, s, { s.protocol_name() });
@@ -146,14 +147,15 @@ impl TcpConnector for Details {
 	async fn connect(
 		&self,
 		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+		context: &dyn protocol::ProxyContext,
+	) -> Result<BytesStream, OutboundError> {
 		return dispatch_outbound!(self, Self, s, { s.connect(dst, context).await });
 	}
 }
 
-impl GetConnector for Details {
-	fn get_udp_connector(&self) -> Option<UdpConnector<'_>> {
+#[cfg(feature = "use-udp")]
+impl protocol::outbound::udp::GetConnector for Details {
+	fn get_udp_connector(&self) -> Option<protocol::outbound::udp::Connector<'_>> {
 		#[cfg(feature = "use-udp")]
 		return dispatch_outbound!(self, Self, s, { s.get_udp_connector() });
 		#[cfg(not(feature = "use-udp"))]

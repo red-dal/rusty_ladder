@@ -20,8 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult},
-		GetProtocolName, Network, PlainHandshakeHandler, ProxyStream, TcpAcceptor,
+		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, TcpAcceptor},
+		BytesStream, GetProtocolName, Network,
 	},
 };
 
@@ -57,10 +57,10 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		if self.network.use_tcp() {
-			Ok(AcceptResult::new_tcp(
+			Ok(AcceptResult::Tcp(
 				Box::new(PlainHandshakeHandler(stream)),
 				self.dst.clone(),
 			))
@@ -75,21 +75,20 @@ mod udp_impl {
 	use super::Settings;
 	use crate::{
 		prelude::*,
-		protocol::{
-			inbound::{Session, UdpProxyStream, UdpRecv, UdpResult, UdpSend},
-			UdpAcceptor,
+		protocol::inbound::udp::{
+			PacketInfo, PacketStream, RecvPacket, SendPacket, Session, Acceptor,
 		},
 	};
 	use std::io;
 	use tokio::net::UdpSocket;
 
 	#[async_trait]
-	impl UdpAcceptor for Settings {
-		async fn accept_udp(&self, sock: UdpSocket) -> Result<UdpProxyStream, BoxStdErr> {
+	impl Acceptor for Settings {
+		async fn accept_udp(&self, sock: UdpSocket) -> Result<PacketStream, BoxStdErr> {
 			if self.network.use_udp() {
 				let sock = Arc::new(sock);
 
-				let stream = UdpProxyStream {
+				let stream = PacketStream {
 					read_half: Box::new(ReadHalfWrapper(sock.clone(), self.dst.clone())),
 					write_half: Box::new(sock),
 				};
@@ -105,10 +104,10 @@ mod udp_impl {
 	pub struct ReadHalfWrapper(pub Arc<UdpSocket>, pub SocksAddr);
 
 	#[async_trait]
-	impl UdpRecv for ReadHalfWrapper {
-		async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<UdpResult> {
+	impl RecvPacket for ReadHalfWrapper {
+		async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<PacketInfo> {
 			let (len, src) = self.0.recv_from(buf).await?;
-			Ok(UdpResult {
+			Ok(PacketInfo {
 				src: Some(src),
 				len,
 				dst: self.1.clone(),
@@ -117,7 +116,7 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl UdpSend for Arc<UdpSocket> {
+	impl SendPacket for Arc<UdpSocket> {
 		async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize> {
 			trace!(
 				"Sending UDP packet for session ({} -> {})",

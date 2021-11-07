@@ -31,8 +31,8 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult},
-		GetProtocolName, PlainHandshakeHandler, ProxyStream, TcpAcceptor,
+		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, TcpAcceptor},
+		BytesStream, GetProtocolName,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -242,7 +242,7 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		debug!("Accepting VMess handshake");
 		let mut stream = self.transport.accept(stream).await?;
@@ -332,7 +332,7 @@ impl TcpAcceptor for Settings {
 
 #[inline]
 fn invalid_request<T>(
-	stream: ProxyStream,
+	stream: BytesStream,
 	err: impl Into<Cow<'static, str>>,
 ) -> Result<T, AcceptError> {
 	AcceptError::new_protocol_err(Box::new(stream), Error::new_invalid_request(err))
@@ -387,14 +387,17 @@ where
 {
 	match cmd {
 		Command::Tcp => {
-			let stream = ProxyStream::new(read_half.into_boxed(), write_half.into_boxed());
-			Ok(AcceptResult::new_tcp(Box::new(PlainHandshakeHandler(stream)), dst))
+			let stream = BytesStream::new(read_half.into_boxed(), write_half.into_boxed());
+			Ok(AcceptResult::Tcp(
+				Box::new(PlainHandshakeHandler(stream)),
+				dst,
+			))
 		}
 		Command::Udp => {
 			#[cfg(feature = "use-udp")]
 			{
 				let stream = udp::new_stream(read_half, write_half, dst);
-				Ok(AcceptResult::new_udp(stream))
+				Ok(AcceptResult::Udp(stream))
 			}
 			#[cfg(not(feature = "use-udp"))]
 			{

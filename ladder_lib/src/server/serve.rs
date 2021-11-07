@@ -17,18 +17,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
+#[cfg(feature = "use-udp")]
+use super::udp;
 use super::{
 	inbound::ErrorHandlingPolicy,
 	stat::{Handle as StatHandle, HandshakeArgs, Monitor},
-	 Error, Inbound, Outbound, Server, OUTBOUND_HANDSHAKE_TIMEOUT,
+	Error, Inbound, Outbound, Server, OUTBOUND_HANDSHAKE_TIMEOUT,
 };
-#[cfg(feature = "use-udp")]
-use super::udp;
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, HandshakeError},
-		FinishHandshake, GetProtocolName, OutboundError, ProxyStream, TcpAcceptor, TcpConnector,
+		inbound::{AcceptError, AcceptResult, FinishHandshake, HandshakeError, TcpAcceptor},
+		outbound::{Error as OutboundError, TcpConnector},
+		BytesStream, GetProtocolName,
 	},
 	utils::{
 		relay::{Counter, Relay},
@@ -204,7 +205,7 @@ impl Server {
 		outbound_ind: usize,
 		dst_addr: &SocksAddr,
 		stat_handle: &Option<StatHandle>,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		if let Some(stat_handle) = stat_handle {
 			stat_handle
 				.set_connecting(outbound_ind, outbound.tag.clone(), dst_addr.clone())
@@ -308,7 +309,7 @@ impl<'a> TcpSession<'a> {
 		};
 
 		match accept_res {
-			AcceptResult::Tcp((handshake_handler, dst)) => {
+			AcceptResult::Tcp(handshake_handler, dst) => {
 				return self.handle_tcp_accept(handshake_handler, &dst).await;
 			}
 			#[cfg(feature = "use-udp")]
@@ -381,8 +382,8 @@ async fn proxy_stream<'a>(
 	conn_id_str: &'a str,
 	dst_addr: &'a SocksAddr,
 	stat_handle: &'a Option<StatHandle>,
-	in_ps: ProxyStream,
-	out_ps: ProxyStream,
+	in_ps: BytesStream,
+	out_ps: BytesStream,
 ) -> Result<(), Error> {
 	let start_time = Instant::now();
 	let recv = Counter::new(0);

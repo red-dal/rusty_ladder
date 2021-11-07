@@ -68,7 +68,7 @@ use super::{key_to_session_key, utils::salt_len, Error};
 use crate::{
 	non_zeros,
 	prelude::*,
-	protocol::{BoxRead, BoxWrite, ProxyStream},
+	protocol::{BoxRead, BoxWrite, BytesStream},
 	utils::{
 		append_mut, append_u16_mut,
 		codec::{self, FrameReader, FrameWriter},
@@ -98,7 +98,7 @@ pub type CryptFrameReader = FrameReader<Decoder, BoxRead>;
 pub type CryptFrameWriter = FrameWriter<Encoder, BoxWrite>;
 
 pub fn new_crypt_stream(
-	stream: ProxyStream,
+	stream: BytesStream,
 	algo: Algorithm,
 	password: Bytes,
 	local_salt: Vec<u8>,

@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::tls;
-use crate::{prelude::*, protocol::ProxyStream};
+use crate::{prelude::*, protocol::BytesStream};
 use bytes::{Buf, Bytes};
 use futures::{ready, Future};
 use h2::{client, server, RecvStream, SendStream};
@@ -52,7 +52,7 @@ pub struct Outbound {
 
 impl Outbound {
 	#[inline]
-	pub async fn connect<RW>(&self, stream: RW, addr: &SocksAddr) -> io::Result<ProxyStream>
+	pub async fn connect<RW>(&self, stream: RW, addr: &SocksAddr) -> io::Result<BytesStream>
 	where
 		RW: 'static + AsyncRead + AsyncWrite + Send + Unpin,
 	{
@@ -60,13 +60,13 @@ impl Outbound {
 		let stream = if let Some(tls) = &self.tls {
 			let stream = tls.connect(stream, addr).await?;
 			let (r, w) = self.priv_connect(stream, addr).await?;
-			ProxyStream {
+			BytesStream {
 				r: Box::new(r),
 				w: Box::new(w),
 			}
 		} else {
 			let (r, w) = self.priv_connect(stream, addr).await?;
-			ProxyStream {
+			BytesStream {
 				r: Box::new(r),
 				w: Box::new(w),
 			}
@@ -166,7 +166,7 @@ pub struct Inbound {
 
 impl Inbound {
 	#[inline]
-	pub async fn accept<RW>(&self, stream: RW) -> io::Result<ProxyStream>
+	pub async fn accept<RW>(&self, stream: RW) -> io::Result<BytesStream>
 	where
 		RW: 'static + AsyncRead + AsyncWrite + Unpin + Send,
 	{
@@ -177,7 +177,7 @@ impl Inbound {
 		}
 	}
 
-	async fn priv_accept<RW>(&self, stream: RW) -> io::Result<ProxyStream>
+	async fn priv_accept<RW>(&self, stream: RW) -> io::Result<BytesStream>
 	where
 		RW: 'static + AsyncRead + AsyncWrite + Unpin + Send,
 	{
@@ -262,7 +262,7 @@ impl Inbound {
 			is_closed,
 		};
 
-		Ok(ProxyStream {
+		Ok(BytesStream {
 			r: Box::new(r),
 			w: Box::new(w),
 		})

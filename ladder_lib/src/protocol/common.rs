@@ -30,12 +30,12 @@ impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + Unp
 pub type BoxRead = Box<dyn AsyncRead + Send + Sync + Unpin>;
 pub type BoxWrite = Box<dyn AsyncWrite + Send + Sync + Unpin>;
 
-pub struct ProxyStream {
+pub struct BytesStream {
 	pub r: BoxRead,
 	pub w: BoxWrite,
 }
 
-impl ProxyStream {
+impl BytesStream {
 	#[inline]
 	#[must_use]
 	pub fn new(r: BoxRead, w: BoxWrite) -> Self {
@@ -43,13 +43,13 @@ impl ProxyStream {
 	}
 }
 
-impl From<(BoxRead, BoxWrite)> for ProxyStream {
+impl From<(BoxRead, BoxWrite)> for BytesStream {
 	fn from((r, w): (BoxRead, BoxWrite)) -> Self {
 		Self { r, w }
 	}
 }
 
-impl AsyncRead for ProxyStream {
+impl AsyncRead for BytesStream {
 	#[inline]
 	fn poll_read(
 		self: Pin<&mut Self>,
@@ -60,7 +60,7 @@ impl AsyncRead for ProxyStream {
 	}
 }
 
-impl AsyncWrite for ProxyStream {
+impl AsyncWrite for BytesStream {
 	#[inline]
 	fn poll_write(
 		self: Pin<&mut Self>,
@@ -81,10 +81,10 @@ impl AsyncWrite for ProxyStream {
 	}
 }
 
-impl From<tokio::net::TcpStream> for ProxyStream {
+impl From<tokio::net::TcpStream> for BytesStream {
 	fn from(val: tokio::net::TcpStream) -> Self {
 		let (rh, wh) = val.into_split();
-		ProxyStream::new(Box::new(rh), Box::new(wh))
+		BytesStream::new(Box::new(rh), Box::new(wh))
 	}
 }
 

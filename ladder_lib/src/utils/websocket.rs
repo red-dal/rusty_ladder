@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::PollBuffer;
-use crate::{prelude::*, protocol::ProxyStream};
+use crate::{prelude::*, protocol::BytesStream};
 use async_tungstenite::{
 	tokio::{accept_hdr_async, client_async, TokioAdapter},
 	tungstenite::{
@@ -286,7 +286,7 @@ fn to_io_err(err: WsError) -> io::Error {
 	io::Error::new(io::ErrorKind::Other, err)
 }
 
-impl<S> From<StreamWrapper<S>> for ProxyStream
+impl<S> From<StreamWrapper<S>> for BytesStream
 where
 	S: 'static
 		+ ItemStream<Item = Result<Message, WsError>>
@@ -297,6 +297,6 @@ where
 {
 	fn from(stream: StreamWrapper<S>) -> Self {
 		let (rh, wh) = tokio::io::split(stream);
-		ProxyStream::new(Box::new(rh), Box::new(wh))
+		BytesStream::new(Box::new(rh), Box::new(wh))
 	}
 }

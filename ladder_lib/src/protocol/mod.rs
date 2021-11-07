@@ -24,15 +24,6 @@ pub mod socks_addr;
 mod common;
 mod proxy_context;
 
-pub use common::{AsyncReadWrite, BoxRead, BoxWrite, GetProtocolName, Network, ProxyStream};
+pub use common::{AsyncReadWrite, BoxRead, BoxWrite, BytesStream, GetProtocolName, Network};
 pub use proxy_context::{GetConnectorError, ProxyContext};
-// TCP
-pub use inbound::{FinishHandshake, PlainHandshakeHandler, TcpAcceptor};
-pub use outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector};
-// UDP
-pub use inbound::UdpAcceptor;
-pub use outbound::{
-	ConnectUdpOverTcpSocket, ConnectUdpOverTcpTunnel, ConnectUdpSocket, ConnectUdpTunnel,
-	GetConnector, UdpConnector, UdpSocketOrTunnelStream,
-};
 pub use socks_addr::{SocksAddr, SocksDestination};

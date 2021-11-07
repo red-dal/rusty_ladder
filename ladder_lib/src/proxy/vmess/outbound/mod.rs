@@ -26,7 +26,8 @@ use super::{Command, HeaderMode, Request};
 use crate::{
 	prelude::*,
 	protocol::{
-		GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector, TcpStreamConnector,
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		BytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -123,9 +124,9 @@ impl Settings {
 
 	async fn priv_connect<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		info!(
 			"Creating VMess TCP connection to '{}', target: '{}'",
 			&self.addr, dst
@@ -159,7 +160,7 @@ impl Settings {
 				req.opt.clear_chunk_stream();
 				req.opt.clear_chunk_masking();
 				let (r, w) = tcp::new_outbound_zero(stream.r, stream.w, req, &self.id, time, mode);
-				return Ok(ProxyStream::new(Box::new(r), Box::new(w)));
+				return Ok(BytesStream::new(Box::new(r), Box::new(w)));
 			}
 			SecurityType::None => {
 				let stream = tcp::new_outbound_plain(stream.r, stream.w, req, &self.id, time, mode);
@@ -184,7 +185,7 @@ impl Settings {
 		let (read_half, write_half) =
 			tcp::new_outbound_aead(stream.r, stream.w, req, &self.id, time, algo, mode)?;
 
-		Ok(ProxyStream::new(Box::new(read_half), Box::new(write_half)))
+		Ok(BytesStream::new(Box::new(read_half), Box::new(write_half)))
 	}
 }
 
@@ -199,10 +200,10 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
@@ -219,7 +220,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
@@ -235,18 +236,22 @@ mod udp_impl {
 	use crate::{
 		prelude::*,
 		protocol::{
-			self, ConnectUdpOverTcpTunnel, GetConnector, OutboundError, ProxyContext, ProxyStream,
-			UdpSocketOrTunnelStream,
+			self,
+			outbound::{
+				udp::{ConnectTunnelOverTcp, GetConnector, SocketOrTunnelStream},
+				Error as OutboundError,
+			},
+			BytesStream, ProxyContext,
 		},
 		utils::{crypto::aead::Algorithm, timestamp_now},
 	};
 	use rand::{rngs::OsRng, thread_rng};
 
 	impl GetConnector for Settings {
-		fn get_udp_connector(&self) -> Option<protocol::outbound::UdpConnector<'_>> {
-			let connector: Box<dyn ConnectUdpOverTcpTunnel> =
+		fn get_udp_connector(&self) -> Option<protocol::outbound::udp::Connector<'_>> {
+			let connector: Box<dyn ConnectTunnelOverTcp> =
 				Box::new(UdpConnector { settings: self });
-			return Some(protocol::outbound::UdpConnector::TunnelOverTcp(connector));
+			return Some(protocol::outbound::udp::Connector::TunnelOverTcp(connector));
 		}
 	}
 
@@ -255,12 +260,12 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl ConnectUdpOverTcpTunnel for UdpConnector<'_> {
+	impl ConnectTunnelOverTcp for UdpConnector<'_> {
 		async fn connect(
 			&self,
 			dst: &SocksAddr,
 			context: &dyn ProxyContext,
-		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let stream = context.dial_tcp(&self.settings.addr).await?;
 			self.connect_stream(dst, stream.into(), context).await
 		}
@@ -268,9 +273,9 @@ mod udp_impl {
 		async fn connect_stream<'a>(
 			&'a self,
 			dst: &'a SocksAddr,
-			stream: ProxyStream,
+			stream: BytesStream,
 			_context: &'a dyn ProxyContext,
-		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let time = timestamp_now();
 
 			let mut rng = OsRng;
@@ -310,7 +315,7 @@ mod udp_impl {
 						tcp::PlainStream::Masking((r, w)) => udp::new_udp_stream(r, w),
 						tcp::PlainStream::NoMasking((r, w)) => udp::new_udp_stream(r, w),
 					};
-					return Ok(UdpSocketOrTunnelStream::Tunnel(stream));
+					return Ok(SocketOrTunnelStream::Tunnel(stream));
 				}
 				SecurityType::Aes128Gcm => Algorithm::Aes128Gcm,
 				SecurityType::Chacha20Poly1305 | SecurityType::Auto => Algorithm::ChaCha20Poly1305,
@@ -332,7 +337,7 @@ mod udp_impl {
 				algo,
 				mode,
 			)?;
-			return Ok(UdpSocketOrTunnelStream::Tunnel(udp::new_udp_stream(
+			return Ok(SocketOrTunnelStream::Tunnel(udp::new_udp_stream(
 				read_half, write_half,
 			)));
 		}

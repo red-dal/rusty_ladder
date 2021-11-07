@@ -23,8 +23,8 @@ use super::utils::{
 use crate::{
 	prelude::*,
 	protocol::{
-		GetConnector, GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector,
-		TcpStreamConnector, UdpConnector,
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		BytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 	utils::BufferedReadHalf,
@@ -74,9 +74,9 @@ impl Settings {
 	/// Connect to `stream` after it's connected on a transport layer.
 	async fn priv_connect<'a>(
 		&'a self,
-		mut stream: ProxyStream,
+		mut stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		debug!(
 			"Creating HTTP proxy connection to '{}', dst: '{}'",
 			self.addr, dst
@@ -140,7 +140,7 @@ impl Settings {
 		}
 
 		let rh = BufferedReadHalf::new(stream.r, leftover);
-		Ok(ProxyStream::new(Box::new(rh), stream.w))
+		Ok(BytesStream::new(Box::new(rh), stream.w))
 	}
 }
 
@@ -157,14 +157,15 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
 }
 
-impl GetConnector for Settings {
-	fn get_udp_connector(&self) -> Option<UdpConnector<'_>> {
+#[cfg(feature = "use-udp")]
+impl crate::protocol::outbound::udp::GetConnector for Settings {
+	fn get_udp_connector(&self) -> Option<crate::protocol::outbound::udp::Connector<'_>> {
 		None
 	}
 }
@@ -173,10 +174,10 @@ impl GetConnector for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}

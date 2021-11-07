@@ -48,7 +48,8 @@ See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
 use crate::{
 	prelude::*,
 	protocol::{
-		GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector, TcpStreamConnector,
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		BytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 	utils::LazyWriteHalf,
@@ -89,9 +90,9 @@ pub struct Settings {
 impl Settings {
 	async fn priv_connect<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		debug!(
 			"Creating Trojan connection to '{}', target: '{}'",
 			&self.addr, dst
@@ -111,7 +112,7 @@ impl Settings {
 		trace!("Trojan request header length: {} bytes", req_buf.len());
 
 		let write_half = LazyWriteHalf::new_not_lazy(stream.w, req_buf);
-		let stream = ProxyStream::new(stream.r, Box::new(write_half));
+		let stream = BytesStream::new(stream.r, Box::new(write_half));
 		Ok(stream)
 	}
 }
@@ -126,10 +127,10 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
@@ -146,7 +147,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
@@ -159,10 +160,15 @@ mod udp_impl {
 		prelude::*,
 		protocol::{
 			self,
-			outbound::socket::{UdpProxyStream, UdpRecv, UdpSend},
+			outbound::{
+				udp::{
+					socket::{PacketStream, RecvPacket, SendPacket},
+					ConnectSocketOverTcp, GetConnector, SocketOrTunnelStream,
+				},
+				Error as OutboundError,
+			},
 			socks_addr::ReadError,
-			BoxRead, ConnectUdpOverTcpSocket, GetConnector, OutboundError, ProxyContext,
-			ProxyStream, UdpSocketOrTunnelStream,
+			BoxRead, BytesStream, ProxyContext,
 		},
 		utils::{read_u16, LazyWriteHalf},
 	};
@@ -170,8 +176,8 @@ mod udp_impl {
 	use std::io;
 
 	impl GetConnector for Settings {
-		fn get_udp_connector(&self) -> Option<protocol::outbound::UdpConnector<'_>> {
-			return Some(protocol::outbound::UdpConnector::SocketOverTcp(Box::new(
+		fn get_udp_connector(&self) -> Option<protocol::outbound::udp::Connector<'_>> {
+			return Some(protocol::outbound::udp::Connector::SocketOverTcp(Box::new(
 				UdpConnector { settings: self },
 			)));
 		}
@@ -188,7 +194,7 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl UdpRecv for UdpReadHalf {
+	impl RecvPacket for UdpReadHalf {
 		async fn recv_src(&mut self, buf: &mut [u8]) -> std::io::Result<(usize, SocksAddr)> {
 			debug_assert!(buf.len() > 4 * 1024);
 			let src = SocksAddr::async_read_from(&mut self.inner)
@@ -245,7 +251,7 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl<W: AsyncWrite + Unpin + Send + Sync> UdpSend for UdpWriteHalf<W> {
+	impl<W: AsyncWrite + Unpin + Send + Sync> SendPacket for UdpWriteHalf<W> {
 		async fn send_dst(&mut self, dst: &SocksAddr, payload: &[u8]) -> std::io::Result<usize> {
 			let payload_len = u16::try_from(payload.len()).unwrap_or_else(|_| {
 				info!(
@@ -280,20 +286,20 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl ConnectUdpOverTcpSocket for UdpConnector<'_> {
+	impl ConnectSocketOverTcp for UdpConnector<'_> {
 		async fn connect(
 			&self,
 			context: &dyn ProxyContext,
-		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let stream = context.dial_tcp(&self.settings.addr).await?;
 			self.connect_stream(stream.into(), context).await
 		}
 
 		async fn connect_stream<'a>(
 			&'a self,
-			stream: ProxyStream,
+			stream: BytesStream,
 			_context: &'a dyn ProxyContext,
-		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let stream = self
 				.settings
 				.transport
@@ -313,7 +319,7 @@ mod udp_impl {
 			let read_half = UdpReadHalf::new(stream.r);
 			let write_half = UdpWriteHalf::new(write_half);
 
-			return Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
+			return Ok(SocketOrTunnelStream::Socket(PacketStream {
 				read_half: Box::new(read_half),
 				write_half: Box::new(write_half),
 			}));

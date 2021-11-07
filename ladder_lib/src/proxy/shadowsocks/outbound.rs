@@ -21,7 +21,8 @@ use super::{method_to_algo, password_to_key, tcp, utils::salt_len, Method};
 use crate::{
 	prelude::*,
 	protocol::{
-		GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector, TcpStreamConnector,
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		BytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, LazyWriteHalf},
@@ -69,9 +70,9 @@ pub struct Settings {
 impl Settings {
 	async fn priv_connect<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		debug!(
 			"Creating Shadowsocks connection to '{}', target: '{}'",
 			&self.addr, dst
@@ -101,7 +102,7 @@ impl Settings {
 				.map_err(OutboundError::Protocol)?;
 
 			trace!("Shadowsocks request sent");
-			Ok(ProxyStream::new(
+			Ok(BytesStream::new(
 				Box::new(crypt_read),
 				Box::new(crypt_write),
 			))
@@ -110,7 +111,7 @@ impl Settings {
 			let mut addr_buf = Vec::with_capacity(dst.serialized_len_atyp());
 			dst.write_to(&mut addr_buf);
 			let write_half = LazyWriteHalf::new_not_lazy(stream.w, addr_buf);
-			Ok(ProxyStream::new(Box::new(stream.r), Box::new(write_half)))
+			Ok(BytesStream::new(Box::new(stream.r), Box::new(write_half)))
 		}
 	}
 }
@@ -125,10 +126,10 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		self.priv_connect(stream, dst).await
 	}
@@ -145,7 +146,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<ProxyStream, OutboundError> {
+	) -> Result<BytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		self.priv_connect(stream, dst).await
 	}
@@ -176,17 +177,19 @@ mod udp_impl {
 	use super::{super::udp, OutboundError, ProxyContext, Settings};
 	use crate::protocol::{
 		self,
-		outbound::socket::{UdpProxyStream, UdpSocketWrapper},
-		ConnectUdpSocket, GetConnector, UdpSocketOrTunnelStream,
+		outbound::udp::{
+			socket::{PacketStream, UdpSocketWrapper},
+			ConnectSocket, GetConnector, SocketOrTunnelStream,
+		},
 	};
 	use async_trait::async_trait;
 	use std::net::SocketAddr;
 
 	impl GetConnector for Settings {
-		fn get_udp_connector(&self) -> Option<protocol::UdpConnector<'_>> {
-			Some(protocol::UdpConnector::Socket(Box::new(UdpConnector {
-				settings: self,
-			})))
+		fn get_udp_connector(&self) -> Option<protocol::outbound::udp::Connector<'_>> {
+			Some(protocol::outbound::udp::Connector::Socket(Box::new(
+				UdpConnector { settings: self },
+			)))
 		}
 	}
 
@@ -195,15 +198,15 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl ConnectUdpSocket for UdpConnector<'_> {
+	impl ConnectSocket for UdpConnector<'_> {
 		async fn connect_socket(
 			&self,
 			context: &dyn ProxyContext,
-		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let read_half = UdpSocketWrapper::bind(SocketAddr::new([0, 0, 0, 0].into(), 0)).await?;
 			let write_half = read_half.clone();
 			self.connect_socket_stream(
-				UdpProxyStream {
+				PacketStream {
 					read_half: Box::new(read_half),
 					write_half: Box::new(write_half),
 				},
@@ -214,9 +217,9 @@ mod udp_impl {
 
 		async fn connect_socket_stream<'a>(
 			&'a self,
-			stream: UdpProxyStream,
+			stream: PacketStream,
 			_context: &'a dyn ProxyContext,
-		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+		) -> Result<SocketOrTunnelStream, OutboundError> {
 			#[allow(clippy::option_if_let_else)]
 			if let Some(inner) = &self.settings.inner {
 				// With encryption
@@ -228,7 +231,7 @@ mod udp_impl {
 					self.settings.addr.clone(),
 					inner.password.clone(),
 				);
-				Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
+				Ok(SocketOrTunnelStream::Socket(PacketStream {
 					read_half: Box::new(read_half),
 					write_half: Box::new(write_half),
 				}))
@@ -237,7 +240,7 @@ mod udp_impl {
 				let (read_half, write_half) = (stream.read_half, stream.write_half);
 				let read_half = udp::PlainReadHalf::new(read_half);
 				let write_half = udp::PlainWriteHalf::new(write_half, self.settings.addr.clone());
-				Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
+				Ok(SocketOrTunnelStream::Socket(PacketStream {
 					read_half: Box::new(read_half),
 					write_half: Box::new(write_half),
 				}))

@@ -17,58 +17,40 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::common::{AsyncReadWrite, GetProtocolName, ProxyStream};
+use super::common::{AsyncReadWrite, GetProtocolName, BytesStream};
 use crate::{prelude::*, protocol::outbound};
 use async_trait::async_trait;
 use std::{
 	fmt::{self, Formatter},
 	io,
 };
-use tokio::net::UdpSocket;
+
+#[cfg(feature = "use-udp")]
+pub mod udp;
 
 #[async_trait]
 pub trait TcpAcceptor: GetProtocolName {
-	async fn accept_tcp<'a>(&'a self, stream: ProxyStream)
+	async fn accept_tcp<'a>(&'a self, stream: BytesStream)
 		-> Result<AcceptResult<'a>, AcceptError>;
 }
 
-#[async_trait]
-pub trait UdpAcceptor: GetProtocolName {
-	async fn accept_udp(&self, sock: UdpSocket) -> Result<UdpProxyStream, BoxStdErr>;
-}
-
 pub enum AcceptResult<'a> {
-	Tcp((Box<dyn FinishHandshake + 'a>, SocksAddr)),
+	Tcp(Box<dyn FinishHandshake + 'a>, SocksAddr),
 	#[cfg(feature = "use-udp")]
-	Udp(UdpProxyStream),
-}
-
-impl<'a> AcceptResult<'a> {
-	#[inline]
-	#[must_use]
-	pub fn new_tcp(handle: Box<dyn FinishHandshake + 'a>, addr: SocksAddr) -> Self {
-		AcceptResult::Tcp((handle, addr))
-	}
-
-	#[inline]
-	#[must_use]
-	#[cfg(feature = "use-udp")]
-	pub fn new_udp(udp_stream: UdpProxyStream) -> Self {
-		AcceptResult::Udp(udp_stream)
-	}
+	Udp(udp::PacketStream),
 }
 
 #[async_trait]
 pub trait FinishHandshake: Send {
-	async fn finish(self: Box<Self>) -> Result<ProxyStream, HandshakeError>;
+	async fn finish(self: Box<Self>) -> Result<BytesStream, HandshakeError>;
 	async fn finish_err(self: Box<Self>, err: &outbound::Error) -> Result<(), HandshakeError>;
 }
 
-pub struct PlainHandshakeHandler(pub ProxyStream);
+pub struct PlainHandshakeHandler(pub BytesStream);
 
 #[async_trait]
 impl FinishHandshake for PlainHandshakeHandler {
-	async fn finish(self: Box<Self>) -> Result<ProxyStream, HandshakeError> {
+	async fn finish(self: Box<Self>) -> Result<BytesStream, HandshakeError> {
 		return Ok(self.0);
 	}
 
@@ -135,66 +117,5 @@ impl fmt::Display for AcceptError {
 impl From<io::Error> for AcceptError {
 	fn from(e: io::Error) -> Self {
 		Self::Io(e)
-	}
-}
-
-#[derive(Clone, Hash, PartialEq, Eq)]
-pub struct Session {
-	/// Address for local client (source)
-	pub src: SocketAddr,
-	/// Address for remote server (destination)
-	pub dst: SocksAddr,
-}
-
-pub struct UdpResult {
-	pub len: usize,
-	pub src: Option<SocketAddr>,
-	pub dst: SocksAddr,
-}
-
-#[async_trait]
-pub trait UdpRecv: Unpin + Send + Sync {
-	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<UdpResult>;
-}
-
-#[async_trait]
-pub trait UdpSend: Unpin + Send + Sync {
-	async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize>;
-}
-
-// pub trait InboundReadWrite: InboundRead + InboundWrite {
-// 	fn split_stream(self: Box<Self>) -> (Box<dyn InboundRead>, Box<dyn InboundWrite>);
-// }
-
-#[async_trait]
-impl<T: UdpRecv + ?Sized> UdpRecv for Box<T> {
-	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<UdpResult> {
-		self.as_mut().recv_inbound(buf).await
-	}
-}
-
-#[async_trait]
-impl<T: UdpSend + ?Sized> UdpSend for Box<T> {
-	async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize> {
-		self.as_mut().send_inbound(sess, buf).await
-	}
-}
-
-pub struct UdpProxyStream {
-	pub read_half: Box<dyn UdpRecv>,
-	pub write_half: Box<dyn UdpSend>,
-}
-
-#[async_trait]
-impl UdpRecv for UdpProxyStream {
-	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<UdpResult> {
-		self.read_half.recv_inbound(buf).await
-	}
-}
-
-#[async_trait]
-impl UdpSend for UdpProxyStream {
-	async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize> {
-		self.write_half.send_inbound(sess, buf).await
 	}
 }

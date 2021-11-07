@@ -21,8 +21,8 @@ use super::{Server, DIAL_TCP_TIMEOUT};
 use crate::{
 	prelude::*,
 	protocol::{
-		GetConnectorError, GetProtocolName, ProxyContext, TcpConnector, TcpStreamConnector,
-		SocksAddr, SocksDestination
+		outbound::{TcpConnector, TcpStreamConnector},
+		GetConnectorError, GetProtocolName, ProxyContext, SocksAddr, SocksDestination,
 	},
 };
 use std::{io, net::SocketAddr, time::Duration};
@@ -73,13 +73,12 @@ impl ProxyContext for Server {
 		let outbound = self
 			.get_outbound(tag)
 			.ok_or_else(|| GetConnectorError::UnknownTag(Tag::from(tag)))?;
-		outbound
-			.settings
-			.get_tcp_stream_connector()
-			.ok_or_else(|| GetConnectorError::NotSupported {
+		outbound.settings.get_tcp_stream_connector().ok_or_else(|| {
+			GetConnectorError::NotSupported {
 				tag: Tag::from(tag),
 				type_name: outbound.settings.protocol_name().into(),
-			})
+			}
+		})
 	}
 }
 

@@ -24,8 +24,9 @@ use super::utils::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, HandshakeError},
-		FinishHandshake, GetProtocolName, OutboundError, ProxyStream, TcpAcceptor,
+		inbound::{AcceptError, AcceptResult, FinishHandshake, HandshakeError, TcpAcceptor},
+		outbound::Error as OutboundError,
+		BytesStream, GetProtocolName,
 	},
 	transport,
 	utils::BufferedReadHalf,
@@ -97,7 +98,7 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: ProxyStream,
+		stream: BytesStream,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		let mut stream = self.transport.accept(stream).await?;
 		let (mut req, leftover) = match read_request(&mut stream).await {
@@ -147,7 +148,7 @@ impl TcpAcceptor for Settings {
 		}
 
 		let handshake = HandshakeFinisher::new(stream, req, leftover);
-		Ok(AcceptResult::Tcp((Box::new(handshake), dst)))
+		Ok(AcceptResult::Tcp(Box::new(handshake), dst))
 	}
 }
 
@@ -162,13 +163,13 @@ async fn write_err_response<T, W: AsyncWrite + Unpin>(
 }
 
 struct HandshakeFinisher {
-	stream: ProxyStream,
+	stream: BytesStream,
 	req: http::Request<()>,
 	leftover: Vec<u8>,
 }
 
 impl<'a> HandshakeFinisher {
-	fn new(stream: ProxyStream, req: http::Request<()>, leftover: Vec<u8>) -> Self {
+	fn new(stream: BytesStream, req: http::Request<()>, leftover: Vec<u8>) -> Self {
 		Self {
 			stream,
 			req,
@@ -179,7 +180,7 @@ impl<'a> HandshakeFinisher {
 
 #[async_trait]
 impl FinishHandshake for HandshakeFinisher {
-	async fn finish(mut self: Box<Self>) -> Result<ProxyStream, HandshakeError> {
+	async fn finish(mut self: Box<Self>) -> Result<BytesStream, HandshakeError> {
 		let mut sent_buf = Vec::new();
 		let mut client_stream = self.stream;
 		let request = self.req;
@@ -219,7 +220,7 @@ impl FinishHandshake for HandshakeFinisher {
 
 		let r = BufferedReadHalf::new(client_stream.r, sent_buf);
 
-		Ok(ProxyStream::new(Box::new(r), client_stream.w))
+		Ok(BytesStream::new(Box::new(r), client_stream.w))
 	}
 
 	async fn finish_err(self: Box<Self>, err: &OutboundError) -> Result<(), HandshakeError> {

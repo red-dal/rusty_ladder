@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::{http_utils, tls};
 use crate::{
 	prelude::*,
-	protocol::ProxyStream,
+	protocol::BytesStream,
 	utils::websocket::{self, Stream as WsStream},
 };
 use std::{collections::HashMap, io};
@@ -43,7 +43,7 @@ pub enum ClientStream<IO: AsyncRead + AsyncWrite + Unpin> {
 	Tls(Box<SecureClientStream<IO>>),
 }
 
-impl<IO> From<ClientStream<IO>> for ProxyStream
+impl<IO> From<ClientStream<IO>> for BytesStream
 where
 	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
 {
@@ -51,11 +51,11 @@ where
 		match s {
 			ClientStream::Raw(stream) => {
 				let (r, w) = tokio::io::split(stream);
-				ProxyStream::new(Box::new(r), Box::new(w))
+				BytesStream::new(Box::new(r), Box::new(w))
 			}
 			ClientStream::Tls(stream) => {
 				let (r, w) = tokio::io::split(stream);
-				ProxyStream::new(Box::new(r), Box::new(w))
+				BytesStream::new(Box::new(r), Box::new(w))
 			}
 		}
 	}
@@ -66,7 +66,7 @@ pub enum ServerStream<IO: AsyncRead + AsyncWrite + Unpin> {
 	Tls(Box<SecureServerStream<IO>>),
 }
 
-impl<IO> From<ServerStream<IO>> for ProxyStream
+impl<IO> From<ServerStream<IO>> for BytesStream
 where
 	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
 {
@@ -74,11 +74,11 @@ where
 		match s {
 			ServerStream::Raw(stream) => {
 				let (r, w) = tokio::io::split(*stream);
-				ProxyStream::new(Box::new(r), Box::new(w))
+				BytesStream::new(Box::new(r), Box::new(w))
 			}
 			ServerStream::Tls(stream) => {
 				let (r, w) = tokio::io::split(*stream);
-				ProxyStream::new(Box::new(r), Box::new(w))
+				BytesStream::new(Box::new(r), Box::new(w))
 			}
 		}
 	}
