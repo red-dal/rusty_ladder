@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 mod alter_ids;
 mod tcp;
+#[cfg(feature = "use-udp")]
 mod udp;
 
 use super::{
@@ -325,7 +326,7 @@ impl TcpAcceptor for Settings {
 			tcp::new_inbound_plain(stream.r, stream.w, &req, response_data, &response_iv)
 		};
 
-		Ok(make_result(cmd, dst, r, w))
+		make_result(cmd, dst, r, w)
 	}
 }
 
@@ -379,7 +380,7 @@ fn make_result<'a, R, W>(
 	dst: SocksAddr,
 	read_half: tcp::ReadHalf<R>,
 	write_half: tcp::WriteHalf<W>,
-) -> AcceptResult<'a>
+) -> Result<AcceptResult<'a>, AcceptError>
 where
 	R: 'static + AsyncRead + Unpin + Send + Sync,
 	W: 'static + AsyncWrite + Unpin + Send + Sync,
@@ -387,11 +388,18 @@ where
 	match cmd {
 		Command::Tcp => {
 			let stream = ProxyStream::new(read_half.into_boxed(), write_half.into_boxed());
-			AcceptResult::new_tcp(Box::new(PlainHandshakeHandler(stream)), dst)
+			Ok(AcceptResult::new_tcp(Box::new(PlainHandshakeHandler(stream)), dst))
 		}
 		Command::Udp => {
-			let stream = udp::new_stream(read_half, write_half, dst);
-			AcceptResult::new_udp(stream)
+			#[cfg(feature = "use-udp")]
+			{
+				let stream = udp::new_stream(read_half, write_half, dst);
+				Ok(AcceptResult::new_udp(stream))
+			}
+			#[cfg(not(feature = "use-udp"))]
+			{
+				Err(AcceptError::UdpNotAcceptable)
+			}
 		}
 	}
 }

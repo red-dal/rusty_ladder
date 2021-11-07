@@ -19,9 +19,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	inbound::ErrorHandlingPolicy,
-	stat::{Monitor, Handle as StatHandle, HandshakeArgs},
-	udp, Error, Inbound, Outbound, Server, OUTBOUND_HANDSHAKE_TIMEOUT,
+	stat::{Handle as StatHandle, HandshakeArgs, Monitor},
+	 Error, Inbound, Outbound, Server, OUTBOUND_HANDSHAKE_TIMEOUT,
 };
+#[cfg(feature = "use-udp")]
+use super::udp;
 use crate::{
 	prelude::*,
 	protocol::{
@@ -37,7 +39,7 @@ use rand::{thread_rng, RngCore};
 use std::future::Future;
 use std::time::{Instant, SystemTime};
 use tokio::{
-	net::{TcpListener, TcpStream, UdpSocket},
+	net::{TcpListener, TcpStream},
 	time::timeout,
 };
 
@@ -93,11 +95,12 @@ impl Server {
 			}));
 
 			// Serving UDP
+			#[cfg(feature = "use-udp")]
 			if let Some(acceptor) = inbound.settings.get_udp_acceptor() {
 				for &bind_addr in inbound.addr.as_slice() {
 					warn!("Serving UDP on {} for inbound '{}'", bind_addr, inbound.tag);
 					let ctx = self.clone();
-					let sock = UdpSocket::bind(&bind_addr).await?;
+					let sock = tokio::net::UdpSocket::bind(&bind_addr).await?;
 					tasks.push(Box::pin(async move {
 						let stream = acceptor.accept_udp(sock).await?;
 						udp::dispatch(stream, inbound_ind, bind_addr, ctx.as_ref()).await?;
@@ -159,16 +162,15 @@ impl Server {
 			let server = self.clone();
 			tokio::spawn(async move {
 				let stat_handle = if let Some(monitor) = &mut monitor {
-					let handle = monitor.register_connection(
-						HandshakeArgs {
+					let handle = monitor
+						.register_connection(HandshakeArgs {
 							conn_id,
 							inbound_ind,
 							inbound_tag: server.inbounds[inbound_ind].tag.clone(),
 							start_time: SystemTime::now(),
 							from: src_addr,
-						},
-					)
-					.await;
+						})
+						.await;
 					Some(handle)
 				} else {
 					None
@@ -267,7 +269,7 @@ impl<'a> TcpSession<'a> {
 		}
 	}
 
-	async fn handle(mut self, tcp_stream: TcpStream, src_addr: SocketAddr) -> Result<(), Error> {
+	async fn handle(mut self, tcp_stream: TcpStream, _src_addr: SocketAddr) -> Result<(), Error> {
 		let inbound = self.inbound;
 
 		// ------ handshake ------
@@ -309,11 +311,12 @@ impl<'a> TcpSession<'a> {
 			AcceptResult::Tcp((handshake_handler, dst)) => {
 				return self.handle_tcp_accept(handshake_handler, &dst).await;
 			}
+			#[cfg(feature = "use-udp")]
 			AcceptResult::Udp(inbound_stream) => {
 				udp::dispatch(
 					inbound_stream,
 					self.inbound_ind,
-					src_addr,
+					_src_addr,
 					self.server.as_ref(),
 				)
 				.await

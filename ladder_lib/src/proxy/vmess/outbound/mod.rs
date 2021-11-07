@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 mod tcp;
+#[cfg(feature = "use-udp")]
 mod udp;
 
 use super::utils::{Error, SecurityType};
@@ -25,8 +26,7 @@ use super::{Command, HeaderMode, Request};
 use crate::{
 	prelude::*,
 	protocol::{
-		self, ConnectUdpOverTcpTunnel, GetConnector, GetProtocolName, OutboundError, ProxyContext,
-		ProxyStream, TcpConnector, TcpStreamConnector, UdpSocketOrTunnelStream,
+		GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector, TcpStreamConnector,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -225,97 +225,116 @@ impl TcpConnector for Settings {
 	}
 }
 
-impl GetConnector for Settings {
-	fn get_udp_connector(&self) -> Option<protocol::outbound::UdpConnector<'_>> {
-		let connector: Box<dyn ConnectUdpOverTcpTunnel> = Box::new(UdpConnector { settings: self });
-		return Some(protocol::outbound::UdpConnector::TunnelOverTcp(connector));
+#[cfg(feature = "use-udp")]
+mod udp_impl {
+	use super::{
+		super::utils::{Error, SecurityType},
+		tcp, udp, Settings,
+	};
+	use super::{Command, Request};
+	use crate::{
+		prelude::*,
+		protocol::{
+			self, ConnectUdpOverTcpTunnel, GetConnector, OutboundError, ProxyContext, ProxyStream,
+			UdpSocketOrTunnelStream,
+		},
+		utils::{crypto::aead::Algorithm, timestamp_now},
+	};
+	use rand::{rngs::OsRng, thread_rng};
+
+	impl GetConnector for Settings {
+		fn get_udp_connector(&self) -> Option<protocol::outbound::UdpConnector<'_>> {
+			let connector: Box<dyn ConnectUdpOverTcpTunnel> =
+				Box::new(UdpConnector { settings: self });
+			return Some(protocol::outbound::UdpConnector::TunnelOverTcp(connector));
+		}
 	}
-}
 
-struct UdpConnector<'a> {
-	pub settings: &'a Settings,
-}
-
-#[async_trait]
-impl ConnectUdpOverTcpTunnel for UdpConnector<'_> {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, OutboundError> {
-		let stream = context.dial_tcp(&self.settings.addr).await?;
-		self.connect_stream(dst, stream.into(), context).await
+	struct UdpConnector<'a> {
+		pub settings: &'a Settings,
 	}
 
-	async fn connect_stream<'a>(
-		&'a self,
-		dst: &'a SocksAddr,
-		stream: ProxyStream,
-		_context: &'a dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, OutboundError> {
-		let time = timestamp_now();
+	#[async_trait]
+	impl ConnectUdpOverTcpTunnel for UdpConnector<'_> {
+		async fn connect(
+			&self,
+			dst: &SocksAddr,
+			context: &dyn ProxyContext,
+		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+			let stream = context.dial_tcp(&self.settings.addr).await?;
+			self.connect_stream(dst, stream.into(), context).await
+		}
 
-		let mut rng = OsRng;
-		let payload_key = rng.gen();
-		let payload_iv = rng.gen();
+		async fn connect_stream<'a>(
+			&'a self,
+			dst: &'a SocksAddr,
+			stream: ProxyStream,
+			_context: &'a dyn ProxyContext,
+		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+			let time = timestamp_now();
 
-		let mut request = Request::new(&payload_iv, &payload_key, dst.clone(), Command::Udp);
+			let mut rng = OsRng;
+			let payload_key = rng.gen();
+			let payload_iv = rng.gen();
 
-		let mut rng = thread_rng();
+			let mut request = Request::new(&payload_iv, &payload_key, dst.clone(), Command::Udp);
 
-		request.sec = self.settings.sec;
-		// Padding, use a random number
-		request.p = rng.next_u32().to_ne_bytes()[0] % 16;
-		// Verification code, use a random number
-		request.v = rng.next_u32().to_ne_bytes()[0];
+			let mut rng = thread_rng();
 
-		trace!("Vmess request: {:?}", request);
+			request.sec = self.settings.sec;
+			// Padding, use a random number
+			request.p = rng.next_u32().to_ne_bytes()[0] % 16;
+			// Verification code, use a random number
+			request.v = rng.next_u32().to_ne_bytes()[0];
 
-		let mode = self.settings.header_mode;
+			trace!("Vmess request: {:?}", request);
 
-		let algo = match self.settings.sec {
-			SecurityType::Aes128Cfb => return Err(Error::StreamEncryptionNotSupported.into()),
-			SecurityType::Zero => return Err(Error::ZeroSecInUdp.into()),
-			SecurityType::None => {
-				let (read_half, write_half) = (stream.r, stream.w);
+			let mode = self.settings.header_mode;
 
-				let stream = tcp::new_outbound_plain(
-					read_half,
-					write_half,
-					request,
-					&self.settings.id,
-					time,
-					mode,
-				);
+			let algo = match self.settings.sec {
+				SecurityType::Aes128Cfb => return Err(Error::StreamEncryptionNotSupported.into()),
+				SecurityType::Zero => return Err(Error::ZeroSecInUdp.into()),
+				SecurityType::None => {
+					let (read_half, write_half) = (stream.r, stream.w);
 
-				let stream = match stream {
-					tcp::PlainStream::Masking((r, w)) => udp::new_udp_stream(r, w),
-					tcp::PlainStream::NoMasking((r, w)) => udp::new_udp_stream(r, w),
-				};
-				return Ok(UdpSocketOrTunnelStream::Tunnel(stream));
-			}
-			SecurityType::Aes128Gcm => Algorithm::Aes128Gcm,
-			SecurityType::Chacha20Poly1305 | SecurityType::Auto => Algorithm::ChaCha20Poly1305,
-		};
+					let stream = tcp::new_outbound_plain(
+						read_half,
+						write_half,
+						request,
+						&self.settings.id,
+						time,
+						mode,
+					);
 
-		// always enable chunk masking
-		request.opt.set_chunk_masking();
-		// always enable global padding
-		request.opt.set_global_padding();
+					let stream = match stream {
+						tcp::PlainStream::Masking((r, w)) => udp::new_udp_stream(r, w),
+						tcp::PlainStream::NoMasking((r, w)) => udp::new_udp_stream(r, w),
+					};
+					return Ok(UdpSocketOrTunnelStream::Tunnel(stream));
+				}
+				SecurityType::Aes128Gcm => Algorithm::Aes128Gcm,
+				SecurityType::Chacha20Poly1305 | SecurityType::Auto => Algorithm::ChaCha20Poly1305,
+			};
 
-		let (read_half, write_half) = tokio::io::split(stream);
+			// always enable chunk masking
+			request.opt.set_chunk_masking();
+			// always enable global padding
+			request.opt.set_global_padding();
 
-		let (read_half, write_half) = tcp::new_outbound_aead(
-			read_half,
-			write_half,
-			request,
-			&self.settings.id,
-			time,
-			algo,
-			mode,
-		)?;
-		return Ok(UdpSocketOrTunnelStream::Tunnel(udp::new_udp_stream(
-			read_half, write_half,
-		)));
+			let (read_half, write_half) = tokio::io::split(stream);
+
+			let (read_half, write_half) = tcp::new_outbound_aead(
+				read_half,
+				write_half,
+				request,
+				&self.settings.id,
+				time,
+				algo,
+				mode,
+			)?;
+			return Ok(UdpSocketOrTunnelStream::Tunnel(udp::new_udp_stream(
+				read_half, write_half,
+			)));
+		}
 	}
 }

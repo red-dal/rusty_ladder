@@ -6,12 +6,14 @@ authors = ["reddal"]
 edition = "2018"
 
 [features]
-default = []
+default = ["use-udp"]
 
 # Enable protobuf for router rules.
 use-protobuf = ["protobuf", "protobuf-codegen-pure"]
 use-router-regex = ["regex"]
 use-webapi = ["warp", "serde", "serde_json", "http"]
+
+use-udp = []
 
 
 # Enable all transport.

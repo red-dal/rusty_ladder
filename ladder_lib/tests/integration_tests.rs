@@ -31,6 +31,7 @@ fn test_integration_tcp() {
 	all(feature = "all-proxies-ring", feature = "all-transports-rustls"),
 	all(feature = "all-proxies-openssl", feature = "all-transports-openssl")
 ))]
+#[cfg(feature = "use-udp")]
 #[test]
 fn test_integration_udp() {
 	println!(

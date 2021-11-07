@@ -154,7 +154,10 @@ impl TcpConnector for Details {
 
 impl GetConnector for Details {
 	fn get_udp_connector(&self) -> Option<UdpConnector<'_>> {
+		#[cfg(feature = "use-udp")]
 		return dispatch_outbound!(self, Self, s, { s.get_udp_connector() });
+		#[cfg(not(feature = "use-udp"))]
+		None
 	}
 }
 

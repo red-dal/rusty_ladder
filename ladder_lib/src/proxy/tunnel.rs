@@ -17,17 +17,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use tokio::net::UdpSocket;
-
 use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{AcceptError, AcceptResult},
-		inbound::{Session, UdpProxyStream, UdpRecv, UdpResult, UdpSend},
-		GetProtocolName, Network, PlainHandshakeHandler, ProxyStream, TcpAcceptor, UdpAcceptor,
+		GetProtocolName, Network, PlainHandshakeHandler, ProxyStream, TcpAcceptor,
 	},
 };
-use std::io;
 
 const PROTOCOL_NAME: &str = "tunnel";
 
@@ -74,47 +70,61 @@ impl TcpAcceptor for Settings {
 	}
 }
 
-#[async_trait]
-impl UdpAcceptor for Settings {
-	async fn accept_udp(&self, sock: UdpSocket) -> Result<UdpProxyStream, BoxStdErr> {
-		if self.network.use_udp() {
-			let sock = Arc::new(sock);
+#[cfg(feature = "use-udp")]
+mod udp_impl {
+	use super::Settings;
+	use crate::{
+		prelude::*,
+		protocol::{
+			inbound::{Session, UdpProxyStream, UdpRecv, UdpResult, UdpSend},
+			UdpAcceptor,
+		},
+	};
+	use std::io;
+	use tokio::net::UdpSocket;
 
-			let stream = UdpProxyStream {
-				read_half: Box::new(ReadHalfWrapper(sock.clone(), self.dst.clone())),
-				write_half: Box::new(sock),
-			};
+	#[async_trait]
+	impl UdpAcceptor for Settings {
+		async fn accept_udp(&self, sock: UdpSocket) -> Result<UdpProxyStream, BoxStdErr> {
+			if self.network.use_udp() {
+				let sock = Arc::new(sock);
 
-			Ok(stream)
-		} else {
-			Err("UDP not acceptable by inbound".into())
+				let stream = UdpProxyStream {
+					read_half: Box::new(ReadHalfWrapper(sock.clone(), self.dst.clone())),
+					write_half: Box::new(sock),
+				};
+
+				Ok(stream)
+			} else {
+				Err("UDP not acceptable by inbound".into())
+			}
 		}
 	}
-}
 
-#[derive(Clone)]
-pub struct ReadHalfWrapper(pub Arc<UdpSocket>, pub SocksAddr);
+	#[derive(Clone)]
+	pub struct ReadHalfWrapper(pub Arc<UdpSocket>, pub SocksAddr);
 
-#[async_trait]
-impl UdpRecv for ReadHalfWrapper {
-	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<UdpResult> {
-		let (len, src) = self.0.recv_from(buf).await?;
-		Ok(UdpResult {
-			src: Some(src),
-			len,
-			dst: self.1.clone(),
-		})
+	#[async_trait]
+	impl UdpRecv for ReadHalfWrapper {
+		async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<UdpResult> {
+			let (len, src) = self.0.recv_from(buf).await?;
+			Ok(UdpResult {
+				src: Some(src),
+				len,
+				dst: self.1.clone(),
+			})
+		}
 	}
-}
 
-#[async_trait]
-impl UdpSend for Arc<UdpSocket> {
-	async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize> {
-		trace!(
-			"Sending UDP packet for session ({} -> {})",
-			sess.src,
-			sess.dst
-		);
-		self.send_to(buf, sess.src).await
+	#[async_trait]
+	impl UdpSend for Arc<UdpSocket> {
+		async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize> {
+			trace!(
+				"Sending UDP packet for session ({} -> {})",
+				sess.src,
+				sess.dst
+			);
+			self.send_to(buf, sess.src).await
+		}
 	}
 }

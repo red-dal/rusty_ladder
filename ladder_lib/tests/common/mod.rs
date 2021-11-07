@@ -1,5 +1,6 @@
 mod http_server;
 mod tcp;
+#[cfg(feature = "use-udp")]
 mod udp;
 
 use ladder_lib::{Server, ServerBuilder};
@@ -23,7 +24,9 @@ const CHILD_INIT_TIME: Duration = Duration::from_millis(200);
 const HTTP_SERVER_ADDR: &str = "127.0.0.1:44337";
 const HTTP_SERVER_URL: &str = "http://127.0.0.1:44337";
 
+#[cfg(feature = "use-udp")]
 const UDP_PROXY_ADDR: ([u8; 4], u16) = ([127, 0, 0, 1], 32211);
+#[cfg(feature = "use-udp")]
 const UDP_ECHO_ADDR: ([u8; 4], u16) = ([127, 0, 0, 1], 9876);
 
 lazy_static! {

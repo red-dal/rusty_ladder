@@ -31,6 +31,7 @@ pub mod inbound;
 pub mod outbound;
 mod tcp;
 #[cfg(any(feature = "shadowsocks-outbound-openssl", feature = "shadowsocks-outbound-ring"))]
+#[cfg(feature = "use-udp")]
 mod udp;
 mod utils;
 

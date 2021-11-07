@@ -191,6 +191,7 @@ where
 				.relay_stream(in_reader, in_writer, out_reader, out_writer)
 				.await?;
 		}
+		#[cfg(feature = "use-udp")]
 		AcceptResult::Udp(_) => {
 			panic!("Cannot test UDP yet")
 		}

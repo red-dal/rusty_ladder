@@ -105,12 +105,15 @@ impl Details {
 	pub fn get_udp_acceptor(&self) -> Option<&(dyn UdpAcceptor + Send + Sync)> {
 		#[allow(clippy::match_wildcard_for_single_variants)]
 		match self {
-			Self::Tunnel(s) => {
-				if s.network().use_udp() {
-					Some(s)
+			Self::Tunnel(_s) => {
+				#[cfg(feature = "use-udp")]
+				if _s.network().use_udp() {
+					Some(_s)
 				} else {
 					None
 				}
+				#[cfg(not(feature = "use-udp"))]
+				None
 			}
 			#[allow(unreachable_patterns)]
 			_ => None,

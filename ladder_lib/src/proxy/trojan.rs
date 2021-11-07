@@ -48,18 +48,13 @@ See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
 use crate::{
 	prelude::*,
 	protocol::{
-		self,
-		outbound::socket::{UdpProxyStream, UdpRecv, UdpSend},
-		BoxRead, ConnectUdpOverTcpSocket, GetConnector, GetProtocolName, OutboundError,
-		ProxyContext, ProxyStream, TcpConnector, TcpStreamConnector, UdpSocketOrTunnelStream,
-		socks_addr::ReadError
+		GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector, TcpStreamConnector,
 	},
 	transport,
-	utils::{read_u16, LazyWriteHalf},
+	utils::LazyWriteHalf,
 };
 use async_trait::async_trait;
 use sha2::{Digest, Sha224};
-use std::io;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -157,107 +152,180 @@ impl TcpConnector for Settings {
 	}
 }
 
-impl GetConnector for Settings {
-	fn get_udp_connector(&self) -> Option<protocol::outbound::UdpConnector<'_>> {
-		return Some(protocol::outbound::UdpConnector::SocketOverTcp(Box::new(
-			UdpConnector { settings: self },
-		)));
-	}
-}
+#[cfg(feature = "use-udp")]
+mod udp_impl {
+	use super::{password_to_hex, Command, Settings};
+	use crate::{
+		prelude::*,
+		protocol::{
+			self,
+			outbound::socket::{UdpProxyStream, UdpRecv, UdpSend},
+			socks_addr::ReadError,
+			BoxRead, ConnectUdpOverTcpSocket, GetConnector, OutboundError, ProxyContext,
+			ProxyStream, UdpSocketOrTunnelStream,
+		},
+		utils::{read_u16, LazyWriteHalf},
+	};
+	use async_trait::async_trait;
+	use std::io;
 
-struct UdpReadHalf {
-	inner: BoxRead,
-}
-
-impl UdpReadHalf {
-	fn new(inner: BoxRead) -> Self {
-		Self { inner }
-	}
-}
-
-#[async_trait]
-impl UdpRecv for UdpReadHalf {
-	async fn recv_src(&mut self, buf: &mut [u8]) -> std::io::Result<(usize, SocksAddr)> {
-		debug_assert!(buf.len() > 4 * 1024);
-		let src = SocksAddr::async_read_from(&mut self.inner)
-			.await
-			.map_err(|e| {
-				if let ReadError::Io(e) = e {
-					e
-				} else {
-					io::Error::new(io::ErrorKind::InvalidData, e)
-				}
-			})?;
-
-		let mut tmp = [0_u8; 4];
-		self.inner.read_exact(&mut tmp).await?;
-
-		let (len, crlf) = tmp.split_at(2);
-
-		let len = read_u16(len) as usize;
-
-		if crlf != CRLF {
-			return Err(io::Error::new(io::ErrorKind::InvalidData, format!(
-				"expected CRLF '{:?}', but get '{:?}'",
-				CRLF, crlf
+	impl GetConnector for Settings {
+		fn get_udp_connector(&self) -> Option<protocol::outbound::UdpConnector<'_>> {
+			return Some(protocol::outbound::UdpConnector::SocketOverTcp(Box::new(
+				UdpConnector { settings: self },
 			)));
 		}
-		if len > buf.len() {
-			return Err(io::Error::new(io::ErrorKind::InvalidData, format!(
-				"Udp recv buffer size too small ({} bytes), {} bytes needed",
-				buf.len(),
-				len
-			)));
-		}
-
-		self.inner.read_exact(&mut buf[..len]).await?;
-		return Ok((len, src));
 	}
-}
 
-struct UdpWriteHalf<W: AsyncWrite + Unpin + Send + Sync> {
-	inner: W,
-	req_buf: Vec<u8>,
-}
+	struct UdpReadHalf {
+		inner: BoxRead,
+	}
 
-impl<W: AsyncWrite + Unpin + Send + Sync> UdpWriteHalf<W> {
-	fn new(inner: W) -> Self {
-		Self {
-			inner,
-			req_buf: Vec::with_capacity(4 * 1024),
+	impl UdpReadHalf {
+		fn new(inner: BoxRead) -> Self {
+			Self { inner }
 		}
 	}
+
+	#[async_trait]
+	impl UdpRecv for UdpReadHalf {
+		async fn recv_src(&mut self, buf: &mut [u8]) -> std::io::Result<(usize, SocksAddr)> {
+			debug_assert!(buf.len() > 4 * 1024);
+			let src = SocksAddr::async_read_from(&mut self.inner)
+				.await
+				.map_err(|e| {
+					if let ReadError::Io(e) = e {
+						e
+					} else {
+						io::Error::new(io::ErrorKind::InvalidData, e)
+					}
+				})?;
+
+			let mut tmp = [0_u8; 4];
+			self.inner.read_exact(&mut tmp).await?;
+
+			let (len, crlf) = tmp.split_at(2);
+
+			let len = read_u16(len) as usize;
+
+			if crlf != CRLF {
+				return Err(io::Error::new(
+					io::ErrorKind::InvalidData,
+					format!("expected CRLF '{:?}', but get '{:?}'", CRLF, crlf),
+				));
+			}
+			if len > buf.len() {
+				return Err(io::Error::new(
+					io::ErrorKind::InvalidData,
+					format!(
+						"Udp recv buffer size too small ({} bytes), {} bytes needed",
+						buf.len(),
+						len
+					),
+				));
+			}
+
+			self.inner.read_exact(&mut buf[..len]).await?;
+			return Ok((len, src));
+		}
+	}
+
+	struct UdpWriteHalf<W: AsyncWrite + Unpin + Send + Sync> {
+		inner: W,
+		req_buf: Vec<u8>,
+	}
+
+	impl<W: AsyncWrite + Unpin + Send + Sync> UdpWriteHalf<W> {
+		fn new(inner: W) -> Self {
+			Self {
+				inner,
+				req_buf: Vec::with_capacity(4 * 1024),
+			}
+		}
+	}
+
+	#[async_trait]
+	impl<W: AsyncWrite + Unpin + Send + Sync> UdpSend for UdpWriteHalf<W> {
+		async fn send_dst(&mut self, dst: &SocksAddr, payload: &[u8]) -> std::io::Result<usize> {
+			let payload_len = u16::try_from(payload.len()).unwrap_or_else(|_| {
+				info!(
+					"UDP payload too large for trojan protocol: {}",
+					payload.len()
+				);
+				u16::MAX
+			});
+
+			let payload = &payload[..payload_len as usize];
+
+			let buf = &mut self.req_buf;
+
+			dst.write_to(buf);
+			buf.put_u16(payload_len);
+			buf.put_slice(CRLF);
+			buf.put_slice(payload);
+
+			self.inner.write_all(buf).await?;
+
+			buf.clear();
+			return Ok(payload.len());
+		}
+
+		async fn shutdown(&mut self) -> std::io::Result<()> {
+			return self.inner.shutdown().await;
+		}
+	}
+
+	struct UdpConnector<'a> {
+		settings: &'a Settings,
+	}
+
+	#[async_trait]
+	impl ConnectUdpOverTcpSocket for UdpConnector<'_> {
+		async fn connect(
+			&self,
+			context: &dyn ProxyContext,
+		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+			let stream = context.dial_tcp(&self.settings.addr).await?;
+			self.connect_stream(stream.into(), context).await
+		}
+
+		async fn connect_stream<'a>(
+			&'a self,
+			stream: ProxyStream,
+			_context: &'a dyn ProxyContext,
+		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+			let stream = self
+				.settings
+				.transport
+				.connect_stream(stream, &self.settings.addr)
+				.await?;
+
+			let mut req_buf = Vec::with_capacity(512);
+			password_to_hex(self.settings.password.as_bytes(), &mut req_buf);
+			req_buf.put_slice(CRLF);
+			req_buf.put_u8(Command::UdpAssociate as u8);
+			// dummy address
+			self.settings.addr.write_to(&mut req_buf);
+			req_buf.put_slice(CRLF);
+
+			let write_half = LazyWriteHalf::new_not_lazy(stream.w, req_buf);
+
+			let read_half = UdpReadHalf::new(stream.r);
+			let write_half = UdpWriteHalf::new(write_half);
+
+			return Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
+				read_half: Box::new(read_half),
+				write_half: Box::new(write_half),
+			}));
+		}
+	}
 }
 
-#[async_trait]
-impl<W: AsyncWrite + Unpin + Send + Sync> UdpSend for UdpWriteHalf<W> {
-	async fn send_dst(&mut self, dst: &SocksAddr, payload: &[u8]) -> std::io::Result<usize> {
-		let payload_len = u16::try_from(payload.len()).unwrap_or_else(|_| {
-			info!(
-				"UDP payload too large for trojan protocol: {}",
-				payload.len()
-			);
-			u16::MAX
-		});
-
-		let payload = &payload[..payload_len as usize];
-
-		let buf = &mut self.req_buf;
-
-		dst.write_to(buf);
-		buf.put_u16(payload_len);
-		buf.put_slice(CRLF);
-		buf.put_slice(payload);
-
-		self.inner.write_all(buf).await?;
-
-		buf.clear();
-		return Ok(payload.len());
-	}
-
-	async fn shutdown(&mut self) -> std::io::Result<()> {
-		return self.inner.shutdown().await;
-	}
+#[repr(u8)]
+enum Command {
+	Connect = 0x1,
+	#[cfg(feature = "use-udp")]
+	UdpAssociate = 0x3,
 }
 
 fn password_to_hex(password: &[u8], buf: &mut impl BufMut) {
@@ -267,55 +335,4 @@ fn password_to_hex(password: &[u8], buf: &mut impl BufMut) {
 	let hash = hasher.finalize();
 	let hex = format!("{:056x}", hash);
 	buf.put_slice(hex.as_bytes());
-}
-
-#[repr(u8)]
-enum Command {
-	Connect = 0x1,
-	UdpAssociate = 0x3,
-}
-
-struct UdpConnector<'a> {
-	settings: &'a Settings,
-}
-
-#[async_trait]
-impl ConnectUdpOverTcpSocket for UdpConnector<'_> {
-	async fn connect(
-		&self,
-		context: &dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, OutboundError> {
-		let stream = context.dial_tcp(&self.settings.addr).await?;
-		self.connect_stream(stream.into(), context).await
-	}
-
-	async fn connect_stream<'a>(
-		&'a self,
-		stream: ProxyStream,
-		_context: &'a dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, OutboundError> {
-		let stream = self
-			.settings
-			.transport
-			.connect_stream(stream, &self.settings.addr)
-			.await?;
-
-		let mut req_buf = Vec::with_capacity(512);
-		password_to_hex(self.settings.password.as_bytes(), &mut req_buf);
-		req_buf.put_slice(CRLF);
-		req_buf.put_u8(Command::UdpAssociate as u8);
-		// dummy address
-		self.settings.addr.write_to(&mut req_buf);
-		req_buf.put_slice(CRLF);
-
-		let write_half = LazyWriteHalf::new_not_lazy(stream.w, req_buf);
-
-		let read_half = UdpReadHalf::new(stream.r);
-		let write_half = UdpWriteHalf::new(write_half);
-
-		return Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
-			read_half: Box::new(read_half),
-			write_half: Box::new(write_half),
-		}));
-	}
 }

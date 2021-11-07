@@ -24,12 +24,15 @@ pub mod socks_addr;
 mod common;
 mod proxy_context;
 
-pub use proxy_context::{GetConnectorError, ProxyContext};
 pub use common::{AsyncReadWrite, BoxRead, BoxWrite, GetProtocolName, Network, ProxyStream};
-pub use inbound::{FinishHandshake, PlainHandshakeHandler, TcpAcceptor, UdpAcceptor};
+pub use proxy_context::{GetConnectorError, ProxyContext};
+// TCP
+pub use inbound::{FinishHandshake, PlainHandshakeHandler, TcpAcceptor};
+pub use outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector};
+// UDP
+pub use inbound::UdpAcceptor;
 pub use outbound::{
 	ConnectUdpOverTcpSocket, ConnectUdpOverTcpTunnel, ConnectUdpSocket, ConnectUdpTunnel,
-	Error as OutboundError, GetConnector, TcpConnector, TcpStreamConnector, UdpConnector,
-	UdpSocketOrTunnelStream,
+	GetConnector, UdpConnector, UdpSocketOrTunnelStream,
 };
 pub use socks_addr::{SocksAddr, SocksDestination};

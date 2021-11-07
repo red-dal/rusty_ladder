@@ -17,17 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{method_to_algo, password_to_key, tcp, udp, utils::salt_len, Method};
+use super::{method_to_algo, password_to_key, tcp, utils::salt_len, Method};
 use crate::{
 	prelude::*,
 	protocol::{
-		self,
-		outbound::{
-			socket::{UdpProxyStream, UdpSocketWrapper},
-			UdpSocketOrTunnelStream,
-		},
-		ConnectUdpSocket, GetConnector, GetProtocolName, OutboundError, ProxyContext, ProxyStream,
-		TcpConnector, TcpStreamConnector,
+		GetProtocolName, OutboundError, ProxyContext, ProxyStream, TcpConnector, TcpStreamConnector,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, LazyWriteHalf},
@@ -157,14 +151,6 @@ impl TcpConnector for Settings {
 	}
 }
 
-impl GetConnector for Settings {
-	fn get_udp_connector(&self) -> Option<protocol::UdpConnector<'_>> {
-		Some(protocol::UdpConnector::Socket(Box::new(UdpConnector {
-			settings: self,
-		})))
-	}
-}
-
 impl Settings {
 	#[must_use]
 	pub fn new(
@@ -185,57 +171,77 @@ impl Settings {
 	}
 }
 
-struct UdpConnector<'a> {
-	settings: &'a Settings,
-}
+#[cfg(feature = "use-udp")]
+mod udp_impl {
+	use super::{super::udp, OutboundError, ProxyContext, Settings};
+	use crate::protocol::{
+		self,
+		outbound::socket::{UdpProxyStream, UdpSocketWrapper},
+		ConnectUdpSocket, GetConnector, UdpSocketOrTunnelStream,
+	};
+	use async_trait::async_trait;
+	use std::net::SocketAddr;
 
-#[async_trait]
-impl ConnectUdpSocket for UdpConnector<'_> {
-	async fn connect_socket(
-		&self,
-		context: &dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, OutboundError> {
-		let read_half = UdpSocketWrapper::bind(SocketAddr::new([0, 0, 0, 0].into(), 0)).await?;
-		let write_half = read_half.clone();
-		self.connect_socket_stream(
-			UdpProxyStream {
-				read_half: Box::new(read_half),
-				write_half: Box::new(write_half),
-			},
-			context,
-		)
-		.await
+	impl GetConnector for Settings {
+		fn get_udp_connector(&self) -> Option<protocol::UdpConnector<'_>> {
+			Some(protocol::UdpConnector::Socket(Box::new(UdpConnector {
+				settings: self,
+			})))
+		}
 	}
 
-	async fn connect_socket_stream<'a>(
-		&'a self,
-		stream: UdpProxyStream,
-		_context: &'a dyn ProxyContext,
-	) -> Result<UdpSocketOrTunnelStream, OutboundError> {
-		#[allow(clippy::option_if_let_else)]
-		if let Some(inner) = &self.settings.inner {
-			// With encryption
-			let (read_half, write_half) = (stream.read_half, stream.write_half);
-			let read_half = udp::ReadHalf::new(read_half, inner.algo, inner.password.clone());
-			let write_half = udp::WriteHalf::new(
-				write_half,
-				inner.algo,
-				self.settings.addr.clone(),
-				inner.password.clone(),
-			);
-			Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
-				read_half: Box::new(read_half),
-				write_half: Box::new(write_half),
-			}))
-		} else {
-			// Without encryption
-			let (read_half, write_half) = (stream.read_half, stream.write_half);
-			let read_half = udp::PlainReadHalf::new(read_half);
-			let write_half = udp::PlainWriteHalf::new(write_half, self.settings.addr.clone());
-			Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
-				read_half: Box::new(read_half),
-				write_half: Box::new(write_half),
-			}))
+	struct UdpConnector<'a> {
+		settings: &'a Settings,
+	}
+
+	#[async_trait]
+	impl ConnectUdpSocket for UdpConnector<'_> {
+		async fn connect_socket(
+			&self,
+			context: &dyn ProxyContext,
+		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+			let read_half = UdpSocketWrapper::bind(SocketAddr::new([0, 0, 0, 0].into(), 0)).await?;
+			let write_half = read_half.clone();
+			self.connect_socket_stream(
+				UdpProxyStream {
+					read_half: Box::new(read_half),
+					write_half: Box::new(write_half),
+				},
+				context,
+			)
+			.await
+		}
+
+		async fn connect_socket_stream<'a>(
+			&'a self,
+			stream: UdpProxyStream,
+			_context: &'a dyn ProxyContext,
+		) -> Result<UdpSocketOrTunnelStream, OutboundError> {
+			#[allow(clippy::option_if_let_else)]
+			if let Some(inner) = &self.settings.inner {
+				// With encryption
+				let (read_half, write_half) = (stream.read_half, stream.write_half);
+				let read_half = udp::ReadHalf::new(read_half, inner.algo, inner.password.clone());
+				let write_half = udp::WriteHalf::new(
+					write_half,
+					inner.algo,
+					self.settings.addr.clone(),
+					inner.password.clone(),
+				);
+				Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
+					read_half: Box::new(read_half),
+					write_half: Box::new(write_half),
+				}))
+			} else {
+				// Without encryption
+				let (read_half, write_half) = (stream.read_half, stream.write_half);
+				let read_half = udp::PlainReadHalf::new(read_half);
+				let write_half = udp::PlainWriteHalf::new(write_half, self.settings.addr.clone());
+				Ok(UdpSocketOrTunnelStream::Socket(UdpProxyStream {
+					read_half: Box::new(read_half),
+					write_half: Box::new(write_half),
+				}))
+			}
 		}
 	}
 }

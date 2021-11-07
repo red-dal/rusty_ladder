@@ -39,6 +39,7 @@ pub trait UdpAcceptor: GetProtocolName {
 
 pub enum AcceptResult<'a> {
 	Tcp((Box<dyn FinishHandshake + 'a>, SocksAddr)),
+	#[cfg(feature = "use-udp")]
 	Udp(UdpProxyStream),
 }
 
@@ -51,6 +52,7 @@ impl<'a> AcceptResult<'a> {
 
 	#[inline]
 	#[must_use]
+	#[cfg(feature = "use-udp")]
 	pub fn new_udp(udp_stream: UdpProxyStream) -> Self {
 		AcceptResult::Udp(udp_stream)
 	}

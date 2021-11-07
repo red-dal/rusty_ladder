@@ -17,17 +17,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-#[cfg(feature = "dns")]
-pub mod dns;
 mod api;
 mod builder;
+#[cfg(feature = "dns")]
+pub mod dns;
 mod error;
 pub mod inbound;
 pub mod outbound;
 mod proxy_context;
 mod serve;
-mod udp;
 pub mod stat;
+#[cfg(feature = "use-udp")]
+mod udp;
 
 pub use api::Api;
 pub use builder::{BuildError, Builder};
@@ -48,6 +49,7 @@ const RELAY_BUFFER_SIZE: usize = 16 * 1024;
 
 /// Udp socket/tunnel will be dropped if there is no read or write for more than
 /// this duration.
+#[cfg(feature = "use-udp")]
 const UDP_TIMEOUT_DURATION: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
@@ -127,10 +129,7 @@ impl Server {
 	/// Returns an error if there are any inbound that failed to initialized.
 	///
 	/// After initializing all inbounds, all session errors will only be logged.
-	pub async fn serve(
-		self: Arc<Self>,
-		monitor: Option<Monitor>,
-	) -> Result<(), BoxStdErr> {
+	pub async fn serve(self: Arc<Self>, monitor: Option<Monitor>) -> Result<(), BoxStdErr> {
 		self.priv_serve(monitor).await
 	}
 
