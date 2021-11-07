@@ -147,6 +147,10 @@ Proxy:
     Enable all proxies with ring/RustCrypto as crypto library.
     This enabled for windows target in `build/build.sh` instead of OpenSSL.
 
+- `use-udp` (*Enabled by default*)
+
+    Enable UDP support for some proxies.
+
 - `chain-outbound`
 
     Enable chain proxy outbound.
