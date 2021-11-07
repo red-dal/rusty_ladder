@@ -220,10 +220,10 @@ mod udp_impl {
 			stream: PacketStream,
 			_context: &'a dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
+			let (read_half, write_half) = (stream.read_half, stream.write_half);
 			#[allow(clippy::option_if_let_else)]
 			if let Some(inner) = &self.settings.inner {
 				// With encryption
-				let (read_half, write_half) = (stream.read_half, stream.write_half);
 				let read_half = udp::ReadHalf::new(read_half, inner.algo, inner.password.clone());
 				let write_half = udp::WriteHalf::new(
 					write_half,
@@ -237,7 +237,6 @@ mod udp_impl {
 				}))
 			} else {
 				// Without encryption
-				let (read_half, write_half) = (stream.read_half, stream.write_half);
 				let read_half = udp::PlainReadHalf::new(read_half);
 				let write_half = udp::PlainWriteHalf::new(write_half, self.settings.addr.clone());
 				Ok(SocketOrTunnelStream::Socket(PacketStream {

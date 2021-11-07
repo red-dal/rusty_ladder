@@ -108,9 +108,9 @@ impl Details {
 	) -> Option<&(dyn crate::protocol::inbound::udp::Acceptor + Send + Sync)> {
 		#[allow(clippy::match_wildcard_for_single_variants)]
 		match self {
-			Self::Tunnel(_s) => {
-				if _s.network().use_udp() {
-					Some(_s)
+			Self::Tunnel(s) => {
+				if s.network().use_udp() {
+					Some(s)
 				} else {
 					None
 				}

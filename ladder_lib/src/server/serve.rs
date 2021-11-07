@@ -178,14 +178,16 @@ impl Server {
 				};
 
 				{
-					let session = TcpSession::new(
-						&server,
+					let inbound = &server.inbounds[inbound_ind];
+					let session = InboundConnection {
+						server: &server,
 						inbound_ind,
-						conn_id,
-						stat_handle.clone(),
-						&src_addr,
-					);
-					if let Err(e) = session.handle(tcp_stream, src_addr).await {
+						inbound: &server.inbounds[inbound_ind],
+						conn_id_str: format_conn_id(conn_id, &inbound.tag),
+						stat_handle: stat_handle.clone(),
+						src: &src_addr,
+					};
+					if let Err(e) = session.handle(tcp_stream).await {
 						error!("Error occurred when serving inbound: {} ", e);
 					}
 				}
@@ -242,8 +244,8 @@ where
 	});
 }
 
-pub struct TcpSession<'a> {
-	server: Arc<Server>,
+pub struct InboundConnection<'a> {
+	server: &'a Server,
 	inbound: &'a Inbound,
 	inbound_ind: usize,
 	conn_id_str: String,
@@ -251,26 +253,8 @@ pub struct TcpSession<'a> {
 	src: &'a SocketAddr,
 }
 
-impl<'a> TcpSession<'a> {
-	pub fn new(
-		server: &'a Arc<Server>,
-		inbound_ind: usize,
-		conn_id: u64,
-		stat_handle: Option<StatHandle>,
-		src: &'a SocketAddr,
-	) -> Self {
-		let inbound = &server.inbounds[inbound_ind];
-		Self {
-			server: server.clone(),
-			inbound,
-			inbound_ind,
-			conn_id_str: format!("{:#06x} ({})", conn_id, inbound.tag),
-			stat_handle,
-			src,
-		}
-	}
-
-	async fn handle(mut self, tcp_stream: TcpStream, _src_addr: SocketAddr) -> Result<(), Error> {
+impl<'a> InboundConnection<'a> {
+	async fn handle(mut self, tcp_stream: TcpStream) -> Result<(), Error> {
 		let inbound = self.inbound;
 
 		// ------ handshake ------
@@ -314,13 +298,7 @@ impl<'a> TcpSession<'a> {
 			}
 			#[cfg(feature = "use-udp")]
 			AcceptResult::Udp(inbound_stream) => {
-				udp::dispatch(
-					inbound_stream,
-					self.inbound_ind,
-					_src_addr,
-					self.server.as_ref(),
-				)
-				.await
+				udp::dispatch(inbound_stream, self.inbound_ind, *self.src, self.server).await
 			}
 		}
 	}
@@ -440,4 +418,9 @@ fn new_route_name(
 		dst_addr,
 	)
 	.into()
+}
+
+#[inline]
+fn format_conn_id(conn_id: u64, inbound_tag: &str) -> String {
+	format!("{:#06x} ({})", conn_id, inbound_tag)
 }

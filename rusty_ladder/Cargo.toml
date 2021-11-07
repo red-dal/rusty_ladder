@@ -6,8 +6,9 @@ edition = "2018"
 license = "GPL-3.0"
 
 [features]
-default = ["use-tui", "all-transports-openssl", "all-proxies-openssl"]
+default = ["use-tui", "all-transports-openssl", "all-proxies-openssl", "use-udp"]
 
+use-udp = ["ladder_lib/use-udp"]
 use-tui = ["tui", "crossterm"]
 use-webapi = ["ladder_lib/use-webapi"]
 # Enable reading geosite file of v2ray for router rules.

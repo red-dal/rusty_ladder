@@ -375,6 +375,7 @@ enum AlterId {
 	Legacy(Vec<Uuid>),
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn make_result<'a, R, W>(
 	cmd: Command,
 	dst: SocksAddr,

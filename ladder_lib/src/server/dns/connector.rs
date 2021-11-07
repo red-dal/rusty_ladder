@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::TokioAdapter;
 use crate::{
 	prelude::{AsyncMutex, Tag},
-	protocol::{ProxyContext, ProxyStream},
+	protocol::{ProxyContext, BytesStream},
 };
 use async_trait::async_trait;
 use futures::io::{AsyncRead, AsyncWrite};
@@ -37,7 +37,7 @@ struct ConnectorData {
 	ctx: Arc<dyn ProxyContext>,
 }
 
-pub struct DohTransportStream(TokioAdapter<ProxyStream>);
+pub struct DohTransportStream(TokioAdapter<BytesStream>);
 
 impl DohTransportStream {
 	pub async fn register(ctx: Arc<dyn ProxyContext>, tag: Tag) {

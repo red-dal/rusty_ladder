@@ -1,5 +1,5 @@
 use super::ConfigError;
-use crate::protocol::{ProxyStream, SocksAddr, SocksDestination};
+use crate::protocol::{BytesStream, SocksAddr, SocksDestination};
 use std::{io, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::rustls;
@@ -111,22 +111,22 @@ impl Connector {
 	}
 }
 
-impl<RW> From<ClientStream<RW>> for ProxyStream
+impl<RW> From<ClientStream<RW>> for BytesStream
 where
 	RW: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
 	fn from(s: ClientStream<RW>) -> Self {
 		let (r, w) = tokio::io::split(s);
-		ProxyStream::new(Box::new(r), Box::new(w))
+		BytesStream::new(Box::new(r), Box::new(w))
 	}
 }
 
-impl<RW> From<ServerStream<RW>> for ProxyStream
+impl<RW> From<ServerStream<RW>> for BytesStream
 where
 	RW: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync,
 {
 	fn from(s: ServerStream<RW>) -> Self {
 		let (r, w) = tokio::io::split(s);
-		ProxyStream::new(Box::new(r), Box::new(w))
+		BytesStream::new(Box::new(r), Box::new(w))
 	}
 }
