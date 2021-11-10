@@ -23,8 +23,8 @@ use std::{collections::HashMap, time::Duration};
 
 const KB: usize = 1024;
 
-const DEFAULT_DIAL_TCP_TIMEOUT: Duration = Duration::from_secs(10);
-const DEFAULT_OUTBOUND_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
+const DEFAULT_DIAL_TCP_TIMEOUT_MS: u64 = 10_000;
+const DEFAULT_OUTBOUND_HANDSHAKE_TIMEOUT_MS: u64 = 20_000;
 const DEFAULT_RELAY_BUFFER_SIZE_KB: usize = 16;
 const DEFAULT_RELAY_TIMEOUT_SECS: usize = 300;
 
@@ -45,6 +45,8 @@ pub enum BuildError {
 	Router(#[from] router::Error),
 	#[error("api error ({0})")]
 	Api(BoxStdErr),
+	#[error("value of '{0}' cannot be zero")]
+	ValueIsZero(Cow<'static, str>),
 }
 
 #[derive(Debug, Default)]
@@ -69,24 +71,24 @@ pub struct Builder {
 	///
 	/// Default: 10000
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub dial_tcp_timeout_ms: u64,
+	pub dial_tcp_timeout_ms: Option<u64>,
 	/// Outbound handshake will be dropped if it cannot be completed within
 	/// this amount of time.
 	///
 	/// Default: 20000
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub outbound_handshake_timeout_ms: u64,
+	pub outbound_handshake_timeout_ms: Option<u64>,
 	/// Buffer size for relaying.
 	///
 	/// Default: 16
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub relay_buffer_size_kb: usize,
+	pub relay_buffer_size_kb: Option<usize>,
 	/// Session will be dropped if there are no bytes transferred within
 	/// this amount of time.
 	///
 	/// Defaults: 300
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub relay_timeout_secs: usize,
+	pub relay_timeout_secs: Option<usize>,
 }
 
 impl Builder {
@@ -155,26 +157,27 @@ impl Builder {
 			}
 		}
 
-		let dial_tcp_timeout = if self.dial_tcp_timeout_ms > 0 {
-			Duration::from_millis(self.dial_tcp_timeout_ms)
+		let dial_tcp_timeout = Duration::from_millis(if let Some(val) = self.dial_tcp_timeout_ms {
+			check_zero(val, "dial_tcp_timeout_ms")?
 		} else {
-			DEFAULT_DIAL_TCP_TIMEOUT
-		};
+			DEFAULT_DIAL_TCP_TIMEOUT_MS
+		});
 
-		let outbound_handshake_timeout = if self.outbound_handshake_timeout_ms > 0 {
-			Duration::from_millis(self.outbound_handshake_timeout_ms)
-		} else {
-			DEFAULT_OUTBOUND_HANDSHAKE_TIMEOUT
-		};
+		let outbound_handshake_timeout =
+			Duration::from_millis(if let Some(val) = self.outbound_handshake_timeout_ms {
+				check_zero(val, "outbound_handshake_timeout_ms")?
+			} else {
+				DEFAULT_OUTBOUND_HANDSHAKE_TIMEOUT_MS
+			});
 
-		let relay_buffer_size = if self.relay_buffer_size_kb > 0 {
-			self.relay_buffer_size_kb
+		let relay_buffer_size = if let Some(val) = self.relay_buffer_size_kb {
+			check_zero_usize(val, "relay_buffer_size_kb")?
 		} else {
 			DEFAULT_RELAY_BUFFER_SIZE_KB
 		} * KB;
 
-		let relay_timeout_secs = if self.relay_timeout_secs > 0 {
-			self.relay_timeout_secs
+		let relay_timeout_secs = if let Some(val) = self.relay_timeout_secs {
+			check_zero_usize(val, "relay_timeout_secs")?
 		} else {
 			DEFAULT_RELAY_TIMEOUT_SECS
 		};
@@ -193,5 +196,19 @@ impl Builder {
 			relay_buffer_size,
 			relay_timeout_secs,
 		})
+	}
+}
+
+#[inline]
+fn check_zero_usize(val: usize, val_name: &'static str) -> Result<usize, BuildError> {
+	check_zero(val as u64, val_name).map(|_| val)
+}
+
+#[inline]
+fn check_zero(val: u64, val_name: &'static str) -> Result<u64, BuildError> {
+	if val > 0 {
+		Ok(val)
+	} else {
+		Err(BuildError::ValueIsZero(Cow::Borrowed(val_name)))
 	}
 }
