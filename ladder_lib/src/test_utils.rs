@@ -185,11 +185,14 @@ where
 			let recv = Counter::new(0);
 			let send = Counter::new(0);
 
-			Relay::new("test_conn_id")
-				.set_recv(recv)
-				.set_send(send)
-				.relay_stream(in_reader, in_writer, out_reader, out_writer)
-				.await?;
+			Relay {
+				conn_id: "test_conn_id",
+				recv: Some(recv.clone()),
+				send: Some(send.clone()),
+				..Relay::default()
+			}
+			.relay_stream(in_reader, in_writer, out_reader, out_writer)
+			.await?;
 		}
 		#[cfg(feature = "use-udp")]
 		AcceptResult::Udp(_) => {

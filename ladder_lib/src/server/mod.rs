@@ -43,10 +43,6 @@ use crate::{
 };
 use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
 
-const DIAL_TCP_TIMEOUT: Duration = Duration::from_secs(10);
-const OUTBOUND_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
-const RELAY_BUFFER_SIZE: usize = 16 * 1024;
-
 /// Udp socket/tunnel will be dropped if there is no read or write for more than
 /// this duration.
 #[cfg(feature = "use-udp")]
@@ -62,6 +58,12 @@ pub struct Server {
 	outbound_tags: HashMap<Tag, usize>,
 	#[cfg(feature = "dns")]
 	pub dns: Option<dns::Config>,
+	// Timeouts
+	/// TCP connection will be dropped if it cannot be established within this amount of time.
+	dial_tcp_timeout: Duration, 
+	outbound_handshake_timeout: Duration,
+	relay_buffer_size: usize,
+	relay_timeout_secs: usize,
 }
 
 impl Server {

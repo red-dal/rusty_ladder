@@ -42,13 +42,14 @@ const ACTIVE: bool = true;
 const NOT_ACTIVE: bool = !ACTIVE;
 
 const TICK_INTERVAL: Duration = Duration::from_secs(1);
-const MAX_TICK_NUM: usize = 300;
+const DEFAULT_TIMEOUT_SECS: usize = 300;
 
 pub struct Relay<'a> {
 	pub conn_id: &'a str,
 	pub recv: Option<Counter>,
 	pub send: Option<Counter>,
 	pub buffer_size: usize,
+	pub timeout_secs: usize,
 }
 
 impl<'a> Relay<'a> {
@@ -59,29 +60,8 @@ impl<'a> Relay<'a> {
 			recv: None,
 			send: None,
 			buffer_size: DEFAULT_BUFFER_SIZE,
+			timeout_secs: DEFAULT_TIMEOUT_SECS,
 		}
-	}
-
-	#[inline]
-	pub fn set_recv(&mut self, recv: Counter) -> &mut Self {
-		self.recv = Some(recv);
-		self
-	}
-
-	/// Set send counter.
-	#[inline]
-	pub fn set_send(&mut self, send: Counter) -> &mut Self {
-		self.send = Some(send);
-		self
-	}
-
-	/// Set the size of the buffer.
-	///
-	/// Two buffers will be used during relay (send and receive).
-	#[inline]
-	pub fn set_buffer_size(&mut self, size: usize) -> &mut Self {
-		self.buffer_size = size;
-		self
 	}
 }
 
@@ -140,7 +120,7 @@ impl Relay<'_> {
 		}
 		.run();
 
-		let guard_task = guard_is_active(is_active).map(|_| {
+		let guard_task = guard_is_active(is_active, self.timeout_secs).map(|_| {
 			Err::<(IR, IW, OR, OW), _>(io::Error::new(
 				io::ErrorKind::TimedOut,
 				"connection not active for too long",
@@ -215,7 +195,7 @@ where
 	Ok((r, w))
 }
 
-async fn guard_is_active(is_active: Switch) {
+async fn guard_is_active(is_active: Switch, max_ticks: usize) {
 	let mut last_tick_count = 0_usize;
 	loop {
 		tokio::time::sleep(TICK_INTERVAL).await;
@@ -224,7 +204,7 @@ async fn guard_is_active(is_active: Switch) {
 			last_tick_count = 0;
 		} else {
 			last_tick_count += 1;
-			if last_tick_count >= MAX_TICK_NUM {
+			if last_tick_count >= max_ticks {
 				break;
 			}
 		}
@@ -262,11 +242,13 @@ mod tests {
 			let recv = Counter::new(0);
 			let send = Counter::new(0);
 
-			let res = Relay::default()
-				.set_recv(recv.clone())
-				.set_send(send.clone())
-				.relay_stream(in_reader, in_writer, out_reader, out_writer)
-				.await;
+			let res = Relay {
+				recv: Some(recv.clone()),
+				send: Some(send.clone()),
+				..Relay::default()
+			}
+			.relay_stream(in_reader, in_writer, out_reader, out_writer)
+			.await;
 			let (in_reader, in_writer, out_reader, out_writer) = res.unwrap();
 
 			let in_data = in_reader.into_inner();

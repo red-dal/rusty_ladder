@@ -19,7 +19,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{inbound, outbound, Api, Server};
 use crate::{prelude::*, router};
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
+
+const KB: usize = 1024;
+
+const DEFAULT_DIAL_TCP_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_OUTBOUND_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
+const DEFAULT_RELAY_BUFFER_SIZE_KB: usize = 16;
+const DEFAULT_RELAY_TIMEOUT_SECS: usize = 300;
 
 #[cfg(feature = "dns")]
 use super::dns;
@@ -40,8 +47,7 @@ pub enum BuildError {
 	Api(BoxStdErr),
 }
 
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 #[cfg_attr(
 	feature = "use_serde",
 	derive(serde::Deserialize),
@@ -57,6 +63,30 @@ pub struct Builder {
 	#[cfg(feature = "dns")]
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub dns: Option<dns::Config>,
+
+	/// TCP connection will be dropped if it cannot be established within
+	/// this amount of time.
+	///
+	/// Default: 10000
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub dial_tcp_timeout_ms: u64,
+	/// Outbound handshake will be dropped if it cannot be completed within
+	/// this amount of time.
+	///
+	/// Default: 20000
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub outbound_handshake_timeout_ms: u64,
+	/// Buffer size for relaying.
+	///
+	/// Default: 16
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub relay_buffer_size_kb: usize,
+	/// Session will be dropped if there are no bytes transferred within
+	/// this amount of time.
+	///
+	/// Defaults: 300
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub relay_timeout_secs: usize,
 }
 
 impl Builder {
@@ -125,6 +155,30 @@ impl Builder {
 			}
 		}
 
+		let dial_tcp_timeout = if self.dial_tcp_timeout_ms > 0 {
+			Duration::from_millis(self.dial_tcp_timeout_ms)
+		} else {
+			DEFAULT_DIAL_TCP_TIMEOUT
+		};
+
+		let outbound_handshake_timeout = if self.outbound_handshake_timeout_ms > 0 {
+			Duration::from_millis(self.outbound_handshake_timeout_ms)
+		} else {
+			DEFAULT_OUTBOUND_HANDSHAKE_TIMEOUT
+		};
+
+		let relay_buffer_size = if self.relay_buffer_size_kb > 0 {
+			self.relay_buffer_size_kb
+		} else {
+			DEFAULT_RELAY_BUFFER_SIZE_KB
+		} * KB;
+
+		let relay_timeout_secs = if self.relay_timeout_secs > 0 {
+			self.relay_timeout_secs
+		} else {
+			DEFAULT_RELAY_TIMEOUT_SECS
+		};
+
 		Ok(Server {
 			inbounds,
 			outbounds,
@@ -134,6 +188,10 @@ impl Builder {
 			dns: self.dns,
 			inbound_tags,
 			outbound_tags,
+			dial_tcp_timeout,
+			outbound_handshake_timeout,
+			relay_buffer_size,
+			relay_timeout_secs,
 		})
 	}
 }

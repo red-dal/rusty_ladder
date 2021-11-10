@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{Server, DIAL_TCP_TIMEOUT};
+use super::Server;
 use crate::{
 	prelude::*,
 	protocol::{
@@ -43,10 +43,10 @@ impl ProxyContext for Server {
 		trace!("Dialing TCP connection to '{}'", addr);
 		let dial_res = match &addr.dest {
 			SocksDestination::Name(name) => {
-				connect_tcp_timeout((name.as_str(), addr.port), DIAL_TCP_TIMEOUT).await
+				connect_tcp_timeout((name.as_str(), addr.port), self.dial_tcp_timeout).await
 			}
 			SocksDestination::Ip(ip) => {
-				connect_tcp_timeout((*ip, addr.port), DIAL_TCP_TIMEOUT).await
+				connect_tcp_timeout((*ip, addr.port), self.dial_tcp_timeout).await
 			}
 		};
 

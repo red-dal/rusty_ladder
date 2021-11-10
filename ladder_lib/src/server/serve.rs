@@ -22,7 +22,7 @@ use super::udp;
 use super::{
 	inbound::ErrorHandlingPolicy,
 	stat::{Handle as StatHandle, HandshakeArgs, Monitor},
-	Error, Inbound, Outbound, Server, OUTBOUND_HANDSHAKE_TIMEOUT,
+	Error, Inbound, Outbound, Server,
 };
 use crate::{
 	prelude::*,
@@ -214,7 +214,7 @@ impl Server {
 				.await;
 		}
 		timeout(
-			OUTBOUND_HANDSHAKE_TIMEOUT,
+			self.outbound_handshake_timeout,
 			outbound.settings.connect(dst_addr, self),
 		)
 		.await
@@ -351,6 +351,8 @@ impl<'a> InboundConnection<'a> {
 			&self.stat_handle,
 			in_stream,
 			out_stream,
+			self.server.relay_buffer_size,
+			self.server.relay_timeout_secs,
 		)
 		.await;
 	}
@@ -362,6 +364,8 @@ async fn proxy_stream<'a>(
 	stat_handle: &'a Option<StatHandle>,
 	in_ps: BytesStream,
 	out_ps: BytesStream,
+	relay_buffer_size: usize,
+	relay_timeout_secs: usize,
 ) -> Result<(), Error> {
 	let start_time = Instant::now();
 	let recv = Counter::new(0);
@@ -371,12 +375,15 @@ async fn proxy_stream<'a>(
 		stat_handle.set_proxying(recv.clone(), send.clone()).await;
 	}
 
-	let relay_result = Relay::new(conn_id_str)
-		.set_recv(recv.clone())
-		.set_send(send.clone())
-		.set_buffer_size(super::RELAY_BUFFER_SIZE)
-		.relay_stream(in_ps.r, in_ps.w, out_ps.r, out_ps.w)
-		.await;
+	let relay_result = Relay {
+		conn_id: conn_id_str,
+		recv: Some(recv.clone()),
+		send: Some(send.clone()),
+		buffer_size: relay_buffer_size,
+		timeout_secs: relay_timeout_secs,
+	}
+	.relay_stream(in_ps.r, in_ps.w, out_ps.r, out_ps.w)
+	.await;
 
 	let end_time = Instant::now();
 
