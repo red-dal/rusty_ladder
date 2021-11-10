@@ -1,3 +1,28 @@
+
+## TCP connection will be dropped if it cannot be established within
+## this amount of time.
+##
+## Default: 10000
+# dial_tcp_timeout_ms = 10000
+
+## Outbound handshake will be dropped if it cannot be completed within
+## this amount of time. 
+##
+## Default: 20000
+# outbound_handshake_timeout_ms = 20000
+
+## Buffer size for relaying.
+##
+## Default: 16
+# relay_buffer_size_kb = 16
+
+## Session will be dropped if there are no bytes transferred within
+## this amount of time.
+## Optional.
+##
+## Defaults: 300
+# relay_timeout_secs = 300
+
 ## Logging settings.
 ## Optional.
 [log]
@@ -10,9 +35,9 @@
 
     ## Output log to this file.
     ## Optional. STDOUT will be used if empty.
-    # ---
+    # ```
     # output = "routing.log"
-    # ---
+    # ```
 
 ## Optional.
 ## Currently only none type.
@@ -477,17 +502,17 @@ dst = [
     # in v2ray geosite file 'examples/geosites.dat' with tag 'cn' are valid.
     #
     # To use geosite, you must compile with feature 'use-protobuf'.
-    # ----
+    # ```
     # "geosite:examples/geosites.dat:cn",
-    # ----
+    # ```
 
     # Connections whose target IP matches one of the conditions in
     # v2ray geoip file 'geoips' with tag 'tag' are valid.
     #
     # To use geoip, you must compile with feature 'use-protobuf'.
-    # ----
+    # ```
     # "geoip:examples/geoip.dat:private",
-    # ----
+    # ```
 ]
 # Only connections that go to one of these ports are valid.
 # Optional. Empty by default.
