@@ -45,6 +45,7 @@ pub enum Network {
 
 impl Network {
 	#[inline]
+	#[must_use]
 	pub fn as_str(&self) -> &'static str {
 		match self {
 			Network::Tcp => "tcp",

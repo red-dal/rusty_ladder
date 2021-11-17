@@ -127,17 +127,17 @@ pub async fn serve_web_api(
 		.and_then(move |params| {
 			let monitor = monitor.clone();
 			let secret = secret.clone();
-			async move { get_connections(params, monitor, secret).await }
+			async move { get_connections(params, &monitor, &secret) }
 		})
 		.with(cors);
 	warp::serve(filter).bind(*addr).await;
 	Ok(())
 }
 
-async fn get_connections(
+fn get_connections(
 	mut params: RequestParams,
-	monitor: Monitor,
-	secret: SmolStr,
+	monitor: &Monitor,
+	secret: &SmolStr,
 ) -> Result<warp::reply::Json, warp::Rejection> {
 	fn str_to_list(val: &str) -> Vec<Tag> {
 		val.split(',').map(Tag::new).collect::<Vec<_>>()
@@ -195,7 +195,7 @@ async fn get_connections(
 		state,
 	};
 	let mut result = Vec::new();
-	monitor.query(&filter, &mut result).await;
+	monitor.query(&filter, &mut result);
 
 	Ok(warp::reply::json(&result))
 }

@@ -34,6 +34,7 @@ pub use std::{
 pub use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub type Tag = smol_str::SmolStr;
+#[allow(dead_code)]
 pub type AsyncMutex<T> = futures::lock::Mutex<T>;
 pub type BoxStdErr = Box<dyn StdErr + Send + Sync>;
 

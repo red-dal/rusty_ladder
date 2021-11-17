@@ -217,7 +217,7 @@ impl Dispatcher {
 				// Session tunnel not exists, create one
 				let sess_id = rand::random::<Id>();
 
-				let sess_handle = if let Some(m) = &self.monitor {
+				let sess_handle = self.monitor.as_ref().map(|m| {
 					let h = m.register_udp_session(RegisterArgs {
 						conn_id: sess_id,
 						inbound_ind,
@@ -226,10 +226,8 @@ impl Dispatcher {
 						from: sess.src,
 					});
 					h.set_connecting(outbound_ind, outbound.tag.clone(), sess.dst.clone());
-					Some(h)
-				} else {
-					None
-				};
+					h
+				});
 				let result = {
 					let sess_handle = sess_handle.as_ref();
 					async move {

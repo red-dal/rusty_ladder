@@ -173,23 +173,20 @@ impl Server {
 	) -> Result<(), BoxStdErr> {
 		loop {
 			let (tcp_stream, src_addr) = listener.accept().await?;
-			let mut monitor = monitor.clone();
+			let monitor = monitor.clone();
 			// randomly generated connection ID
 			let conn_id = thread_rng().next_u64();
 			let server = self.clone();
 			tokio::spawn(async move {
-				let stat_handle = if let Some(monitor) = &mut monitor {
-					let handle = monitor.register_tcp_session(RegisterArgs {
+				let stat_handle = monitor.as_ref().map(|m| {
+					m.register_tcp_session(RegisterArgs {
 						conn_id,
 						inbound_ind,
 						inbound_tag: server.inbounds[inbound_ind].tag.clone(),
 						start_time: SystemTime::now(),
 						from: src_addr,
-					});
-					Some(handle)
-				} else {
-					None
-				};
+					})
+				});
 
 				{
 					let inbound = &server.inbounds[inbound_ind];

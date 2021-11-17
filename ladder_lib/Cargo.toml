@@ -6,7 +6,7 @@ authors = ["reddal"]
 edition = "2018"
 
 [features]
-default = []
+default = ["use-webapi"]
 
 # Enable protobuf for router rules.
 use-protobuf = ["protobuf", "protobuf-codegen-pure"]

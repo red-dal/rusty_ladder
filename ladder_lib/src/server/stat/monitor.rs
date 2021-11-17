@@ -83,6 +83,7 @@ impl Monitor {
 	/// # Panics
 	///
 	/// Panics if a connection with the same id is already registered.
+	#[must_use]
 	pub fn register_tcp_session(&self, args: RegisterArgs) -> SessionHandle {
 		let conn_id = args.conn_id;
 		self.0
@@ -94,6 +95,13 @@ impl Monitor {
 		}
 	}
 
+	/// Register a new connection in the monitor and returns a [`Handle`].
+	///
+	/// # Panics
+	///
+	/// Panics if a connection with the same id is already registered.
+	#[cfg(feature="use-udp")]
+	#[must_use]
 	pub fn register_udp_session(&self, args: RegisterArgs) -> SessionHandle {
 		let sess_id = args.conn_id;
 		self.0
