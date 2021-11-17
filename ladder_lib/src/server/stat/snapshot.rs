@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	data::{self, CounterValue},
-	HandshakeArgs, Tag,
+	SessionBasicInfo, Tag,
 };
 use crate::protocol::SocksAddr;
 use std::time::SystemTime;
@@ -64,7 +64,7 @@ pub enum State {
 #[cfg_attr(feature = "use-webapi", derive(serde::Serialize))]
 pub struct Snapshot {
 	#[cfg_attr(feature = "use-webapi", serde(flatten))]
-	pub basic: HandshakeArgs,
+	pub basic: SessionBasicInfo,
 	pub state: State,
 	pub end_time: Option<SystemTime>,
 }

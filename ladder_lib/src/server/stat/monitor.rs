@@ -21,7 +21,7 @@ use futures::Future;
 
 use super::{
 	data::{Connection, CounterValue, SessionState},
-	HandshakeArgs, Id, Snapshot, Tag,
+	Id, Network, SessionBasicInfo, Snapshot, Tag,
 };
 use crate::{
 	prelude::*,
@@ -31,6 +31,7 @@ use crate::{
 	},
 	utils::relay::Counter,
 };
+use parking_lot::Mutex;
 use std::{
 	borrow::Cow,
 	collections::HashMap,
@@ -61,9 +62,9 @@ impl From<Error> for ServerError {
 }
 
 #[allow(clippy::module_name_repetitions)]
-type ArcInternal = Arc<AsyncMutex<Internal>>;
+type ArcInternal = Arc<Mutex<Internal>>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Monitor(ArcInternal);
 
 impl Monitor {
@@ -72,7 +73,7 @@ impl Monitor {
 			conns: HashMap::default(),
 			dead_conns: VecDeque::with_capacity(DEAD_CONNS_BUFFER_SIZE),
 		};
-		let mon = Arc::new(AsyncMutex::new(mon));
+		let mon = Arc::new(Mutex::new(mon));
 		let task = update_speed(mon.clone());
 		(Self(mon), task)
 	}
@@ -82,27 +83,51 @@ impl Monitor {
 	/// # Panics
 	///
 	/// Panics if a connection with the same id is already registered.
-	pub async fn register_connection(&self, args: HandshakeArgs) -> Handle {
+	pub fn register_tcp_session(&self, args: RegisterArgs) -> SessionHandle {
 		let conn_id = args.conn_id;
-		self.0.lock().await.new_handshake(args);
-		Handle { monitor: self.clone(), conn_id }
-	}
-
-	pub async fn set_connecting(
-		&self,
-		conn_id: Id,
-		outbound_ind: usize,
-		outbound_tag: Tag,
-		to: SocksAddr,
-	) {
 		self.0
 			.lock()
-			.await
-			.set_connecting(conn_id, outbound_ind, outbound_tag, to);
+			.new_handshake(args.into_handshake_args(Network::Tcp));
+		SessionHandle {
+			monitor: self.clone(),
+			conn_id,
+		}
 	}
 
-	pub async fn query(&self, filter: &Filter, result: &mut Vec<Snapshot>) {
-		self.0.lock().await.query(filter, result);
+	pub fn register_udp_session(&self, args: RegisterArgs) -> SessionHandle {
+		let sess_id = args.conn_id;
+		self.0
+			.lock()
+			.new_handshake(args.into_handshake_args(Network::Udp));
+		SessionHandle {
+			monitor: self.clone(),
+			conn_id: sess_id,
+		}
+	}
+
+	pub fn query(&self, filter: &Filter, result: &mut Vec<Snapshot>) {
+		self.0.lock().query(filter, result);
+	}
+}
+
+pub struct RegisterArgs {
+	pub conn_id: Id,
+	pub inbound_ind: usize,
+	pub inbound_tag: Tag,
+	pub start_time: SystemTime,
+	pub from: SocketAddr,
+}
+
+impl RegisterArgs {
+	fn into_handshake_args(self, net: Network) -> SessionBasicInfo {
+		SessionBasicInfo {
+			conn_id: self.conn_id,
+			inbound_ind: self.inbound_ind,
+			inbound_tag: self.inbound_tag,
+			start_time: self.start_time,
+			from: self.from,
+			net,
+		}
 	}
 }
 
@@ -113,7 +138,7 @@ struct Internal {
 }
 
 impl Internal {
-	fn new_handshake(&mut self, args: HandshakeArgs) {
+	fn new_handshake(&mut self, args: SessionBasicInfo) {
 		let conn_id = args.conn_id;
 		// no connections should share the same id
 
@@ -170,14 +195,14 @@ impl Internal {
 		}
 	}
 
-	async fn set_dead(&mut self, conn_id: Id, end_time: SystemTime) {
+	fn set_dead(&mut self, conn_id: Id, end_time: SystemTime) {
 		trace!("set dead for conn {:x}", conn_id);
 
 		if let Some(c) = self.conns.remove(&conn_id) {
 			if self.dead_conns.len() >= DEAD_CONNS_BUFFER_SIZE {
 				self.dead_conns.pop_front();
 			}
-			let dead = c.into_dead(end_time).await;
+			let dead = c.into_dead(end_time);
 			self.dead_conns.push_back(dead);
 		} else {
 			panic!("Connection with id {} is not registered", conn_id);
@@ -207,33 +232,26 @@ impl Internal {
 	}
 }
 
-#[derive(Debug, Clone)]
-pub struct Handle {
+#[derive(Clone)]
+pub struct SessionHandle {
 	pub monitor: Monitor,
 	pub conn_id: Id,
 }
 
-impl Handle {
-	pub async fn set_connecting(&self, outbound_ind: usize, outbound_tag: Tag, to: SocksAddr) {
-		self.monitor.0
+impl SessionHandle {
+	pub fn set_connecting(&self, outbound_ind: usize, outbound_tag: Tag, to: SocksAddr) {
+		self.monitor
+			.0
 			.lock()
-			.await
 			.set_connecting(self.conn_id, outbound_ind, outbound_tag, to);
 	}
 
-	pub async fn set_proxying(&self, recv: Counter, send: Counter) {
-		self.monitor.0
-			.lock()
-			.await
-			.set_proxying(self.conn_id, recv, send);
+	pub fn set_proxying(&self, recv: Counter, send: Counter) {
+		self.monitor.0.lock().set_proxying(self.conn_id, recv, send);
 	}
 
-	pub async fn set_dead(&self, end_time: SystemTime) {
-		self.monitor.0
-			.lock()
-			.await
-			.set_dead(self.conn_id, end_time)
-			.await;
+	pub fn set_dead(&self, end_time: SystemTime) {
+		self.monitor.0.lock().set_dead(self.conn_id, end_time);
 	}
 }
 
@@ -356,7 +374,7 @@ async fn update_speed(mon: ArcInternal) {
 		trace!("Updating speed, elapsed ms: {}", elap_ms);
 
 		// Update speeds.
-		let mut mon = mon.lock().await;
+		let mut mon = mon.lock();
 		// Remove all connections that no longer exist.
 		last_vals.retain(|id, _val| mon.conns.contains_key(id));
 

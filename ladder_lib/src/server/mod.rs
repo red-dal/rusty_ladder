@@ -43,11 +43,6 @@ use crate::{
 };
 use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
 
-/// Udp socket/tunnel will be dropped if there is no read or write for more than
-/// this duration.
-#[cfg(feature = "use-udp")]
-const UDP_TIMEOUT_DURATION: Duration = Duration::from_secs(30);
-
 #[derive(Default)]
 pub struct Server {
 	pub inbounds: Vec<Inbound>,

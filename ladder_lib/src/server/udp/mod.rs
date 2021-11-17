@@ -19,38 +19,48 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 mod connection_map;
 
-use super::{Error, UDP_TIMEOUT_DURATION};
+use super::Error;
 use crate::{
 	prelude::*,
 	protocol::{
 		inbound::udp::{PacketStream, Session},
 		outbound::{
-			udp::{GetConnector, Connector, SocketOrTunnelStream},
+			udp::{Connector, GetConnector, SocketOrTunnelStream},
 			Error as OutboundError,
 		},
 		ProxyContext,
 	},
+	server::stat::{Id, RegisterArgs},
+	Monitor,
 };
 use bytes::{Bytes, BytesMut};
 use connection_map::ConnectionsMap;
 use futures::{channel::mpsc, future::Either, Future, FutureExt, SinkExt, StreamExt};
-use std::{io, time::Duration};
+use std::{
+	io,
+	time::{Duration, SystemTime},
+};
 
 type ArcMutex<T> = Arc<AsyncMutex<T>>;
 pub type DataReceiver = mpsc::Receiver<(Session, Bytes)>;
 pub type DataSender = mpsc::Sender<(Session, Bytes)>;
 
 /// Interval between checking timeout status.
-const TIMEOUT_GUARD_INTERVAL: Duration = Duration::from_millis(500);
+const TIMEOUT_GUARD_INTERVAL: Duration = Duration::from_millis(1000);
 const TASK_TIMEOUT: Duration = Duration::from_millis(200);
 const UDP_BUFFER_SIZE: usize = 8 * 1024;
 const UDP_PACKET_BUFFER_SIZE: usize = 64;
+/// Udp socket/tunnel will be dropped if there is no read or write for more than
+/// this duration.
+const UDP_TIMEOUT_DURATION: Duration = Duration::from_secs(5);
 
 pub async fn dispatch(
 	stream: PacketStream,
+	inbound: &super::Inbound,
 	inbound_ind: usize,
 	inbound_bind_addr: SocketAddr,
 	server: &super::Server,
+	monitor: Option<Monitor>,
 ) -> Result<(), Error> {
 	trace!(
 		"Dispatching UDP packet for inbound[{}] on {}",
@@ -60,7 +70,7 @@ pub async fn dispatch(
 	let (mut read_half, mut write_half) = (stream.read_half, stream.write_half);
 	let (inbound_sender, mut inbound_receiver) = mpsc::channel(UDP_PACKET_BUFFER_SIZE);
 
-	let (dispatcher, guard_task) = Dispatcher::new(inbound_sender);
+	let (dispatcher, guard_task) = Dispatcher::new(inbound.tag.clone(), inbound_sender, monitor);
 
 	// Read data from inbound, and send to outbound
 	let send_task = async move {
@@ -146,17 +156,25 @@ pub async fn dispatch(
 }
 
 struct Dispatcher {
+	inbound_tag: Tag,
 	inbound_sender: DataSender,
 	map: ConnectionsMap,
+	monitor: Option<Monitor>,
 }
 
 impl Dispatcher {
-	pub fn new(inbound_sender: DataSender) -> (Self, impl Future<Output = ()>) {
+	pub fn new(
+		inbound_tag: Tag,
+		inbound_sender: DataSender,
+		monitor: Option<Monitor>,
+	) -> (Self, impl Future<Output = ()>) {
 		let (map, guard_task) = ConnectionsMap::new();
 		(
 			Self {
+				inbound_tag,
 				inbound_sender,
 				map,
+				monitor,
 			},
 			guard_task,
 		)
@@ -197,10 +215,46 @@ impl Dispatcher {
 					sess.dst
 				);
 				// Session tunnel not exists, create one
-				let stream = create_stream(sess, &outbound.settings, server).await?;
-				self.map
-					.create_connection(self.inbound_sender.clone(), sess, outbound_ind, stream)
-					.await?
+				let sess_id = rand::random::<Id>();
+
+				let sess_handle = if let Some(m) = &self.monitor {
+					let h = m.register_udp_session(RegisterArgs {
+						conn_id: sess_id,
+						inbound_ind,
+						inbound_tag: self.inbound_tag.clone(),
+						start_time: SystemTime::now(),
+						from: sess.src,
+					});
+					h.set_connecting(outbound_ind, outbound.tag.clone(), sess.dst.clone());
+					Some(h)
+				} else {
+					None
+				};
+				let result = {
+					let sess_handle = sess_handle.as_ref();
+					async move {
+						let stream = connect_outbound(sess, &outbound.settings, server).await?;
+						self.map
+							.register_session(
+								self.inbound_sender.clone(),
+								sess,
+								sess_handle,
+								outbound_ind,
+								stream,
+							)
+							.await
+					}
+					.await
+				};
+				match result {
+					Ok(r) => r,
+					Err(e) => {
+						if let Some(h) = sess_handle {
+							h.set_dead(SystemTime::now());
+						}
+						return Err(e);
+					}
+				}
 			};
 		if let Err(e) = outbound_sender.send((sess.clone(), data)).await {
 			debug!(
@@ -215,7 +269,7 @@ impl Dispatcher {
 	}
 }
 
-async fn create_stream<C>(
+async fn connect_outbound<C>(
 	sess: &Session,
 	outbound: &C,
 	ctx: &dyn ProxyContext,

@@ -26,7 +26,7 @@ pub mod snapshot;
 pub use snapshot::Snapshot;
 
 mod data;
-pub use data::{HandshakeArgs, CounterValue};
+pub use data::{CounterValue, SessionBasicInfo};
 
 pub type Id = u64;
 type Tag = SmolStr;
@@ -35,3 +35,20 @@ type Tag = SmolStr;
 mod webapi;
 #[cfg(feature = "use-webapi")]
 pub(crate) use webapi::serve_web_api;
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "use-webapi", derive(serde::Serialize))]
+pub enum Network {
+	Tcp,
+	Udp,
+}
+
+impl Network {
+	#[inline]
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Network::Tcp => "tcp",
+			Network::Udp => "udp",
+		}
+	}
+}

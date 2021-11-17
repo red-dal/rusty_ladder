@@ -42,7 +42,7 @@ impl DataManager {
 			let monitor = &self.monitor;
 			futures::executor::block_on(async {
 				// call async functions
-				monitor.query(&stat::Filter::new_all(), result).await;
+				monitor.query(&stat::Filter::new_all(), result);
 			});
 		}
 	}

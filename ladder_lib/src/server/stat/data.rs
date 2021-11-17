@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{Id, Snapshot, Tag};
+use super::{Id, Network, Snapshot, Tag};
 use crate::{protocol::SocksAddr, utils::relay::Counter};
 use std::{
 	net::SocketAddr,
@@ -27,7 +27,7 @@ use std::{
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "use-webapi", derive(serde::Serialize))]
-pub struct HandshakeArgs {
+pub struct SessionBasicInfo {
 	#[cfg_attr(
 		feature = "use-webapi",
 		serde(serialize_with = "super::webapi::serde_conn_id::serialize")
@@ -37,6 +37,7 @@ pub struct HandshakeArgs {
 	pub inbound_tag: Tag,
 	pub start_time: SystemTime,
 	pub from: SocketAddr,
+	pub net: Network
 }
 
 #[derive(Debug, Clone)]
@@ -171,12 +172,12 @@ impl SessionState {
 }
 
 pub(super) struct Connection {
-	pub basic: HandshakeArgs,
+	pub basic: SessionBasicInfo,
 	pub state: SessionState,
 }
 
 impl Connection {
-	pub async fn into_dead(mut self, end_time: SystemTime) -> Snapshot {
+	pub fn into_dead(mut self, end_time: SystemTime) -> Snapshot {
 		if let SessionState::Proxying {
 			out: _,
 			counter: _,

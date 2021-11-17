@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::udp;
 use super::{
 	inbound::ErrorHandlingPolicy,
-	stat::{Handle as StatHandle, HandshakeArgs, Monitor},
+	stat::{Monitor, RegisterArgs, SessionHandle},
 	Error, Inbound, Outbound, Server,
 };
 use crate::{
@@ -84,16 +84,23 @@ impl Server {
 			let server = self.clone();
 			let monitor = monitor.clone();
 			// Serving TCP
-			tasks.push(Box::pin(async move {
-				if let Err(err) = server.handle_inbound_tcp(inbound_ind, monitor).await {
-					error!(
-						"Error happened on inbound '{}' on {}: {}",
-						inbound.tag, inbound.addr, err
-					);
-					return Err(err);
-				};
-				Ok(())
-			}));
+			let tcp_task = {
+				let monitor = monitor.clone();
+				async move {
+					if let Err(err) = server
+						.handle_inbound_tcp(inbound_ind, monitor.clone())
+						.await
+					{
+						error!(
+							"Error happened on inbound '{}' on {}: {}",
+							inbound.tag, inbound.addr, err
+						);
+						return Err(err);
+					};
+					Ok(())
+				}
+			};
+			tasks.push(Box::pin(tcp_task));
 
 			// Serving UDP
 			#[cfg(feature = "use-udp")]
@@ -102,9 +109,18 @@ impl Server {
 					warn!("Serving UDP on {} for inbound '{}'", bind_addr, inbound.tag);
 					let ctx = self.clone();
 					let sock = tokio::net::UdpSocket::bind(&bind_addr).await?;
+					let monitor = monitor.clone();
 					tasks.push(Box::pin(async move {
 						let stream = acceptor.accept_udp(sock).await?;
-						udp::dispatch(stream, inbound_ind, bind_addr, ctx.as_ref()).await?;
+						udp::dispatch(
+							stream,
+							inbound,
+							inbound_ind,
+							bind_addr,
+							ctx.as_ref(),
+							monitor,
+						)
+						.await?;
 						Ok(())
 					}));
 				}
@@ -163,15 +179,13 @@ impl Server {
 			let server = self.clone();
 			tokio::spawn(async move {
 				let stat_handle = if let Some(monitor) = &mut monitor {
-					let handle = monitor
-						.register_connection(HandshakeArgs {
-							conn_id,
-							inbound_ind,
-							inbound_tag: server.inbounds[inbound_ind].tag.clone(),
-							start_time: SystemTime::now(),
-							from: src_addr,
-						})
-						.await;
+					let handle = monitor.register_tcp_session(RegisterArgs {
+						conn_id,
+						inbound_ind,
+						inbound_tag: server.inbounds[inbound_ind].tag.clone(),
+						start_time: SystemTime::now(),
+						from: src_addr,
+					});
 					Some(handle)
 				} else {
 					None
@@ -195,7 +209,7 @@ impl Server {
 				// kill connection in the monitor
 				let end_time = SystemTime::now();
 				if let Some(stat_handle) = stat_handle {
-					stat_handle.set_dead(end_time).await;
+					stat_handle.set_dead(end_time);
 				}
 			});
 		}
@@ -206,12 +220,10 @@ impl Server {
 		outbound: &Outbound,
 		outbound_ind: usize,
 		dst_addr: &SocksAddr,
-		stat_handle: &Option<StatHandle>,
+		stat_handle: &Option<SessionHandle>,
 	) -> Result<BytesStream, OutboundError> {
 		if let Some(stat_handle) = stat_handle {
-			stat_handle
-				.set_connecting(outbound_ind, outbound.tag.clone(), dst_addr.clone())
-				.await;
+			stat_handle.set_connecting(outbound_ind, outbound.tag.clone(), dst_addr.clone());
 		}
 		timeout(
 			self.outbound_handshake_timeout,
@@ -249,7 +261,7 @@ pub struct InboundConnection<'a> {
 	inbound: &'a Inbound,
 	inbound_ind: usize,
 	conn_id_str: String,
-	stat_handle: Option<StatHandle>,
+	stat_handle: Option<SessionHandle>,
 	src: &'a SocketAddr,
 }
 
@@ -298,7 +310,16 @@ impl<'a> InboundConnection<'a> {
 			}
 			#[cfg(feature = "use-udp")]
 			AcceptResult::Udp(inbound_stream) => {
-				udp::dispatch(inbound_stream, self.inbound_ind, *self.src, self.server).await
+				let monitor = self.stat_handle.as_ref().map(|h| h.monitor.clone());
+				udp::dispatch(
+					inbound_stream,
+					inbound,
+					self.inbound_ind,
+					*self.src,
+					self.server,
+					monitor,
+				)
+				.await
 			}
 		}
 	}
@@ -361,7 +382,7 @@ impl<'a> InboundConnection<'a> {
 async fn proxy_stream<'a>(
 	conn_id_str: &'a str,
 	dst_addr: &'a SocksAddr,
-	stat_handle: &'a Option<StatHandle>,
+	stat_handle: &'a Option<SessionHandle>,
 	in_ps: BytesStream,
 	out_ps: BytesStream,
 	relay_buffer_size: usize,
@@ -372,7 +393,7 @@ async fn proxy_stream<'a>(
 	let send = Counter::new(0);
 
 	if let Some(stat_handle) = stat_handle {
-		stat_handle.set_proxying(recv.clone(), send.clone()).await;
+		stat_handle.set_proxying(recv.clone(), send.clone());
 	}
 
 	let relay_result = Relay {

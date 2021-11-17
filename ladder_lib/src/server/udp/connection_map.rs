@@ -27,6 +27,8 @@ use crate::{
 		inbound::udp::Session,
 		outbound::udp::{socket, tunnel, SocketOrTunnelStream},
 	},
+	server::stat::SessionHandle,
+	utils::relay::Counter,
 };
 use bytes::BytesMut;
 use futures::{channel::mpsc, Future, SinkExt, StreamExt};
@@ -34,7 +36,7 @@ use std::{
 	collections::HashMap,
 	io,
 	sync::atomic::{AtomicBool, Ordering},
-	time::{Duration, Instant},
+	time::{Duration, Instant, SystemTime},
 };
 use tokio::task::JoinHandle;
 
@@ -85,41 +87,45 @@ impl ConnectionsMap {
 					let mut sockets = sockets.lock().await;
 					let mut tunnels = tunnels.lock().await;
 					let now = Instant::now();
+					let systime_now = SystemTime::now();
 
-					// Find timeout sessions
-					let mut timeout_sockets = Vec::new();
-					for (key, conn) in &sockets.map {
-						if conn.check_timeout(now, UDP_TIMEOUT_DURATION).await {
-							debug!(
-								"UDP socket for (src {}, outbound_ind {}) is outdated",
-								key.0, key.1
-							);
-							timeout_sockets.push(*key);
+					// Find timeout sessions and remove
+					{
+						let mut timeout_sockets = Vec::new();
+						for (key, conn) in &sockets.map {
+							if conn.check_inactive(now, UDP_TIMEOUT_DURATION) {
+								debug!(
+									"UDP socket for (src {}, outbound_ind {}) is outdated",
+									key.0, key.1
+								);
+								timeout_sockets.push(*key);
+							}
+						}
+						for (src, outbound_ind) in timeout_sockets {
+							sockets.remove(src, outbound_ind, systime_now);
 						}
 					}
-					let mut timeout_tunnels = Vec::new();
-					for (key, conn) in &tunnels.map {
-						if conn.check_outdated(now, UDP_TIMEOUT_DURATION).await {
-							debug!(
-								"UDP tunnel for src {}, dst {} is outdated",
-								key.src, key.dst
-							);
-							timeout_tunnels.push(key.clone());
+					{
+						let mut timeout_tunnels = Vec::new();
+						for (key, conn) in &tunnels.map {
+							if conn.check_inactive(now, UDP_TIMEOUT_DURATION) {
+								debug!(
+									"UDP tunnel for src {}, dst {} is outdated",
+									key.src, key.dst
+								);
+								timeout_tunnels.push(key.clone());
+							}
 						}
-					}
-
-					// Remove timeout sessions from map
-					for (src, outbound_ind) in timeout_sockets {
-						sockets.remove(src, outbound_ind);
-					}
-					for sess in timeout_tunnels {
-						tunnels.remove(&sess);
+						for sess in timeout_tunnels {
+							tunnels.remove(&sess, systime_now);
+						}
 					}
 				}
 				// Gracefully shutdown
 				debug!("Shutting down ConnectionMap guard task. Clean up all connections");
-				sockets.lock().await.remove_all();
-				tunnels.lock().await.remove_all();
+				let now = SystemTime::now();
+				sockets.lock().await.remove_all(now);
+				tunnels.lock().await.remove_all(now);
 			}
 		};
 		(
@@ -144,10 +150,11 @@ impl ConnectionsMap {
 		None
 	}
 
-	pub async fn create_connection(
+	pub async fn register_session(
 		&self,
 		inbound_sender: DataSender,
 		sess: &Session,
+		sess_handle: Option<&SessionHandle>,
 		outbound_ind: usize,
 		stream: SocketOrTunnelStream,
 	) -> Result<DataSender, Error> {
@@ -175,60 +182,71 @@ impl ConnectionsMap {
 
 		// Anything sent from this sender will be written into outbound stream.
 		let (outbound_sender, outbound_receiver) = mpsc::channel(UDP_PACKET_BUFFER_SIZE);
+
+		let read_counter = Counter::new(0);
+		let write_counter = Counter::new(0);
+		if let Some(h) = sess_handle {
+			h.set_proxying(read_counter.clone(), write_counter.clone());
+		}
+
+		let args = SpawnTaskArgs {
+			sess,
+			sess_handle,
+			outbound_ind,
+			inbound_sender,
+			outbound_sender: outbound_sender.clone(),
+			outbound_receiver,
+			read_counter,
+			write_counter,
+		};
+
 		match stream {
-			SocketOrTunnelStream::Socket(s) => {
+			SocketOrTunnelStream::Socket(stream) => {
 				debug!(
 					"Creating UDP socket connection for (src: {}, outbound_ind: {})",
 					sess.src, outbound_ind
 				);
-				self.spawn_socket(
-					sess.src,
-					outbound_ind,
-					s,
-					inbound_sender,
-					outbound_sender.clone(),
-					outbound_receiver,
-				)
-				.await;
+				self.relay_socket_packets(stream, args).await;
 			}
 			SocketOrTunnelStream::Tunnel(stream) => {
 				debug!(
 					"Creating UDP tunnel connection for (src: {}, dst: {})",
 					sess.src, sess.dst
 				);
-				self.spawn_tunnel(
-					sess,
-					stream,
-					inbound_sender,
-					outbound_sender.clone(),
-					outbound_receiver,
-				)
-				.await;
+				self.relay_tunnel_packets(stream, args).await;
 			}
 		};
 		Ok(outbound_sender)
 	}
 
-	async fn spawn_socket(
-		&self,
-		src: SocketAddr,
-		outbound_ind: usize,
-		stream: socket::PacketStream,
-		inbound_sender: DataSender,
-		outbound_sender: DataSender,
-		outbound_receiver: DataReceiver,
-	) {
-		let last_active_time = Arc::new(AsyncMutex::new(Instant::now()));
+	async fn relay_socket_packets(&self, stream: socket::PacketStream, args: SpawnTaskArgs<'_>) {
+		let last_active_time = ArcInstant::new(Instant::now());
 		let (read_half, write_half) = (stream.read_half, stream.write_half);
+
+		let src = args.sess.src;
+		let outbound_ind = args.outbound_ind;
+
+		let read_counter = args.read_counter;
+		let write_counter = args.write_counter;
 
 		// Read data from outbound and send it to inbound
 		let read_task = {
 			let map = self.sockets.clone();
 			let last_active_time = last_active_time.clone();
+			let inbound_sender = args.inbound_sender;
 			async move {
-				let res = socket_to_sender(src, read_half, inbound_sender, last_active_time).await;
+				let res = copy_from_socket_to_sender(
+					src,
+					read_half,
+					inbound_sender,
+					last_active_time,
+					read_counter.clone(),
+				)
+				.await;
 				// Remove sender from map when finished
-				map.lock().await.remove(src, outbound_ind);
+				map.lock()
+					.await
+					.remove(src, outbound_ind, SystemTime::now());
 				res
 			}
 		};
@@ -236,47 +254,64 @@ impl ConnectionsMap {
 		let write_task = {
 			let map = self.sockets.clone();
 			let last_active_time = last_active_time.clone();
+			let outbound_receiver = args.outbound_receiver;
+
 			async move {
-				let res = receiver_to_socket(write_half, outbound_receiver, last_active_time).await;
-				map.lock().await.remove(src, outbound_ind);
+				let res = copy_from_receiver_to_socket(
+					write_half,
+					outbound_receiver,
+					last_active_time,
+					write_counter.clone(),
+				)
+				.await;
+				map.lock()
+					.await
+					.remove(src, outbound_ind, SystemTime::now());
 				res
 			}
 		};
 
-		let handle = tokio::spawn(async move {
-			futures::pin_mut!(read_task);
-			futures::pin_mut!(write_task);
-			select_timeout(TASK_TIMEOUT, read_task, write_task).await;
-		});
+		let sess_handle = args.sess_handle.cloned();
+		let handle = {
+			let sess_handle = sess_handle.clone();
+			tokio::spawn(async move {
+				futures::pin_mut!(read_task);
+				futures::pin_mut!(write_task);
+				select_timeout(TASK_TIMEOUT, read_task, write_task).await;
+				if let Some(h) = &sess_handle {
+					h.set_dead(SystemTime::now());
+				}
+			})
+		};
 
 		self.sockets.lock().await.insert(
 			src,
 			outbound_ind,
-			SocketConnection::new(outbound_sender, last_active_time, handle),
+			SocketConnection::new(args.outbound_sender, last_active_time, handle, sess_handle),
 		);
 	}
 
-	async fn spawn_tunnel<'a>(
-		&'a self,
-		sess: &'a Session,
-		stream: tunnel::PacketStream,
-		inbound_sender: DataSender,
-		outbound_sender: DataSender,
-		outbound_receiver: DataReceiver,
-	) {
-		let last_active_time = Arc::new(AsyncMutex::new(Instant::now()));
+	async fn relay_tunnel_packets(&self, stream: tunnel::PacketStream, args: SpawnTaskArgs<'_>) {
+		let last_active_time = ArcInstant::new(Instant::now());
 		let (read_half, write_half) = (stream.read_half, stream.write_half);
 
 		// Read from outbound, and send to inbound
 		let read_task = {
 			let map = self.tunnels.clone();
 			let last_active_time = last_active_time.clone();
-			let sess = sess.clone();
+			let sess = args.sess.clone();
+			let inbound_sender = args.inbound_sender;
+			let read_counter = args.read_counter;
 			async move {
-				let res =
-					tunnel_to_sender(sess.clone(), read_half, inbound_sender, last_active_time)
-						.await;
-				map.lock().await.remove(&sess);
+				let res = tunnel_to_sender(
+					&sess,
+					read_half,
+					inbound_sender,
+					last_active_time,
+					read_counter,
+				)
+				.await;
+				map.lock().await.remove(&sess, SystemTime::now());
 				res
 			}
 		};
@@ -284,88 +319,132 @@ impl ConnectionsMap {
 
 		let write_task = {
 			let map = self.tunnels.clone();
-			let sess = sess.clone();
+			let sess = args.sess.clone();
 			let last_active_time = last_active_time.clone();
+			let outbound_receiver = args.outbound_receiver;
+			let write_counter = args.write_counter;
 			async move {
-				let res = receiver_to_tunnel(write_half, outbound_receiver, last_active_time).await;
-				map.lock().await.remove(&sess);
+				let res = receiver_to_tunnel(
+					write_half,
+					outbound_receiver,
+					last_active_time,
+					&write_counter,
+				)
+				.await;
+				map.lock().await.remove(&sess, SystemTime::now());
 				res
 			}
 		};
 
-		let handle = tokio::spawn(async move {
-			futures::pin_mut!(read_task);
-			futures::pin_mut!(write_task);
-			select_timeout(TASK_TIMEOUT, read_task, write_task).await;
-		});
+		let sess_handle = args.sess_handle.cloned();
+		let handle = {
+			let sess_handle = sess_handle.clone();
+			tokio::spawn(async move {
+				futures::pin_mut!(read_task);
+				futures::pin_mut!(write_task);
+				select_timeout(TASK_TIMEOUT, read_task, write_task).await;
+				if let Some(h) = sess_handle {
+					h.set_dead(SystemTime::now());
+				}
+			})
+		};
 
 		self.tunnels.lock().await.insert(
-			sess.clone(),
-			TunnelConnection::new(outbound_sender.clone(), last_active_time, handle),
+			args.sess.clone(),
+			TunnelConnection::new(
+				args.outbound_sender.clone(),
+				last_active_time,
+				handle,
+				sess_handle,
+			),
 		);
 	}
 }
 
+struct SpawnTaskArgs<'a> {
+	sess: &'a Session,
+	sess_handle: Option<&'a SessionHandle>,
+	outbound_ind: usize,
+	inbound_sender: DataSender,
+	outbound_sender: DataSender,
+	outbound_receiver: DataReceiver,
+	read_counter: Counter,
+	write_counter: Counter,
+}
+
 struct SocketConnection {
 	sender: DataSender,
-	last_active_time: ArcMutex<Instant>,
+	last_active_time: ArcInstant,
 	handle: JoinHandle<()>,
+	sess_handle: Option<SessionHandle>,
 }
 
 impl SocketConnection {
 	fn new(
 		sender: DataSender,
-		last_active_time: ArcMutex<Instant>,
+		last_active_time: ArcInstant,
 		handle: JoinHandle<()>,
+		sess_handle: Option<SessionHandle>,
 	) -> Self {
 		Self {
 			sender,
 			last_active_time,
 			handle,
+			sess_handle,
 		}
 	}
 
-	async fn check_timeout(&self, now: Instant, max_elapsed: Duration) -> bool {
-		let elapsed = now - *self.last_active_time.lock().await;
+	fn check_inactive(&self, now: Instant, max_elapsed: Duration) -> bool {
+		let elapsed = now - self.last_active_time.get();
 		elapsed > max_elapsed
 	}
 
-	fn close(&mut self) {
+	fn close(&mut self, now: SystemTime) {
+		if let Some(h) = &self.sess_handle {
+			h.set_dead(now);
+		}
 		self.handle.abort();
 	}
 }
 
 struct TunnelConnection {
 	sender: DataSender,
-	last_active_time: ArcMutex<Instant>,
+	last_active_time: ArcInstant,
 	handle: JoinHandle<()>,
+	sess_handle: Option<SessionHandle>,
 }
 
 impl TunnelConnection {
 	fn new(
 		sender: DataSender,
-		last_active_time: ArcMutex<Instant>,
+		last_active_time: ArcInstant,
 		handle: JoinHandle<()>,
+		sess_handle: Option<SessionHandle>,
 	) -> Self {
 		Self {
 			sender,
 			last_active_time,
 			handle,
+			sess_handle,
 		}
 	}
 
-	async fn check_outdated(&self, now: Instant, max_elapsed: Duration) -> bool {
-		let elapsed = now - *self.last_active_time.lock().await;
+	fn check_inactive(&self, now: Instant, max_elapsed: Duration) -> bool {
+		let elapsed = now - self.last_active_time.get();
 		elapsed > max_elapsed
 	}
 
-	fn close(&mut self) {
+	fn close(&mut self, now: SystemTime) {
+		if let Some(h) = &self.sess_handle {
+			h.set_dead(now);
+		}
 		self.handle.abort();
 	}
 }
 
 #[derive(Default)]
 struct SocketsMap {
+	/// A map of (dest_addr, outbound_ind)->SocketConnection.
 	map: HashMap<(SocketAddr, usize), SocketConnection>,
 }
 
@@ -378,7 +457,7 @@ impl SocketsMap {
 		self.map.insert((src, outbound_ind), conn);
 	}
 
-	fn remove(&mut self, src: SocketAddr, outbound_ind: usize) {
+	fn remove(&mut self, src: SocketAddr, outbound_ind: usize, now: SystemTime) {
 		if let Some(mut conn) = self.map.remove(&(src, outbound_ind)) {
 			trace!(
 				"Removing UDP socket connection for (src {}, outbound_ind {}) from SocketsMap, remaining: {}",
@@ -386,11 +465,11 @@ impl SocketsMap {
 				outbound_ind,
 				self.map.len()
 			);
-			conn.close();
+			conn.close(now);
 		}
 	}
 
-	fn remove_all(&mut self) {
+	fn remove_all(&mut self, now: SystemTime) {
 		// Close and remove all connections
 		for ((src, outbound_ind), conn) in &mut self.map {
 			trace!(
@@ -398,7 +477,7 @@ impl SocketsMap {
 				src,
 				outbound_ind
 			);
-			conn.close();
+			conn.close(now);
 		}
 		self.map.clear();
 	}
@@ -418,7 +497,7 @@ impl TunnelsMap {
 		self.map.insert(sess, conn);
 	}
 
-	fn remove(&mut self, sess: &Session) -> Option<TunnelConnection> {
+	fn remove(&mut self, sess: &Session, now: SystemTime) -> Option<TunnelConnection> {
 		if let Some(mut conn) = self.map.remove(sess) {
 			trace!(
 				"Removing UDP tunnel connection for (src {}, dst {}) from TunnelsMap, remaining: {}",
@@ -426,14 +505,14 @@ impl TunnelsMap {
 				sess.dst,
 				self.map.len()
 			);
-			conn.close();
+			conn.close(now);
 			Some(conn)
 		} else {
 			None
 		}
 	}
 
-	fn remove_all(&mut self) {
+	fn remove_all(&mut self, now: SystemTime) {
 		// Close and remove all connections
 		for (sess, conn) in &mut self.map {
 			trace!(
@@ -441,17 +520,18 @@ impl TunnelsMap {
 				sess.src,
 				sess.dst
 			);
-			conn.close();
+			conn.close(now);
 		}
 		self.map.clear();
 	}
 }
 
-async fn socket_to_sender(
+async fn copy_from_socket_to_sender(
 	src: SocketAddr,
 	mut read_half: Box<dyn socket::RecvPacket>,
 	mut inbound_sender: DataSender,
-	last_active_time: ArcMutex<Instant>,
+	last_active_time: ArcInstant,
+	counter: Counter,
 ) -> Result<(), io::Error> {
 	loop {
 		let mut buf = BytesMut::new();
@@ -462,7 +542,7 @@ async fn socket_to_sender(
 		if len == 0 {
 			break;
 		}
-		*last_active_time.lock().await = Instant::now();
+		last_active_time.set(Instant::now());
 
 		// Send packet to inbound
 		// Error means
@@ -474,27 +554,32 @@ async fn socket_to_sender(
 			error!("Cannot send outbound data to inbound: {}", e);
 			return Err(io::Error::new(io::ErrorKind::Other, e));
 		}
+
+		counter.add(usize_to_u64(len));
 	}
 	Ok(())
 }
 
-async fn receiver_to_socket(
+async fn copy_from_receiver_to_socket(
 	mut write_half: Box<dyn socket::SendPacket>,
 	mut receiver: DataReceiver,
-	last_active_time: ArcMutex<Instant>,
+	last_active_time: ArcInstant,
+	counter: Counter,
 ) -> Result<(), io::Error> {
 	while let Some((sess, data)) = receiver.next().await {
 		write_half.send_dst(&sess.dst, &data).await?;
-		*last_active_time.lock().await = Instant::now();
+		counter.add(usize_to_u64(data.len()));
+		last_active_time.set(Instant::now());
 	}
 	Result::<(), io::Error>::Ok(())
 }
 
 async fn tunnel_to_sender(
-	sess: Session,
+	sess: &Session,
 	mut read_half: Box<dyn tunnel::RecvPacket>,
 	mut inbound_sender: DataSender,
-	last_active_time: ArcMutex<Instant>,
+	last_active_time: ArcInstant,
+	counter: Counter,
 ) -> Result<(), io::Error> {
 	loop {
 		let mut buf = BytesMut::new();
@@ -505,13 +590,14 @@ async fn tunnel_to_sender(
 		if len == 0 {
 			break;
 		}
-		*last_active_time.lock().await = Instant::now();
+		last_active_time.set(Instant::now());
 
 		// Send packet to inbound
 		buf.truncate(len);
 		if let Err(e) = inbound_sender.send((sess.clone(), buf.freeze())).await {
 			return Err(io::Error::new(io::ErrorKind::Other, e));
 		};
+		counter.add(usize_to_u64(len));
 	}
 	Ok(())
 }
@@ -519,11 +605,35 @@ async fn tunnel_to_sender(
 async fn receiver_to_tunnel(
 	mut write_half: Box<dyn tunnel::SendPacket>,
 	mut receiver: DataReceiver,
-	last_active_time: ArcMutex<Instant>,
+	last_active_time: ArcInstant,
+	counter: &Counter,
 ) -> Result<(), io::Error> {
 	while let Some((_sess, data)) = receiver.next().await {
 		write_half.send(&data).await?;
-		*last_active_time.lock().await = Instant::now();
+		last_active_time.set(Instant::now());
+		counter.add(usize_to_u64(data.len()));
 	}
 	Result::<(), io::Error>::Ok(())
+}
+
+#[inline]
+fn usize_to_u64(value: usize) -> u64 {
+	u64::try_from(value).expect("Cannot convert usize to u64")
+}
+
+#[derive(Clone)]
+struct ArcInstant(Arc<parking_lot::Mutex<Instant>>);
+
+impl ArcInstant {
+	pub fn new(instant: Instant) -> Self {
+		Self(Arc::new(parking_lot::Mutex::new(instant)))
+	}
+
+	pub fn get(&self) -> Instant {
+		*self.0.lock()
+	}
+
+	pub fn set(&self, now: Instant) {
+		*self.0.lock() = now;
+	}
 }
