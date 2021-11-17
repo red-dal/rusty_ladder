@@ -49,6 +49,11 @@ pub enum BuildError {
 	ValueIsZero(Cow<'static, str>),
 }
 
+#[cfg(feature = "use-udp")]
+const fn default_udp_session_timeout_ms() -> u64 {
+	20_000
+}
+
 #[derive(Debug, Default)]
 #[cfg_attr(
 	feature = "use_serde",
@@ -89,6 +94,16 @@ pub struct Builder {
 	/// Defaults: 300
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub relay_timeout_secs: Option<usize>,
+	/// Udp socket/tunnel session will be dropped if there is no read or write for more than
+	/// this amount of time.
+	///
+	/// Defaults: 20000
+	#[cfg(feature = "use-udp")]
+	#[cfg_attr(
+		feature = "use_serde",
+		serde(default = "default_udp_session_timeout_ms")
+	)]
+	pub udp_session_timeout_ms: u64,
 }
 
 impl Builder {
@@ -99,6 +114,7 @@ impl Builder {
 	/// Returns an error if any of the inbounds/outbounds or router failed to build.
 	pub fn build(self) -> Result<Server, BuildError> {
 		type Map = HashMap<Tag, usize>;
+		debug!("Server config: {:?}", self);
 		// Returns false if tag already exists.
 		// Empty tag will be ignored.
 		fn add_tag(ind: usize, tag: &Tag, map: &mut Map, other_map: &Map) -> bool {
@@ -182,6 +198,9 @@ impl Builder {
 			DEFAULT_RELAY_TIMEOUT_SECS
 		};
 
+		#[cfg(feature = "use-udp")]
+		check_zero(self.udp_session_timeout_ms, "udp_session_timeout_ms")?;
+
 		Ok(Server {
 			inbounds,
 			outbounds,
@@ -195,6 +214,8 @@ impl Builder {
 			outbound_handshake_timeout,
 			relay_buffer_size,
 			relay_timeout_secs,
+			#[cfg(feature = "use-udp")]
+			udp_session_timeout: Duration::from_millis(self.udp_session_timeout_ms),
 		})
 	}
 }

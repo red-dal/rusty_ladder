@@ -50,9 +50,6 @@ const TIMEOUT_GUARD_INTERVAL: Duration = Duration::from_millis(1000);
 const TASK_TIMEOUT: Duration = Duration::from_millis(200);
 const UDP_BUFFER_SIZE: usize = 8 * 1024;
 const UDP_PACKET_BUFFER_SIZE: usize = 64;
-/// Udp socket/tunnel will be dropped if there is no read or write for more than
-/// this duration.
-const UDP_TIMEOUT_DURATION: Duration = Duration::from_secs(5);
 
 pub async fn dispatch(
 	stream: PacketStream,
@@ -61,6 +58,7 @@ pub async fn dispatch(
 	inbound_bind_addr: SocketAddr,
 	server: &super::Server,
 	monitor: Option<Monitor>,
+	session_timeout: Duration,
 ) -> Result<(), Error> {
 	trace!(
 		"Dispatching UDP packet for inbound[{}] on {}",
@@ -70,7 +68,12 @@ pub async fn dispatch(
 	let (mut read_half, mut write_half) = (stream.read_half, stream.write_half);
 	let (inbound_sender, mut inbound_receiver) = mpsc::channel(UDP_PACKET_BUFFER_SIZE);
 
-	let (dispatcher, guard_task) = Dispatcher::new(inbound.tag.clone(), inbound_sender, monitor);
+	let (dispatcher, guard_task) = Dispatcher::new(
+		inbound.tag.clone(),
+		inbound_sender,
+		monitor,
+		session_timeout,
+	);
 
 	// Read data from inbound, and send to outbound
 	let send_task = async move {
@@ -167,8 +170,9 @@ impl Dispatcher {
 		inbound_tag: Tag,
 		inbound_sender: DataSender,
 		monitor: Option<Monitor>,
+		session_timeout: Duration,
 	) -> (Self, impl Future<Output = ()>) {
-		let (map, guard_task) = ConnectionsMap::new();
+		let (map, guard_task) = ConnectionsMap::new(session_timeout);
 		(
 			Self {
 				inbound_tag,

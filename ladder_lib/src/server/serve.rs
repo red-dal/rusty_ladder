@@ -105,6 +105,7 @@ impl Server {
 			// Serving UDP
 			#[cfg(feature = "use-udp")]
 			if let Some(acceptor) = inbound.settings.get_udp_acceptor() {
+				let session_timeout = self.udp_session_timeout;
 				for &bind_addr in inbound.addr.as_slice() {
 					warn!("Serving UDP on {} for inbound '{}'", bind_addr, inbound.tag);
 					let ctx = self.clone();
@@ -119,6 +120,7 @@ impl Server {
 							bind_addr,
 							ctx.as_ref(),
 							monitor,
+							session_timeout,
 						)
 						.await?;
 						Ok(())
@@ -177,6 +179,8 @@ impl Server {
 			// randomly generated connection ID
 			let conn_id = thread_rng().next_u64();
 			let server = self.clone();
+			#[cfg(feature = "use-udp")]
+			let udp_session_timeout = self.udp_session_timeout;
 			tokio::spawn(async move {
 				let stat_handle = monitor.as_ref().map(|m| {
 					m.register_tcp_session(RegisterArgs {
@@ -197,6 +201,8 @@ impl Server {
 						conn_id_str: format_conn_id(conn_id, &inbound.tag),
 						stat_handle: stat_handle.clone(),
 						src: &src_addr,
+						#[cfg(feature = "use-udp")]
+						udp_session_timeout,
 					};
 					if let Err(e) = session.handle(tcp_stream).await {
 						error!("Error occurred when serving inbound: {} ", e);
@@ -260,6 +266,8 @@ pub struct InboundConnection<'a> {
 	conn_id_str: String,
 	stat_handle: Option<SessionHandle>,
 	src: &'a SocketAddr,
+	#[cfg(feature = "use-udp")]
+	udp_session_timeout: std::time::Duration,
 }
 
 impl<'a> InboundConnection<'a> {
@@ -307,6 +315,7 @@ impl<'a> InboundConnection<'a> {
 			}
 			#[cfg(feature = "use-udp")]
 			AcceptResult::Udp(inbound_stream) => {
+				let session_timeout = self.udp_session_timeout;
 				let monitor = self.stat_handle.as_ref().map(|h| h.monitor.clone());
 				udp::dispatch(
 					inbound_stream,
@@ -315,6 +324,7 @@ impl<'a> InboundConnection<'a> {
 					*self.src,
 					self.server,
 					monitor,
+					session_timeout,
 				)
 				.await
 			}

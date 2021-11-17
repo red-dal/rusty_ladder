@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	select_timeout, ArcMutex, DataReceiver, DataSender, Error, TASK_TIMEOUT,
-	TIMEOUT_GUARD_INTERVAL, UDP_BUFFER_SIZE, UDP_PACKET_BUFFER_SIZE, UDP_TIMEOUT_DURATION,
+	TIMEOUT_GUARD_INTERVAL, UDP_BUFFER_SIZE, UDP_PACKET_BUFFER_SIZE,
 };
 use crate::{
 	prelude::*,
@@ -67,7 +67,7 @@ impl Drop for ConnectionsMap {
 }
 
 impl ConnectionsMap {
-	pub fn new() -> (Self, impl Future<Output = ()>) {
+	pub fn new(session_timeout: Duration) -> (Self, impl Future<Output = ()>) {
 		let stopped = Arc::new(AtomicBool::new(NOT_STOPPED));
 		let sockets = Arc::new(AsyncMutex::new(SocketsMap::default()));
 		let tunnels = Arc::new(AsyncMutex::new(TunnelsMap::default()));
@@ -93,7 +93,7 @@ impl ConnectionsMap {
 					{
 						let mut timeout_sockets = Vec::new();
 						for (key, conn) in &sockets.map {
-							if conn.check_inactive(now, UDP_TIMEOUT_DURATION) {
+							if conn.check_inactive(now, session_timeout) {
 								debug!(
 									"UDP socket for (src {}, outbound_ind {}) is outdated",
 									key.0, key.1
@@ -108,7 +108,7 @@ impl ConnectionsMap {
 					{
 						let mut timeout_tunnels = Vec::new();
 						for (key, conn) in &tunnels.map {
-							if conn.check_inactive(now, UDP_TIMEOUT_DURATION) {
+							if conn.check_inactive(now, session_timeout) {
 								debug!(
 									"UDP tunnel for src {}, dst {} is outdated",
 									key.src, key.dst

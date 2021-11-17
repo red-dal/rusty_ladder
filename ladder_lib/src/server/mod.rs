@@ -59,6 +59,8 @@ pub struct Server {
 	outbound_handshake_timeout: Duration,
 	relay_buffer_size: usize,
 	relay_timeout_secs: usize,
+	#[cfg(feature = "use-udp")]
+	udp_session_timeout: Duration,
 }
 
 impl Server {
