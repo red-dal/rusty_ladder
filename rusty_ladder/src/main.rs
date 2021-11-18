@@ -23,12 +23,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use config::Config;
 use gumdrop::Options;
-use std::{ffi::OsStr, fs::File, io, path::Path, sync::Arc};
+use std::{borrow::Cow, ffi::OsStr, fs::File, io, path::Path, sync::Arc};
 use tokio::runtime::Runtime;
 
 type BoxStdErr = Box<dyn std::error::Error + Send + Sync>;
 
 const DEFAULT_CONF_PATH: &str = "config.toml";
+const VERSION: &str = "0.1.1";
 
 #[cfg(feature = "use-tui")]
 mod tui;
@@ -46,6 +47,9 @@ pub struct AppOptions {
 
 	#[options(help = "Set the path of the config file. 'config.toml' is used by default.")]
 	config: Option<String>,
+
+	#[options(help = "Print version")]
+	version: bool,
 }
 
 enum ConfigFileFormat {
@@ -85,11 +89,19 @@ fn read_config<R: io::Read>(mut reader: R, format: &ConfigFileFormat) -> Result<
 	Ok(conf)
 }
 
-fn serve() -> Result<(), BoxStdErr> {
-	println!("Hello world!");
+#[derive(Debug, thiserror::Error)]
+enum Error {
+	#[error("[IO error] {0}")]
+	Io(#[from] io::Error),
+	#[error("[input] {0}")]
+	Input(Cow<'static, str>),
+	#[error("[config] {0}")]
+	Config(BoxStdErr),
+	#[error("[runtime] {0}")]
+	Runtime(BoxStdErr),
+}
 
-	let opts = AppOptions::parse_args_default_or_exit();
-
+fn serve(opts: AppOptions) -> Result<(), Error> {
 	let config_path_str: &str = opts.config.as_deref().unwrap_or(DEFAULT_CONF_PATH);
 
 	println!("Reading config file '{}'", config_path_str);
@@ -102,36 +114,39 @@ fn serve() -> Result<(), BoxStdErr> {
 	// Get config format
 	let format = if let Some(mut val) = opts.format {
 		val.make_ascii_lowercase();
-		ConfigFileFormat::from_str(&val)
-			.ok_or_else(|| format!("Unknown config file format from settings value '{}'", val))?
+		ConfigFileFormat::from_str(&val).ok_or_else(|| {
+			Error::Input(format!("Unknown config file format from settings value '{}'", val).into())
+		})?
 	} else if let Some(ext) = config_path.extension() {
 		ConfigFileFormat::from_os_str(ext).ok_or_else(|| {
 			if let Some(ext) = ext.to_str() {
-				format!("Unknown file extension '{}'", ext)
+				Error::Input(format!("Unknown file extension '{}'", ext).into())
 			} else {
-				"Unknown file extension".to_owned()
+				Error::Input("Unknown file extension".into())
 			}
 		})?
 	} else {
-		return Err("Unable to determine config file format.".into());
+		return Err(Error::Input(
+			"Unable to determine config file format.".into(),
+		));
 	};
 
-	let conf = read_config(config_file, &format)?;
+	let conf = read_config(config_file, &format).map_err(Error::Config)?;
 
 	let rt = Runtime::new()?;
 
 	#[cfg(feature = "use-tui")]
 	{
 		let use_tui = opts.tui;
-		tui_utils::run_with_tui(use_tui, conf, rt)?;
+		tui_utils::run_with_tui(use_tui, conf, rt).map_err(Error::Runtime)?;
 	}
 	#[cfg(not(feature = "use-tui"))]
 	{
 		// Initialize logger
-		init_logger(&conf.log)?;
-		let server = Arc::new(conf.server.build()?);
+		init_logger(&conf.log).map_err(Error::Config)?;
+		let server = Arc::new(conf.server.build().map_err(|e| Error::Config(Box::new(e)))?);
 		if let Err(err) = rt.block_on(server.serve(None)) {
-			return Err(err);
+			return Err(Error::Runtime(err));
 		};
 	}
 
@@ -139,8 +154,18 @@ fn serve() -> Result<(), BoxStdErr> {
 }
 
 fn main() {
-	if let Err(err) = serve() {
+	let opts = AppOptions::parse_args_default_or_exit();
+	if opts.version {
+		println!("{}", VERSION);
+		return;
+	}
+	if let Err(err) = serve(opts) {
 		println!("Error happened during initialization:\n {}\n", err);
+		std::process::exit(match err {
+			Error::Io(_) => exitcode::IOERR,
+			Error::Input(_) | Error::Config(_) => exitcode::CONFIG,
+			Error::Runtime(_) => exitcode::SOFTWARE,
+		});
 	}
 }
 
@@ -229,7 +254,9 @@ fn init_logger(conf: &config::Log) -> Result<(), BoxStdErr> {
 	let dispatch = fern::Dispatch::new()
 		.level(conf.level)
 		.format(move |out, message, record| {
-			let now_str = time::OffsetDateTime::now_utc().format(&time_format).unwrap();
+			let now_str = time::OffsetDateTime::now_utc()
+				.format(&time_format)
+				.unwrap();
 			let target = if record.level() <= log::Level::Info {
 				// For info, warn, error
 				""

@@ -529,6 +529,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "exitcode"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de853764b47027c2e862a995c34978ffa63c1501f2e15f987ba11bd4f9bba193"
+
+[[package]]
 name = "fern"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1647,6 +1653,7 @@ name = "rusty_ladder"
 version = "0.1.1"
 dependencies = [
  "crossterm",
+ "exitcode",
  "fern",
  "futures",
  "gumdrop",
@@ -1655,6 +1662,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "thiserror",
  "time 0.3.5",
  "tokio",
  "toml",
