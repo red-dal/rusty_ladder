@@ -27,7 +27,18 @@
 ## Optional.
 ##
 ## Defaults: 300
+## ```
 # relay_timeout_secs = 300
+## ```
+
+## Udp socket/tunnel session will be dropped if there is no read or write for more than
+## this amount of time.
+## Optional.
+##
+## Defaults: 20000
+## ```
+# udp_session_timeout_ms = 20000
+## ```
 
 ## Logging settings.
 ## Optional.
