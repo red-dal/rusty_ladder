@@ -171,14 +171,14 @@ chain-outbound = []
 trojan-outbound = ["sha2", "__transport-outbound"]
 
 # Enable local DNS server.
-dns = [
-	"trust-dns-server",
-	"trust-dns-client",
-	"tokio-rustls",
-	"webpki-roots",
-	"trust-dns-https",
-	"lru",
-]
+# dns = [
+# 	"trust-dns-server",
+# 	"trust-dns-client",
+# 	"tokio-rustls",
+# 	"webpki-roots",
+# 	"trust-dns-https",
+# 	"lru",
+# ]
 
 # Enable serde support for configuration builder.
 use_serde = ["serde"]
@@ -224,7 +224,6 @@ num_enum = "0.5"
 parking_lot = "0.11"
 lazy_static = "1.4"
 thiserror = "1.0"
-ahash = "0.7"
 
 # Web API
 warp = { version = "0.3", optional = true, default-features = false, features = [
@@ -236,12 +235,12 @@ protobuf = { version = "2.24", optional = true }
 regex = { version = "1.5", optional = true }
 
 # DNS
-trust-dns-server = { version = "0.20", optional = true }
-trust-dns-client = { version = "0.20", optional = true, features = [
-	"dns-over-https-rustls",
-] }
-trust-dns-https = { version = "0.20", optional = true }
-lru = { version = "0.6", optional = true, default-features = false }
+# trust-dns-server = { version = "0.20", optional = true }
+# trust-dns-client = { version = "0.20", optional = true, features = [
+# 	"dns-over-https-rustls",
+# ] }
+# trust-dns-https = { version = "0.20", optional = true }
+# lru = { version = "0.6", optional = true, default-features = false }
 
 # H2
 h2 = { version = "0.3", features = ["stream"], optional = true }

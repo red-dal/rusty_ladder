@@ -47,10 +47,6 @@ use regex::Regex;
 type Domain = SmolStr;
 type Tag = SmolStr;
 
-// Use ahash to improve performance
-type DomainHasher = ahash::AHasher;
-type DomainHasherBuilder = std::hash::BuildHasherDefault<DomainHasher>;
-
 /// All fields are considered allow all if empty
 #[derive(Default, Debug)]
 pub struct Rule {
@@ -258,11 +254,11 @@ pub enum CidrMode {
 
 #[derive(Default, Debug)]
 pub struct DestinationContainer {
-	pub ips: HashSet<IpAddr, DomainHasherBuilder>,
+	pub ips: HashSet<IpAddr>,
 	pub cidrs: Vec<(Cidr, CidrMode)>,
-	pub domains: HashSet<Domain, DomainHasherBuilder>,
+	pub domains: HashSet<Domain>,
 	pub substrings: Vec<SmolStr>,
-	pub full_domains: HashSet<Domain, DomainHasherBuilder>,
+	pub full_domains: HashSet<Domain>,
 	#[cfg(feature = "use-router-regex")]
 	pub regex_domains: Vec<Regex>,
 }
