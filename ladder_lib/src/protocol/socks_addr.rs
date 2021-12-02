@@ -49,7 +49,7 @@ pub enum ReadError {
 	#[error("'{0}' is not a valid domain ({1})")]
 	InvalidDomain(String, idna::Errors),
 	#[error("empty domain name")]
-	EmptyDomainName,
+	DomainNameEmpty,
 	#[error("domain name length larger than 255")]
 	DomainNameTooLong,
 	#[error("invalid port {0} ({1})")]
@@ -93,25 +93,11 @@ impl SocksDestination {
 	}
 
 	#[inline]
-	#[must_use]
 	/// Create a new `SocksDestination` from [`str`].
-	///
-	/// # Panics
-	/// Panics if the length of `name` is larger than 255.
-	pub fn new_domain_str(name: &str) -> Self {
-		Self::Name(DomainName::new_from_str(name).expect("domain length cannot be larger than 255"))
-	}
-
-	#[inline]
-	#[must_use]
-	/// Create a new `SocksDestination` from [`SmolStr`].
-	///
-	/// # Panics
-	/// Panics if the length of `name` is larger than 255.
-	pub fn new_domain_smol(name: SmolStr) -> Self {
-		Self::Name(
-			DomainName::new_from_smol(name).expect("domain length cannot be larger than 255"),
-		)
+	/// # Errors
+	/// Return a [`ReadError`] if `value` is not a valid domain name.
+	pub fn new_domain(value: impl AsRef<str>) -> Result<Self, ReadError> {
+		DomainName::from_str(value.as_ref()).map(SocksDestination::Name)
 	}
 
 	#[inline]
@@ -171,7 +157,7 @@ impl SocksDestination {
 				r.read_exact(&mut len)?;
 				let len = len[0];
 				if len == 0 {
-					return Err(ReadError::EmptyDomainName);
+					return Err(ReadError::DomainNameEmpty);
 				}
 				// Domain length is a u8, which will never be larger than 256.
 				let mut buffer = [0_u8; 256];
@@ -199,7 +185,7 @@ impl SocksDestination {
 			AddrType::Name => {
 				let len = r.read_u8().await?;
 				if len == 0 {
-					return Err(ReadError::EmptyDomainName);
+					return Err(ReadError::DomainNameEmpty);
 				}
 				// Domain length is a u8, which will never be larger than 256.
 				let mut buffer = [0_u8; 256];
@@ -253,7 +239,7 @@ impl FromStr for SocksDestination {
 	type Err = ReadError;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		if s.is_empty() {
-			return Err(ReadError::EmptyDomainName);
+			return Err(ReadError::DomainNameEmpty);
 		}
 		let _ip_err = match IpAddr::from_str(s) {
 			Ok(ip) => return Ok(Self::Ip(ip)),
@@ -437,7 +423,7 @@ impl SocksAddr {
 
 		let mut split = s.split_terminator(':');
 
-		let host_str = split.next().ok_or(ReadError::EmptyDomainName)?;
+		let host_str = split.next().ok_or(ReadError::DomainNameEmpty)?;
 
 		let port_str = split.next();
 
@@ -572,33 +558,6 @@ mod serde_internal {
 pub struct DomainName(SmolStr);
 
 impl DomainName {
-	#[must_use]
-	fn new_from_str(val: &str) -> Option<Self> {
-		if u8::try_from(val.len()).is_ok() {
-			Some(Self(SmolStr::from(val)))
-		} else {
-			None
-		}
-	}
-
-	#[must_use]
-	fn new_from_smol(val: SmolStr) -> Option<Self> {
-		if u8::try_from(val.len()).is_ok() {
-			Some(Self(val))
-		} else {
-			None
-		}
-	}
-
-	#[must_use]
-	fn new_from_string(val: String) -> Option<Self> {
-		if u8::try_from(val.len()).is_ok() {
-			Some(Self(SmolStr::from(val)))
-		} else {
-			None
-		}
-	}
-
 	#[inline]
 	#[must_use]
 	pub fn as_str(&self) -> &str {
@@ -624,9 +583,17 @@ impl std::str::FromStr for DomainName {
 	type Err = ReadError;
 
 	fn from_str(v: &str) -> Result<Self, ReadError> {
+		if v.is_empty() {
+			return Err(ReadError::DomainNameEmpty);
+		}
+		if v.len() > 256 {
+			return Err(ReadError::DomainNameTooLong);
+		}
+		// Remove the final dot '.' if possible.
+		let v = v.strip_suffix('.').unwrap_or(v);
 		let name = idna::domain_to_ascii_strict(v)
 			.map_err(|e| ReadError::InvalidDomain(v.to_owned(), e))?;
-		Self::new_from_string(name).ok_or(ReadError::DomainNameTooLong)
+		Ok(Self(SmolStr::new(&name)))
 	}
 }
 
@@ -725,7 +692,7 @@ mod host_tests {
 		expected_buffer.put_slice(name.as_bytes());
 
 		let mut result = vec![];
-		SocksDestination::new_domain_str(name).write_to_no_atyp(&mut result);
+		SocksDestination::new_domain(name).unwrap().write_to_no_atyp(&mut result);
 		assert_eq!(expected_buffer, result);
 	}
 
@@ -777,7 +744,7 @@ mod host_tests {
 				SocksDestination::async_read_from_atyp(&mut Cursor::new(input), AddrType::Name)
 					.await
 					.unwrap();
-			assert_eq!(result, SocksDestination::new_domain_str(name));
+			assert_eq!(result, SocksDestination::new_domain(name).unwrap());
 		});
 	}
 
@@ -817,7 +784,7 @@ mod host_tests {
 		input.put_slice(name.as_bytes());
 
 		let result = SocksDestination::read_from_atyp(&mut Cursor::new(&input), atyp).unwrap();
-		assert_eq!(result, SocksDestination::new_domain_str(name));
+		assert_eq!(result, SocksDestination::new_domain(name).unwrap());
 		assert_eq!(result.serialized_len_atyp() - 1, input.len());
 	}
 
@@ -843,7 +810,7 @@ mod host_tests {
 	fn test_dest_parse_name() {
 		let name = "hello.world";
 		assert_eq!(
-			SocksDestination::new_domain_str(name),
+			SocksDestination::new_domain(name).unwrap(),
 			SocksDestination::from_str(name).unwrap()
 		)
 	}
@@ -852,7 +819,7 @@ mod host_tests {
 	fn test_dest_parse_error_empty() {
 		assert!(matches!(
 			SocksDestination::from_str("").unwrap_err(),
-			ReadError::EmptyDomainName
+			ReadError::DomainNameEmpty
 		));
 	}
 
@@ -889,7 +856,7 @@ mod host_tests {
 	#[test]
 	fn test_dest_display_name() {
 		let name = "hello.world";
-		assert_eq!(name, SocksDestination::new_domain_str(name).to_string());
+		assert_eq!(name, SocksDestination::new_domain(name).unwrap().to_string());
 	}
 
 	#[test]
@@ -907,6 +874,6 @@ mod host_tests {
 	#[test]
 	fn test_dest_to_str_name() {
 		let name = "hello.world";
-		assert_eq!(name, SocksDestination::new_domain_str(name).to_str());
+		assert_eq!(name, SocksDestination::new_domain(name).unwrap().to_str());
 	}
 }

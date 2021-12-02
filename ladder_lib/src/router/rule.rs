@@ -30,10 +30,12 @@ const GEOSITE_PREFIX: &str = "geosite";
 #[allow(dead_code)]
 const GEOIP_PREFIX: &str = "geoip";
 
-use crate::protocol::SocksDestination;
 use super::Cidr;
+use crate::protocol::{socks_addr::DomainName, SocksDestination};
 use smol_str::SmolStr;
-use std::{borrow::Cow, collections::HashSet, net::IpAddr, str::FromStr};
+use std::{collections::HashSet, net::IpAddr, str::FromStr};
+#[cfg(feature = "use-protobuf")]
+use std::borrow::Cow;
 
 #[cfg(feature = "use-protobuf")]
 use super::protos::rules as proto;
@@ -44,7 +46,6 @@ use crate::prelude::BoxStdErr;
 #[cfg(feature = "use-router-regex")]
 use regex::Regex;
 
-type Domain = SmolStr;
 type Tag = SmolStr;
 
 /// All fields are considered allow all if empty
@@ -114,9 +115,9 @@ pub enum Error {
 	#[error("empty outbound tag")]
 	EmptyOutboundTag,
 	#[error("invalid source ({0})")]
-	InvalidSource(Cow<'static, str>),
+	InvalidSource(BoxStdErr),
 	#[error("invalid destination ({0})")]
-	InvalidDestination(Cow<'static, str>),
+	InvalidDestination(BoxStdErr),
 	#[cfg(feature = "use-router-regex")]
 	#[error("regex error ({0})")]
 	Regex(regex::Error),
@@ -256,9 +257,9 @@ pub enum CidrMode {
 pub struct DestinationContainer {
 	pub ips: HashSet<IpAddr>,
 	pub cidrs: Vec<(Cidr, CidrMode)>,
-	pub domains: HashSet<Domain>,
+	pub domains: HashSet<DomainName>,
 	pub substrings: Vec<SmolStr>,
-	pub full_domains: HashSet<Domain>,
+	pub full_domains: HashSet<DomainName>,
 	#[cfg(feature = "use-router-regex")]
 	pub regex_domains: Vec<Regex>,
 }
@@ -349,23 +350,17 @@ impl DestinationContainer {
 	///
 	/// Returns `false` if container already had this value in present.
 	#[allow(clippy::map_unwrap_or)]
-	pub fn push_domain(&mut self, domain: impl Into<SmolStr> + std::borrow::Borrow<str>) -> bool {
-		// Remove tailing '.'
-		let name = domain
-			.borrow()
-			.strip_suffix('.')
-			.map(SmolStr::from)
-			.unwrap_or_else(|| domain.into());
+	pub fn push_domain(&mut self, value: DomainName) -> bool {
 		// Generate hash
-		self.domains.insert(name)
+		self.domains.insert(value)
 	}
 
 	pub fn push_domain_substr(&mut self, substr: impl Into<SmolStr>) {
 		self.substrings.push(substr.into());
 	}
 
-	pub fn push_domain_full(&mut self, domain: impl Into<SmolStr>) {
-		self.full_domains.insert(domain.into());
+	pub fn push_domain_full(&mut self, value: DomainName) {
+		self.full_domains.insert(value);
 	}
 
 	#[cfg(feature = "use-router-regex")]
@@ -482,12 +477,12 @@ impl DestinationContainer {
 				}
 			}
 			proto::Domain_Type::Domain => {
-				let val = idna::domain_to_ascii_strict(&domain.value)
+				let val = DomainName::from_str(&domain.value)
 					.map_err(|e| Error::InvalidDestination(e.to_string().into()))?;
 				self.push_domain(val);
 			}
 			proto::Domain_Type::Full => {
-				let val = idna::domain_to_ascii_strict(&domain.value)
+				let val = DomainName::from_str(&domain.value)
 					.map_err(|e| Error::InvalidDestination(e.to_string().into()))?;
 				self.push_domain_full(val);
 			}
@@ -500,7 +495,7 @@ impl DestinationContainer {
 		&mut self,
 		proto_cidr: &proto::CIDR,
 		mode: CidrMode,
-	) -> Result<(), Cow<'static, str>> {
+	) -> Result<(), BoxStdErr> {
 		use std::{cmp::Ordering, convert::TryFrom};
 
 		let ip_slice = proto_cidr.ip.as_slice();
@@ -640,9 +635,9 @@ impl PrefixType {
 pub enum Destination {
 	Ip(IpAddr),
 	Cidr(Cidr),
-	Domain(Domain),
+	Domain(DomainName),
 	DomainSubstring(SmolStr),
-	FullDomain(Domain),
+	FullDomain(DomainName),
 	#[cfg(feature = "use-router-regex")]
 	Regex(Regex),
 	#[cfg(feature = "use-protobuf")]
@@ -670,71 +665,53 @@ impl FromStr for Destination {
 			return Ok(Self::Cidr(cidr));
 		}
 
-		// Checking format [prefix]:[name]
-		if let Some((prefix, name)) = value.split_once(':') {
+		let (prefix_type, name) = if let Some((prefix, name)) = value.split_once(':') {
 			let prefix_type = PrefixType::from_str(prefix).ok_or_else(|| {
 				let msg = format!("unknown prefix '{}' in '{}'", prefix, value);
 				Error::InvalidDestination(msg.into())
 			})?;
-			// Check for geosite or geoip or regex or substring
-			#[allow(clippy::match_wildcard_for_single_variants)]
-			match prefix_type {
-				#[cfg(feature = "use-protobuf")]
-				PrefixType::GeoSite => {
-					let (file, tag) = name.split_once(':').ok_or_else(|| {
-						Error::InvalidDestination(
-							format!("invalid destination geosite '{}' in '{}'", name, value).into(),
-						)
-					})?;
-					return Ok(Self::GeoSite {
-						file_path: file.to_owned().into(),
-						tag: tag.to_owned().into(),
-					});
-				}
-				#[cfg(feature = "use-protobuf")]
-				PrefixType::GeoIp => {
-					let (file, tag) = name.split_once(':').ok_or_else(|| {
-						Error::InvalidDestination(
-							format!("invalid destination geoip '{}' in '{}'", name, value).into(),
-						)
-					})?;
-					return Ok(Self::GeoIp {
-						file_path: file.to_owned().into(),
-						tag: tag.to_owned().into(),
-					});
-				}
-				#[cfg(feature = "use-router-regex")]
-				PrefixType::Regex => {
-					return Ok(Self::Regex(Regex::new(name).map_err(Error::Regex)?));
-				}
-				PrefixType::DomainSubstring => return Ok(Self::DomainSubstring(name.into())),
-				PrefixType::FullDomain => return Ok(Self::FullDomain(name.into())),
-				_ => {}
-			}
-			// Check for domain
-			let domain = idna::domain_to_ascii_strict(name).map_err(|e| {
-				let msg = format!("invalid domain '{}' in '{}' ({})", name, value, e);
-				Error::InvalidDestination(msg.into())
-			})?;
-
-			let res = if PrefixType::Domain == prefix_type {
-				Self::Domain(domain.into())
-			} else {
-				let msg = format!("invalid domain '{}' in '{}'", domain, value);
-				return Err(Error::InvalidDestination(msg.into()));
-			};
-			Ok(res)
+			(prefix_type, name)
 		} else {
-			let domain = idna::domain_to_ascii_strict(value).map_err(|e| {
-				let msg = format!(
-					"'{}' is not a valid IP address, CIDR, or domain name ({})",
-					value, e
-				);
-				Error::InvalidDestination(msg.into())
-			})?;
-			Ok(Self::Domain(domain.into()))
+			// Use Domain if empty
+			(PrefixType::Domain, value)
+		};
+
+		match prefix_type {
+			#[cfg(feature = "use-protobuf")]
+			PrefixType::GeoSite => {
+				let (file, tag) = name.split_once(':').ok_or_else(|| {
+					Error::InvalidDestination(
+						format!("invalid destination geosite '{}' in '{}'", name, name).into(),
+					)
+				})?;
+				Ok(Self::GeoSite {
+					file_path: file.to_owned().into(),
+					tag: tag.to_owned().into(),
+				})
+			}
+			#[cfg(feature = "use-protobuf")]
+			PrefixType::GeoIp => {
+				let (file, tag) = name.split_once(':').ok_or_else(|| {
+					Error::InvalidDestination(
+						format!("invalid destination geoip '{}' in '{}'", name, name).into(),
+					)
+				})?;
+				Ok(Self::GeoIp {
+					file_path: file.to_owned().into(),
+					tag: tag.to_owned().into(),
+				})
+			}
+			#[cfg(feature = "use-router-regex")]
+			PrefixType::Regex => Ok(Self::Regex(Regex::new(name).map_err(Error::Regex)?)),
+			PrefixType::DomainSubstring => Ok(Self::DomainSubstring(name.into())),
+			PrefixType::FullDomain => Ok(Self::FullDomain(new_domain_for_dest(name)?)),
+			PrefixType::Domain => Ok(Self::Domain(new_domain_for_dest(name)?)),
 		}
 	}
+}
+
+fn new_domain_for_dest(domain: &str) -> Result<DomainName, Error> {
+	DomainName::from_str(domain).map_err(|e| Error::InvalidDestination(e.into()))
 }
 
 #[cfg(feature = "use_serde")]
@@ -805,10 +782,10 @@ mod tests {
 
 	#[test]
 	fn test_destination_from_str_domain() {
-		let domain = "this.is-a.domain";
-		let result = Destination::from_str(domain).unwrap();
+		let domain_str = "this.is-a.domain";
+		let result = Destination::from_str(domain_str).unwrap();
 		if let Destination::Domain(name) = &result {
-			assert_eq!(name, domain)
+			assert_eq!(name, &DomainName::from_str(domain_str).unwrap())
 		} else {
 			panic!("Destination {:?} is not a domain", result);
 		}
@@ -876,11 +853,11 @@ mod tests {
 
 	#[test]
 	fn test_destination_from_str_full_domain() {
-		let domain = "this.is-a.full.domain";
-		let value = &format!("full:{}", domain);
+		let domain_str = "this.is-a.full.domain";
+		let value = "full:this.is-a.full.domain";
 		let result = Destination::from_str(value).unwrap();
 		if let Destination::FullDomain(res_domain) = &result {
-			assert_eq!(res_domain, domain)
+			assert_eq!(res_domain, &DomainName::from_str(domain_str).unwrap())
 		} else {
 			panic!("Destination {:?} is not a FullDomain", result);
 		}
@@ -916,7 +893,7 @@ mod tests {
 		let data = ["a.com", "b.a.com", "c.b.a.com", "bad.website"];
 		let mut dc = DestinationContainer::default();
 		for name in data {
-			dc.push_domain(name);
+			dc.push_domain(DomainName::from_str(name).unwrap());
 		}
 		for name in data {
 			println!("try to find name: {} in {:?}", name, data);
@@ -935,7 +912,7 @@ mod tests {
 		let data = ["a.com", "b.a.com", "c.b.a.com", "bad.website"];
 		let mut dc = DestinationContainer::default();
 		for name in data {
-			dc.push_domain(name);
+			dc.push_domain(DomainName::from_str(name).unwrap());
 		}
 		for name in data {
 			println!("try to find name: {} in {:?}", name, data);
@@ -950,7 +927,7 @@ mod tests {
 	#[test]
 	fn test_destination_container_contain_domain() {
 		let mut c = DestinationContainer::default();
-		c.push_domain("normal.domain");
+		c.push_domain(DomainName::from_str("normal.domain").unwrap());
 
 		// True
 		assert!(c.contains_domain("this-is.normal.domain"));
@@ -966,7 +943,7 @@ mod tests {
 	#[test]
 	fn test_destination_container_contain_domain_full() {
 		let mut c = DestinationContainer::default();
-		c.push_domain_full("full.domain");
+		c.push_domain_full(DomainName::from_str("full.domain").unwrap());
 
 		// True
 		assert!(c.contains_domain("full.domain"));
@@ -1012,8 +989,8 @@ mod tests {
 	#[test]
 	fn test_destination_container_contain_domain_mixed() {
 		let mut c = DestinationContainer::default();
-		c.push_domain("normal.domain");
-		c.push_domain_full("full.domain");
+		c.push_domain(DomainName::from_str("normal.domain").unwrap());
+		c.push_domain_full(DomainName::from_str("full.domain").unwrap());
 		c.push_domain_regex(Regex::new(r"re.*-.*\.domain$").unwrap());
 		c.push_domain_substr("substr");
 
