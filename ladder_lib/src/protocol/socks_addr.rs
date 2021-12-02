@@ -46,8 +46,8 @@ pub enum ReadError {
 	StrUtf8(std::str::Utf8Error),
 	#[error("unknown address type {0}")]
 	UnknownAddressType(u8),
-	#[error("'{0}' is not an IP ({1}) and not a valid name ({2})")]
-	InvalidDomain(String, std::net::AddrParseError, idna::Errors),
+	#[error("'{0}' is not a valid domain ({1})")]
+	InvalidDomain(String, idna::Errors),
 	#[error("empty domain name")]
 	EmptyDomainName,
 	#[error("domain name length larger than 255")]
@@ -255,19 +255,11 @@ impl FromStr for SocksDestination {
 		if s.is_empty() {
 			return Err(ReadError::EmptyDomainName);
 		}
-		let ip_err = match IpAddr::from_str(s) {
+		let _ip_err = match IpAddr::from_str(s) {
 			Ok(ip) => return Ok(Self::Ip(ip)),
 			Err(e) => e,
 		};
-		let name_err = match idna::domain_to_ascii_strict(s) {
-			Ok(name) => {
-				return Ok(Self::Name(
-					DomainName::new_from_string(name).ok_or(ReadError::DomainNameTooLong)?,
-				))
-			}
-			Err(e) => e,
-		};
-		Err(ReadError::InvalidDomain(s.to_owned(), ip_err, name_err))
+		DomainName::from_str(s).map(Self::Name)
 	}
 }
 
@@ -581,7 +573,7 @@ pub struct DomainName(SmolStr);
 
 impl DomainName {
 	#[must_use]
-	pub fn new_from_str(val: &str) -> Option<Self> {
+	fn new_from_str(val: &str) -> Option<Self> {
 		if u8::try_from(val.len()).is_ok() {
 			Some(Self(SmolStr::from(val)))
 		} else {
@@ -590,7 +582,7 @@ impl DomainName {
 	}
 
 	#[must_use]
-	pub fn new_from_smol(val: SmolStr) -> Option<Self> {
+	fn new_from_smol(val: SmolStr) -> Option<Self> {
 		if u8::try_from(val.len()).is_ok() {
 			Some(Self(val))
 		} else {
@@ -599,7 +591,7 @@ impl DomainName {
 	}
 
 	#[must_use]
-	pub fn new_from_string(val: String) -> Option<Self> {
+	fn new_from_string(val: String) -> Option<Self> {
 		if u8::try_from(val.len()).is_ok() {
 			Some(Self(SmolStr::from(val)))
 		} else {
@@ -625,6 +617,16 @@ impl DomainName {
 	#[must_use]
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
+	}
+}
+
+impl std::str::FromStr for DomainName {
+	type Err = ReadError;
+
+	fn from_str(v: &str) -> Result<Self, ReadError> {
+		let name = idna::domain_to_ascii_strict(v)
+			.map_err(|e| ReadError::InvalidDomain(v.to_owned(), e))?;
+		Self::new_from_string(name).ok_or(ReadError::DomainNameTooLong)
 	}
 }
 
@@ -859,14 +861,14 @@ mod host_tests {
 		assert!(
 			matches!(
 				SocksDestination::from_str("bad.host_name").unwrap_err(),
-				ReadError::InvalidDomain(_, _, _)
+				ReadError::InvalidDomain(_, _)
 			),
 			"'_' should not be accepted"
 		);
 		assert!(
 			matches!(
 				SocksDestination::from_str("bad*.domain").unwrap_err(),
-				ReadError::InvalidDomain(_, _, _)
+				ReadError::InvalidDomain(_, _)
 			),
 			"'*' should not be accepted"
 		);

@@ -54,7 +54,7 @@ type ArcValidator = Arc<AsyncMutex<UserValidator>>;
 #[cfg(feature = "vmess-legacy-auth")]
 use user_validator::spawn_update_task;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[cfg_attr(
 	feature = "use_serde",
 	derive(serde::Deserialize),

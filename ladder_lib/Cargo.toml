@@ -1,7 +1,7 @@
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [package]
 name = "ladder_lib"
-version = "0.0.3"
+version = "0.0.4"
 authors = ["reddal"]
 edition = "2018"
 
@@ -171,14 +171,10 @@ chain-outbound = []
 trojan-outbound = ["sha2", "__transport-outbound"]
 
 # Enable local DNS server.
-# dns = [
-# 	"trust-dns-server",
-# 	"trust-dns-client",
-# 	"tokio-rustls",
-# 	"webpki-roots",
-# 	"trust-dns-https",
-# 	"lru",
-# ]
+dns = [
+	"trust-dns-server",
+	"trust-dns-client",
+]
 
 # Enable serde support for configuration builder.
 use_serde = ["serde"]
@@ -235,12 +231,8 @@ protobuf = { version = "2.24", optional = true }
 regex = { version = "1.5", optional = true }
 
 # DNS
-# trust-dns-server = { version = "0.20", optional = true }
-# trust-dns-client = { version = "0.20", optional = true, features = [
-# 	"dns-over-https-rustls",
-# ] }
-# trust-dns-https = { version = "0.20", optional = true }
-# lru = { version = "0.6", optional = true, default-features = false }
+trust-dns-server = { version = "0.20", optional = true }
+trust-dns-client = { version = "0.20", optional = true }
 
 # H2
 h2 = { version = "0.3", features = ["stream"], optional = true }
