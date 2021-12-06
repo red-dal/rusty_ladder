@@ -19,22 +19,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 // mod connector;
 mod destination;
+mod dns_client;
 
+use super::Server;
 use crate::{
 	prelude::*,
-	protocol::{
-		outbound::Error as OutboundError, outbound::TcpConnector, BytesStream, ProxyContext,
-	},
+	protocol::{outbound::Error as OutboundError, BytesStream},
 };
 use destination::DnsDestination;
-use futures::{lock::Mutex as AsyncMutex, Future, FutureExt};
+use dns_client::DnsClient;
+use futures::Future;
 use std::{
 	io,
 	task::{Context, Poll},
 };
 use thiserror::Error;
 use tokio::net::UdpSocket;
-use trust_dns_client::client::{AsyncClient, ClientHandle};
 use trust_dns_server::{
 	authority::{EmptyLookup, LookupObject, MessageResponseBuilder},
 	proto::{self, error::ProtoError},
@@ -56,189 +56,30 @@ pub struct Config {
 #[cfg(all(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
 compile_error!("Cannot use `dns-over-openssl` and `dns-over-rustls` at the same time");
 
-// TODO:
-// - Auto reconnect
-
 impl Config {
-	pub(super) async fn serve(&self, ctx: Arc<super::Server>) -> Result<(), BoxStdErr> {
+	pub(super) async fn serve(&self, ctx: Arc<Server>) -> Result<(), BoxStdErr> {
 		log::debug!(
 			"Proxying DNS queries from {} to {}",
 			self.bind_addr,
 			self.server_addr
 		);
-		let server_addr = self.server_addr.clone();
-
-		let (client, client_background_task, server_addr) = match server_addr {
-			DnsDestination::Udp(addr) => self.connect_udp(ctx, addr).await,
-			DnsDestination::Tcp(addr) => self.connect_tcp(ctx, addr).await,
-			#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
-			DnsDestination::Tls(addr) => self.connect_tls(ctx, addr).await,
-		}?;
-
-		let client = Arc::new(AsyncMutex::new(client));
+		let dns_client = DnsClient::new(
+			self.tag.clone(),
+			ctx,
+			self.bind_addr,
+			self.server_addr.clone(),
+		);
 
 		let sock = UdpSocket::bind(self.bind_addr).await?;
 		let mut server_future = trust_dns_server::ServerFuture::new(ProxyRequestHandler {
-			client,
-			server_addr,
+			dns_client: Arc::new(dns_client),
 		});
 		server_future.register_socket(sock);
-		let serve_task = async move {
-			server_future
-				.block_until_done()
-				.await
-				.map_err(|e| Box::new(e) as BoxStdErr)
-		};
-		futures::future::try_join(serve_task, async move {
-			client_background_task.await?;
-			Ok(())
-		})
-		.await?;
-
-		Ok(())
+		server_future
+			.block_until_done()
+			.await
+			.map_err(|e| Box::new(e) as BoxStdErr)
 	}
-
-	async fn connect_udp(
-		&self,
-		_ctx: Arc<super::Server>,
-		server_addr: SocketAddr,
-	) -> Result<(AsyncClient, BoxBackgroundFut, SocksAddr), BoxStdErr> {
-		info!(
-			"Running DNS server on {}, proxy all requests to DNS server '{}' (UDP)",
-			self.bind_addr, server_addr
-		);
-		let (client, bg) = if let Some(tag) = &self.tag {
-			let msg = format!(
-				"UDP DNS cannot use outbound '{}' as transport currently.",
-				tag
-			);
-			error!("{}", msg);
-			return Err(msg.into());
-		} else {
-			let stream = proto::udp::UdpClientStream::<tokio::net::UdpSocket>::new(server_addr);
-			let (client, bg) = AsyncClient::connect(stream).await?;
-			(client, Box::pin(bg) as BoxBackgroundFut)
-		};
-		Ok((client, bg, server_addr.into()))
-	}
-
-	async fn connect_tcp(
-		&self,
-		ctx: Arc<super::Server>,
-		server_addr: SocketAddr,
-	) -> Result<(AsyncClient, BoxBackgroundFut, SocksAddr), BoxStdErr> {
-		info!(
-			"Running DNS server on {}, proxy all requests to DNS server '{}' through TCP",
-			self.bind_addr, server_addr
-		);
-
-		let (client, bg_task) = {
-			let stream =
-				create_transport_stream_timedout(&server_addr.into(), &ctx, self.tag.as_ref())
-					.await?;
-			connect_async_client_over_stream(stream, server_addr).await?
-		};
-
-		Ok((client, bg_task, server_addr.into()))
-	}
-
-	#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
-	async fn connect_tls(
-		&self,
-		ctx: Arc<super::Server>,
-		server_addr: SocksAddr,
-	) -> Result<(AsyncClient, BoxBackgroundFut, SocksAddr), BoxStdErr> {
-		use crate::utils::tls;
-		info!(
-			"Running DNS server on {}, proxy all requests to DNS server '{}' through TLS",
-			self.bind_addr, server_addr
-		);
-		let (client, bg_task) = {
-			let stream =
-				create_transport_stream_timedout(&server_addr, &ctx, self.tag.as_ref()).await?;
-			debug!(
-				"DNS transport connected, establishing TLS connection to '{}'",
-				server_addr
-			);
-			let tls_stream = tls::Connector::new(vec![], "")?
-				.connect(stream, &server_addr)
-				.await?;
-			debug!("DNS over TLS connected");
-			// Use 0.0.0.0:0 for now.
-			connect_async_client_over_stream(tls_stream, SocketAddr::new([0, 0, 0, 0].into(), 0))
-				.await?
-		};
-
-		Ok((client, bg_task, server_addr.clone()))
-	}
-}
-
-async fn create_transport_stream_timedout(
-	addr: &SocksAddr,
-	ctx: &super::Server,
-	outbound_tag: Option<&Tag>,
-) -> Result<BytesStream, BoxStdErr> {
-	let outbound = outbound_tag
-		.map(|tag| {
-			ctx.get_outbound(tag)
-				.ok_or_else(|| DnsError::UnknownTag(tag.clone()))
-		})
-		.transpose()?;
-
-	if let Some(tag) = outbound_tag {
-		debug!(
-			"Connecting to DNS server '{}' with outbound '{}'",
-			addr, tag
-		);
-	} else {
-		debug!("Connecting to DNS server '{}'", addr);
-	}
-
-	let timeout_duration = ctx.outbound_handshake_timeout;
-	let task = async move {
-		// Raw TCP or outbound stream
-		let stream = if let Some(outbound) = outbound {
-			outbound.settings.connect(addr, ctx).await?
-		} else {
-			ctx.dial_tcp(addr).await?.into()
-		};
-		Ok::<_, BoxStdErr>(stream)
-	};
-	tokio::time::timeout(timeout_duration, task)
-		.map(|res| {
-			res.map_err(|_| {
-				io::Error::new(
-					io::ErrorKind::TimedOut,
-					"timeout when trying to establish connection to DNS server",
-				)
-			})?
-		})
-		.await
-}
-
-async fn connect_async_client_over_stream<S>(
-	stream: S,
-	server_addr: SocketAddr,
-) -> Result<(AsyncClient, BoxBackgroundFut), BoxStdErr>
-where
-	S: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync,
-{
-	let (tcp_stream, stream_handle) =
-		proto::tcp::TcpStream::from_stream(TokioToFutureAdapter::new(stream), server_addr);
-
-	// Make TcpClientStream and DnsStreamHandle with tcp_stream
-	let tcp_client_stream = proto::tcp::TcpClientStream::from_stream(tcp_stream);
-	let dns_stream_handle = proto::xfer::BufDnsStreamHandle::new(server_addr, stream_handle);
-
-	// Build multiplexer
-	let multiplexer = proto::xfer::DnsMultiplexer::new(
-		Box::pin(async move { Ok(tcp_client_stream) }),
-		Box::new(dns_stream_handle),
-		proto::op::message::NoopMessageFinalizer::new(),
-	);
-
-	let (client, bg) = AsyncClient::connect(multiplexer).await?;
-	Ok((client, Box::pin(bg) as BoxBackgroundFut))
 }
 
 #[derive(Error, Debug)]
@@ -252,8 +93,7 @@ enum DnsError {
 }
 
 struct ProxyRequestHandler {
-	client: Arc<AsyncMutex<AsyncClient>>,
-	server_addr: SocksAddr,
+	dns_client: Arc<DnsClient>,
 }
 
 type RequestFuture = dyn Future<Output = ()> + Send;
@@ -295,7 +135,6 @@ impl trust_dns_server::server::RequestHandler for ProxyRequestHandler {
 			debug!("DNS from {} query domain '{}'", request.src, query.name());
 			query_name = Some(query.name());
 		}
-
 		let query_name = if let Some(query_name) = query_name {
 			query_name
 		} else {
@@ -303,37 +142,18 @@ impl trust_dns_server::server::RequestHandler for ProxyRequestHandler {
 			// Returns nothing for containing no domains
 			return Box::pin(futures::future::ready(()));
 		};
-
 		let name = proto::rr::Name::from(query_name);
-
-		let client = self.client.clone();
-
-		let server_addr = self.server_addr.clone();
+		let client = self.dns_client.clone();
+		let server_addr = self.dns_client.server_addr.clone();
 		Box::pin(async move {
 			let mut response_handle = response_handle;
-
 			// Make a query
 			let response = {
-				let mut client = client.lock().await;
 				debug!(
 					"Sending DNS query for domain '{}' to '{}'",
 					name, server_addr
 				);
-				let query_result = client
-					.query(
-						name.clone(),
-						proto::rr::DNSClass::IN,
-						proto::rr::RecordType::A,
-					)
-					.await;
-
-				if let Err(e) = &query_result {
-					if let trust_dns_client::error::ClientErrorKind::Io(_e) = e.kind() {
-						todo!()
-					}
-				}
-
-				let response = match query_result {
+				let response = match client.query(name.clone(), proto::rr::RecordType::A).await {
 					Ok(response) => response,
 					Err(e) => {
 						error!(
@@ -345,7 +165,6 @@ impl trust_dns_server::server::RequestHandler for ProxyRequestHandler {
 				};
 				response
 			};
-
 			send_response(
 				&request,
 				&mut response_handle,
@@ -468,9 +287,13 @@ mod tests {
 		server::{self, Server},
 		test_utils::init_log,
 	};
+	use futures::FutureExt;
 	use lazy_static::lazy_static;
 	use std::{collections::HashMap, iter::FromIterator, time::Duration};
-	use trust_dns_client::rr::{DNSClass, RData, RecordType};
+	use trust_dns_client::{
+		client::{AsyncClient, ClientHandle},
+		rr::{DNSClass, RData, RecordType},
+	};
 	use trust_dns_server::server::RequestHandler;
 
 	const LOCALHOST: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
