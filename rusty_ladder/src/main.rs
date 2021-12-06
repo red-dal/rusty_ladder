@@ -29,7 +29,7 @@ use tokio::runtime::Runtime;
 type BoxStdErr = Box<dyn std::error::Error + Send + Sync>;
 
 const DEFAULT_CONF_PATH: &str = "config.toml";
-const VERSION: &str = "0.1.1";
+const VERSION: &str = "0.1.2";
 
 #[cfg(feature = "use-tui")]
 mod tui;

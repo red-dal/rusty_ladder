@@ -29,6 +29,9 @@ NO_OPENSSL_TARGET_LIST=(
     x86_64-pc-windows-gnu
 )
 
+FEATURES="use-tui all-transports-openssl all-proxies-openssl use-udp"
+WIN_FEATURES="use-tui all-transports-rustls all-proxies-ring use-udp"
+
 # Make docker images
 cd $BUILD_DIR
 for target in "${TARGET_LIST[@]}"; do
@@ -38,10 +41,10 @@ done
 cd $WORK_DIR
 export RUSTFLAGS='-C link-arg=-s'
 for target in "${TARGET_LIST[@]}"; do
-    cross build --release --target $target
+    cross build --release --no-default-features --features "$FEATURES" --target $target
 done
 for target in "${NO_OPENSSL_TARGET_LIST[@]}"; do
-    cross build --release --no-default-features --features "use-tui all-transports-rustls all-proxies-ring" --target $target
+    cross build --release --no-default-features --features "$WIN_FEATURES" --target $target
 done
 # Package
 cd $TARGET_DIR
