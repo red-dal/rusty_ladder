@@ -61,6 +61,34 @@
 [api]
     type = "none"
 
+## Local DNS server settings.
+## 
+## This is only available when feature 'dns' or 'dns-over-openssl' or 
+## 'dns-over-rustls' is enabled.
+## 
+## Optional.
+[dns]
+    ## Address of local UDP DNS server.
+    bind_addr = "127.0.0.1:33353"
+    ## Address of DNS server.
+    ## 
+	## This can be:
+    ## - DNS over UDP, e.g. "udp://223.5.5.5:53" or "223.5.5.5:53".
+    ##
+    ## - DNS over TCP, e.g. "tcp://223.5.5.5:53"
+    ##
+    ## - DNS over TLS (only available when feature 'dns-over-openssl' or 
+    ##      'dns-over-rustls' is enabled), e.g. "tls://dns.quad9.net:853"
+    ##
+    server_addr = "223.5.5.5:53"
+	## Which outbound should be used as transport.
+    ##
+	## Only DNS over TCP/TLS is supported.
+    ## Optional.
+    ## ```
+    # outbound_tag = "some_outbound_tag"
+    ## ```
+
 
 ## *****
 ## Please DO NOT use any key or password shown in this file

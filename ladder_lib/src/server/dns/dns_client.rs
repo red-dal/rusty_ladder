@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::{
-	BoxBackgroundFut, BytesStream, DnsDestination, DnsError, Server, TokioToFutureAdapter,
+	BoxBackgroundFut, BytesStream, DnsServerAddr, DnsError, Server, TokioToFutureAdapter,
 };
 use crate::{
 	prelude::*,
@@ -39,7 +39,7 @@ pub(super) struct DnsClient {
 	outbound_tag: Option<Tag>,
 	ctx: Arc<Server>,
 	pub bind_addr: SocketAddr,
-	pub server_addr: DnsDestination,
+	pub server_addr: DnsServerAddr,
 	client: Arc<AsyncMutex<Option<AsyncClient>>>,
 }
 
@@ -48,7 +48,7 @@ impl DnsClient {
 		outbound_tag: Option<Tag>,
 		ctx: Arc<Server>,
 		bind_addr: SocketAddr,
-		server_addr: DnsDestination,
+		server_addr: DnsServerAddr,
 	) -> Self {
 		Self {
 			outbound_tag,
@@ -103,12 +103,12 @@ impl DnsClient {
 			c
 		} else {
 			let (c, background_task) = match &self.server_addr {
-				DnsDestination::Udp(addr) => connect_udp(self.bind_addr, outbound_tag, *addr).await,
-				DnsDestination::Tcp(addr) => {
+				DnsServerAddr::Udp(addr) => connect_udp(self.bind_addr, outbound_tag, *addr).await,
+				DnsServerAddr::Tcp(addr) => {
 					connect_tcp(self.bind_addr, outbound_tag, ctx, *addr).await
 				}
 				#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
-				DnsDestination::Tls(addr) => connect_tls(self.bind_addr, outbound_tag, ctx, addr.clone()).await,
+				DnsServerAddr::Tls(addr) => connect_tls(self.bind_addr, outbound_tag, ctx, addr.clone()).await,
 			}?;
 			{
 				let arc_client = self.client.clone();

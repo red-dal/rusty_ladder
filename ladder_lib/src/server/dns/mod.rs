@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 // mod connector;
-mod destination;
+mod dns_server_addr;
 mod dns_client;
 
 use super::Server;
@@ -26,7 +26,7 @@ use crate::{
 	prelude::*,
 	protocol::{outbound::Error as OutboundError, BytesStream},
 };
-use destination::DnsDestination;
+use dns_server_addr::DnsServerAddr;
 use dns_client::DnsClient;
 use futures::Future;
 use std::{
@@ -47,10 +47,15 @@ type BoxBackgroundFut = Pin<Box<Fut>>;
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct Config {
+	/// Address of local UDP DNS server.
 	bind_addr: SocketAddr,
-	server_addr: DnsDestination,
+	/// Address of DNS server.
+	server_addr: DnsServerAddr,
+	/// Which outbound should be used as transport.
+	/// 
+	/// Only DNS over TCP/TLS is supported.
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	tag: Option<Tag>,
+	outbound_tag: Option<Tag>,
 }
 
 #[cfg(all(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
@@ -64,7 +69,7 @@ impl Config {
 			self.server_addr
 		);
 		let dns_client = DnsClient::new(
-			self.tag.clone(),
+			self.outbound_tag.clone(),
 			ctx,
 			self.bind_addr,
 			self.server_addr.clone(),
@@ -512,8 +517,8 @@ mod tests {
 			let ctx = {
 				let dns_config = Config {
 					bind_addr: proxy_bind_addr,
-					server_addr: DnsDestination::Udp(server_addr),
-					tag: None,
+					server_addr: DnsServerAddr::Udp(server_addr),
+					outbound_tag: None,
 				};
 				let mut server = Server::default();
 				server.dns = Some(dns_config);
@@ -556,8 +561,8 @@ mod tests {
 			let ctx = {
 				let dns_config = Config {
 					bind_addr: proxy_addr,
-					server_addr: DnsDestination::Tcp(server_addr),
-					tag: None,
+					server_addr: DnsServerAddr::Tcp(server_addr),
+					outbound_tag: None,
 				};
 				let mut server = Server::default();
 				server.dns = Some(dns_config);
@@ -600,8 +605,8 @@ mod tests {
 			let ctx = {
 				let dns_config = Config {
 					bind_addr: proxy_addr,
-					server_addr: DnsDestination::Tcp(server_addr),
-					tag: Some(OUTBOUND_TAG.into()),
+					server_addr: DnsServerAddr::Tcp(server_addr),
+					outbound_tag: Some(OUTBOUND_TAG.into()),
 				};
 				let outbound = server::outbound::Outbound {
 					tag: OUTBOUND_TAG.into(),
@@ -684,8 +689,8 @@ mod tests {
 			let ctx = {
 				let dns_config = Config {
 					bind_addr: proxy_addr,
-					server_addr: DnsDestination::Tcp(server_addr),
-					tag: Some(OUTBOUND_TAG.into()),
+					server_addr: DnsServerAddr::Tcp(server_addr),
+					outbound_tag: Some(OUTBOUND_TAG.into()),
 				};
 				let vmess_settings = {
 					let mut builder = vmess::outbound::SettingsBuilder::new(vmess_addr.into(), id);
