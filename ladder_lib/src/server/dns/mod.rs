@@ -22,7 +22,9 @@ mod destination;
 
 use crate::{
 	prelude::*,
-	protocol::{outbound::Error as OutboundError, outbound::TcpConnector, BytesStream},
+	protocol::{
+		outbound::Error as OutboundError, outbound::TcpConnector, BytesStream, ProxyContext,
+	},
 };
 use destination::DnsDestination;
 use futures::{lock::Mutex as AsyncMutex, Future, FutureExt};
@@ -51,6 +53,9 @@ pub struct Config {
 	tag: Option<Tag>,
 }
 
+#[cfg(all(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+compile_error!("Cannot use `dns-over-openssl` and `dns-over-rustls` at the same time");
+
 // TODO:
 // - Auto reconnect
 
@@ -66,16 +71,15 @@ impl Config {
 		let (client, client_background_task, server_addr) = match server_addr {
 			DnsDestination::Udp(addr) => self.connect_udp(ctx, addr).await,
 			DnsDestination::Tcp(addr) => self.connect_tcp(ctx, addr).await,
-			// DnsDestination::Https(addr) => self.connect_https(ctx, addr).await,
+			#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+			DnsDestination::Tls(addr) => self.connect_tls(ctx, addr).await,
 		}?;
 
 		let client = Arc::new(AsyncMutex::new(client));
-		// let cache = Arc::new(AsyncMutex::new(LruCache::new(MAX_CACHE_NUM)));
 
 		let sock = UdpSocket::bind(self.bind_addr).await?;
 		let mut server_future = trust_dns_server::ServerFuture::new(ProxyRequestHandler {
 			client,
-			// cache,
 			server_addr,
 		});
 		server_future.register_socket(sock);
@@ -98,7 +102,7 @@ impl Config {
 		&self,
 		_ctx: Arc<super::Server>,
 		server_addr: SocketAddr,
-	) -> Result<(AsyncClient, BoxBackgroundFut, SocketAddr), BoxStdErr> {
+	) -> Result<(AsyncClient, BoxBackgroundFut, SocksAddr), BoxStdErr> {
 		info!(
 			"Running DNS server on {}, proxy all requests to DNS server '{}' (UDP)",
 			self.bind_addr, server_addr
@@ -115,14 +119,14 @@ impl Config {
 			let (client, bg) = AsyncClient::connect(stream).await?;
 			(client, Box::pin(bg) as BoxBackgroundFut)
 		};
-		Ok((client, bg, server_addr))
+		Ok((client, bg, server_addr.into()))
 	}
 
 	async fn connect_tcp(
 		&self,
 		ctx: Arc<super::Server>,
 		server_addr: SocketAddr,
-	) -> Result<(AsyncClient, BoxBackgroundFut, SocketAddr), BoxStdErr> {
+	) -> Result<(AsyncClient, BoxBackgroundFut, SocksAddr), BoxStdErr> {
 		info!(
 			"Running DNS server on {}, proxy all requests to DNS server '{}' through TCP",
 			self.bind_addr, server_addr
@@ -130,20 +134,49 @@ impl Config {
 
 		let (client, bg_task) = {
 			let stream =
-				create_transport_stream_timedout(server_addr, &ctx, self.tag.as_ref(), None)
+				create_transport_stream_timedout(&server_addr.into(), &ctx, self.tag.as_ref())
 					.await?;
 			connect_async_client_over_stream(stream, server_addr).await?
 		};
 
-		Ok((client, bg_task, server_addr))
+		Ok((client, bg_task, server_addr.into()))
+	}
+
+	#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+	async fn connect_tls(
+		&self,
+		ctx: Arc<super::Server>,
+		server_addr: SocksAddr,
+	) -> Result<(AsyncClient, BoxBackgroundFut, SocksAddr), BoxStdErr> {
+		use crate::utils::tls;
+		info!(
+			"Running DNS server on {}, proxy all requests to DNS server '{}' through TLS",
+			self.bind_addr, server_addr
+		);
+		let (client, bg_task) = {
+			let stream =
+				create_transport_stream_timedout(&server_addr, &ctx, self.tag.as_ref()).await?;
+			debug!(
+				"DNS transport connected, establishing TLS connection to '{}'",
+				server_addr
+			);
+			let tls_stream = tls::Connector::new(vec![], "")?
+				.connect(stream, &server_addr)
+				.await?;
+			debug!("DNS over TLS connected");
+			// Use 0.0.0.0:0 for now.
+			connect_async_client_over_stream(tls_stream, SocketAddr::new([0, 0, 0, 0].into(), 0))
+				.await?
+		};
+
+		Ok((client, bg_task, server_addr.clone()))
 	}
 }
 
 async fn create_transport_stream_timedout(
-	addr: SocketAddr,
+	addr: &SocksAddr,
 	ctx: &super::Server,
 	outbound_tag: Option<&Tag>,
-	tls_name: Option<&str>,
 ) -> Result<BytesStream, BoxStdErr> {
 	let outbound = outbound_tag
 		.map(|tag| {
@@ -165,23 +198,9 @@ async fn create_transport_stream_timedout(
 	let task = async move {
 		// Raw TCP or outbound stream
 		let stream = if let Some(outbound) = outbound {
-			outbound.settings.connect(&addr.into(), ctx).await?
+			outbound.settings.connect(addr, ctx).await?
 		} else {
-			tokio::net::TcpStream::connect(addr)
-				.await
-				.map(BytesStream::from)?
-		};
-		// TLS
-		let stream = if let Some(name) = tls_name {
-			let connector = crate::utils::tls::Connector::new(vec![], "")?;
-			let dest = crate::protocol::socks_addr::SocksDestination::from_str(name)?;
-			BytesStream::from(
-				connector
-					.connect(stream, &SocksAddr::new(dest, addr.port()))
-					.await?,
-			)
-		} else {
-			stream
+			ctx.dial_tcp(addr).await?.into()
 		};
 		Ok::<_, BoxStdErr>(stream)
 	};
@@ -234,7 +253,7 @@ enum DnsError {
 
 struct ProxyRequestHandler {
 	client: Arc<AsyncMutex<AsyncClient>>,
-	server_addr: SocketAddr,
+	server_addr: SocksAddr,
 }
 
 type RequestFuture = dyn Future<Output = ()> + Send;
@@ -288,8 +307,8 @@ impl trust_dns_server::server::RequestHandler for ProxyRequestHandler {
 		let name = proto::rr::Name::from(query_name);
 
 		let client = self.client.clone();
-		// let cache = self.cache.clone();
-		let server_addr = self.server_addr;
+
+		let server_addr = self.server_addr.clone();
 		Box::pin(async move {
 			let mut response_handle = response_handle;
 

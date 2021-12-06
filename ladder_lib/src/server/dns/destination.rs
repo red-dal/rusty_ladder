@@ -23,9 +23,29 @@ use crate::prelude::*;
 enum AddrType {
 	Tcp,
 	Udp,
+	#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+	Tls,
 }
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+impl AddrType {
+	fn from_prefix(prefix: &str) -> Option<Self> {
+		#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+		if prefix.as_bytes().eq_ignore_ascii_case(TLS.as_bytes()) {
+			return Some(AddrType::Tls);
+		}
+
+		if prefix.as_bytes().eq_ignore_ascii_case(TCP.as_bytes()) {
+			Some(AddrType::Tcp)
+		} else if prefix.as_bytes().eq_ignore_ascii_case(UDP.as_bytes()) {
+			Some(AddrType::Udp)
+		} else {
+			None
+		}
+	}
+}
+
+#[derive(Debug, thiserror::Error)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Error {
 	#[error("invalid address '{0}', should be IP:PORT")]
 	InvalidSocketAddr(Box<str>),
@@ -35,6 +55,10 @@ pub enum Error {
 	TooLong,
 	#[error("address is empty")]
 	Empty,
+	/// A tuple of (addr_str, error_msg)
+	#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+	#[error("invalid address '{0}' ({1}), should be HOSTNAME:PORT")]
+	InvalidSocksAddr(Box<str>, String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,10 +70,15 @@ pub enum Error {
 pub(super) enum DnsDestination {
 	Udp(SocketAddr),
 	Tcp(SocketAddr),
+	#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+	Tls(SocksAddr),
 }
 
 const TCP: &str = "tcp";
 const UDP: &str = "udp";
+#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+const TLS: &str = "tls";
+
 const SEPARATOR: &str = "://";
 const MAX_LENGTH: usize = 300;
 
@@ -65,13 +94,8 @@ impl FromStr for DnsDestination {
 		}
 
 		let (addr_type, addr_str) = if let Some((prefix, addr_str)) = s.split_once(SEPARATOR) {
-			let addr_type = if prefix.as_bytes().eq_ignore_ascii_case(TCP.as_bytes()) {
-				AddrType::Tcp
-			} else if prefix.as_bytes().eq_ignore_ascii_case(UDP.as_bytes()) {
-				AddrType::Udp
-			} else {
-				return Err(Error::InvalidPrefix(prefix.into()));
-			};
+			let addr_type =
+				AddrType::from_prefix(prefix).ok_or_else(|| Error::InvalidPrefix(prefix.into()))?;
 			(addr_type, addr_str)
 		} else {
 			(AddrType::Udp, s)
@@ -84,6 +108,10 @@ impl FromStr for DnsDestination {
 			AddrType::Udp => SocketAddr::from_str(addr_str)
 				.map_err(|_| Error::InvalidSocketAddr(addr_str.into()))
 				.map(DnsDestination::Udp),
+			#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+			AddrType::Tls => SocksAddr::from_str(addr_str)
+				.map_err(|e| Error::InvalidSocksAddr(addr_str.into(), e.to_string()))
+				.map(DnsDestination::Tls),
 		}
 	}
 }
@@ -101,6 +129,8 @@ impl std::fmt::Display for DnsDestination {
 		match self {
 			DnsDestination::Udp(a) => write!(f, "{}{}{}", UDP, SEPARATOR, a),
 			DnsDestination::Tcp(a) => write!(f, "{}{}{}", TCP, SEPARATOR, a),
+			#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+			DnsDestination::Tls(a) => write!(f, "{}{}{}", TLS, SEPARATOR, a),
 		}
 	}
 }

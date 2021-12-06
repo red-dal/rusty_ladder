@@ -175,6 +175,14 @@ dns = [
 	"trust-dns-server",
 	"trust-dns-client",
 ]
+dns-over-openssl = [
+	"dns",
+	"__tls_openssl",
+]
+dns-over-rustls = [
+	"dns",
+	"__tls_rustls",
+]
 
 # Enable serde support for configuration builder.
 use_serde = ["serde"]
