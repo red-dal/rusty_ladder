@@ -3,8 +3,8 @@ This is a proxy client/server that helps you bypass the Great Fire Wall.
 
 Currently supports: 
 - HTTP in/outbound with basic username/password authentication
-- SOCKS5 in/outbound with CONNECT command and username/password authentication
-- Shadowsocks in/outbound
+- SOCKS5 in/outbound with CONNECT command and username/password authentication (TCP only)
+- Shadowsocks in/outbound (TCP only)
 - VMess in/outbound
 - Trojan outbound
 - TLS/WS/WSS transport layer for in/outbounds
@@ -163,7 +163,8 @@ Proxy:
 
 - `use-udp` (*Enabled by default*)
 
-    Enable UDP support for some proxies.
+    Enable UDP support for some proxies. 
+    Currently only Shadowsocks outbound, VMess in/outbound support UDP.
 
 - `chain-outbound`
 
