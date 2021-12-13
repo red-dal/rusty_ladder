@@ -171,16 +171,16 @@ chain-outbound = []
 trojan-outbound = ["sha2", "__transport-outbound"]
 
 # Enable local DNS server.
-dns = [
+local-dns = [
 	"trust-dns-server",
 	"trust-dns-client",
 ]
-dns-over-openssl = [
-	"dns",
+local-dns-over-openssl = [
+	"local-dns",
 	"__tls_openssl",
 ]
-dns-over-rustls = [
-	"dns",
+local-dns-over-rustls = [
+	"local-dns",
 	"__tls_rustls",
 ]
 

@@ -96,15 +96,15 @@ See more at https://docs.rs/openssl/0.10.36/openssl/#manual
 
 ## **Feature Flags**
 DNS:
-- `dns`
+- `local-dns`
 
     Enable local DNS proxy.
 
-- `dns-over-openssl`
+- `local-dns-over-openssl`
 
     Enable local DNS proxy and remote DNS over TLS using OpenSSL.
 
-- `dns-over-rustls`
+- `local-dns-over-rustls`
 
     Enable local DNS proxy and remote DNS over TLS using rustls.
     You can only use either `-openssl` or `-rustls`.

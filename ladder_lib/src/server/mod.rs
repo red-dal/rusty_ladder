@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 mod api;
 mod builder;
-#[cfg(feature = "dns")]
+#[cfg(feature = "local-dns")]
 pub mod dns;
 mod error;
 pub mod inbound;
@@ -51,7 +51,7 @@ pub struct Server {
 	pub api: Api,
 	inbound_tags: HashMap<Tag, usize>,
 	outbound_tags: HashMap<Tag, usize>,
-	#[cfg(feature = "dns")]
+	#[cfg(feature = "local-dns")]
 	pub dns: Option<dns::Config>,
 	// Timeouts
 	/// TCP connection will be dropped if it cannot be established within this amount of time.

@@ -129,7 +129,7 @@ impl Server {
 			}
 		}
 		// Serving DNS
-		#[cfg(feature = "dns")]
+		#[cfg(feature = "local-dns")]
 		{
 			if let Some(dns) = &self.dns {
 				let task = dns.serve(self.clone());

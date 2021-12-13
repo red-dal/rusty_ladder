@@ -107,7 +107,7 @@ impl DnsClient {
 				DnsServerAddr::Tcp(addr) => {
 					connect_tcp(self.bind_addr, outbound_tag, ctx, *addr).await
 				}
-				#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+				#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 				DnsServerAddr::Tls(addr) => connect_tls(self.bind_addr, outbound_tag, ctx, addr.clone()).await,
 			}?;
 			{
@@ -179,7 +179,7 @@ async fn connect_tcp(
 	Ok((client, bg_task))
 }
 
-#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 async fn connect_tls(
 	bind_addr: SocketAddr,
 	outbound_tag: Option<&Tag>,

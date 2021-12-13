@@ -23,13 +23,13 @@ use crate::prelude::*;
 enum AddrType {
 	Tcp,
 	Udp,
-	#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+	#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 	Tls,
 }
 
 impl AddrType {
 	fn from_prefix(prefix: &str) -> Option<Self> {
-		#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+		#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 		if prefix.as_bytes().eq_ignore_ascii_case(TLS.as_bytes()) {
 			return Some(AddrType::Tls);
 		}
@@ -56,7 +56,7 @@ pub enum Error {
 	#[error("address is empty")]
 	Empty,
 	/// A tuple of (addr_str, error_msg)
-	#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+	#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 	#[error("invalid address '{0}' ({1}), should be HOSTNAME:PORT")]
 	InvalidSocksAddr(Box<str>, String),
 }
@@ -70,13 +70,13 @@ pub enum Error {
 pub(super) enum DnsServerAddr {
 	Udp(SocketAddr),
 	Tcp(SocketAddr),
-	#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+	#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 	Tls(SocksAddr),
 }
 
 const TCP: &str = "tcp";
 const UDP: &str = "udp";
-#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 const TLS: &str = "tls";
 
 const SEPARATOR: &str = "://";
@@ -108,7 +108,7 @@ impl FromStr for DnsServerAddr {
 			AddrType::Udp => SocketAddr::from_str(addr_str)
 				.map_err(|_| Error::InvalidSocketAddr(addr_str.into()))
 				.map(DnsServerAddr::Udp),
-			#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+			#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 			AddrType::Tls => SocksAddr::from_str(addr_str)
 				.map_err(|e| Error::InvalidSocksAddr(addr_str.into(), e.to_string()))
 				.map(DnsServerAddr::Tls),
@@ -129,7 +129,7 @@ impl std::fmt::Display for DnsServerAddr {
 		match self {
 			DnsServerAddr::Udp(a) => write!(f, "{}{}{}", UDP, SEPARATOR, a),
 			DnsServerAddr::Tcp(a) => write!(f, "{}{}{}", TCP, SEPARATOR, a),
-			#[cfg(any(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+			#[cfg(any(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 			DnsServerAddr::Tls(a) => write!(f, "{}{}{}", TLS, SEPARATOR, a),
 		}
 	}

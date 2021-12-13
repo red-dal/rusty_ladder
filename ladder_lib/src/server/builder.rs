@@ -23,7 +23,7 @@ use std::{collections::HashMap, time::Duration};
 
 const KB: usize = 1024;
 
-#[cfg(feature = "dns")]
+#[cfg(feature = "local-dns")]
 use super::dns;
 
 #[derive(Debug, thiserror::Error)]
@@ -78,7 +78,7 @@ pub struct Builder {
 	pub router: router::Builder,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub api: Api,
-	#[cfg(feature = "dns")]
+	#[cfg(feature = "local-dns")]
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub dns: Option<dns::Config>,
 
@@ -204,7 +204,7 @@ impl Builder {
 			outbounds,
 			router,
 			api: self.api,
-			#[cfg(feature = "dns")]
+			#[cfg(feature = "local-dns")]
 			dns: self.dns,
 			inbound_tags,
 			outbound_tags,

@@ -58,7 +58,7 @@ pub struct Config {
 	outbound_tag: Option<Tag>,
 }
 
-#[cfg(all(feature = "dns-over-openssl", feature = "dns-over-rustls"))]
+#[cfg(all(feature = "local-dns-over-openssl", feature = "local-dns-over-rustls"))]
 compile_error!("Cannot use `dns-over-openssl` and `dns-over-rustls` at the same time");
 
 impl Config {

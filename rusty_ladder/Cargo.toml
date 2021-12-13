@@ -8,9 +8,9 @@ license = "GPL-3.0"
 [features]
 default = ["use-tui", "all-transports-openssl", "all-proxies-openssl", "use-udp"]
 
-dns = ["ladder_lib/dns"]
-dns-over-openssl = ["ladder_lib/dns-over-openssl"]
-dns-over-rustls = ["ladder_lib/dns-over-rustls"]
+local-dns = ["ladder_lib/local-dns"]
+local-dns-over-openssl = ["ladder_lib/local-dns-over-openssl"]
+local-dns-over-rustls = ["ladder_lib/local-dns-over-rustls"]
 
 use-udp = ["ladder_lib/use-udp"]
 use-tui = ["tui", "crossterm"]
