@@ -27,7 +27,7 @@ pub trait Acceptor: GetProtocolName {
 	async fn accept_udp(&self, sock: UdpSocket) -> Result<PacketStream, BoxStdErr>;
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct Session {
 	/// Address for local client (source)
 	pub src: SocketAddr,

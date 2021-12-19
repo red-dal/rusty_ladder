@@ -6,6 +6,9 @@
 [[inbounds]]
 addr = "0.0.0.0:1080"
 protocol = "socks5"
+# Should UDP be enabled, false by defualt.
+# `use-udp` feature must be enabled to use UDP for SOCKS5 inbound.
+is_udp_enabled = false
 # Authentication.
 # Comment these if you want no authentication.
 [inbounds.users]

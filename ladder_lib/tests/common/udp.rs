@@ -20,6 +20,21 @@ impl Tester {
 		self.test_udp_with_v2ray("Tunnel UDP inbound", &conf_path, None);
 	}
 
+	#[cfg(feature = "socks5-inbound")]
+	pub fn test_udp_socks(&self) {
+		println!("\n--------------------------- SOCKS5 UDP Inbound ---------------------------\n");
+		let socks_dir = self.test_config_dir.clone_push("socks");
+		let conf_path = socks_dir.clone_push("udp_in.toml");
+		let v2_udp_path = socks_dir.clone_push("v2_udp_out.json");
+		self.test_udp_with_v2ray("SOCKS UDP inbound", &conf_path, Some(v2_udp_path.as_ref()));
+	}
+
+	#[cfg(any(
+		feature = "vmess-inbound-openssl",
+		feature = "vmess-inbound-ring",
+		feature = "vmess-outbound-openssl",
+		feature = "vmess-outbound-ring"
+	))]
 	pub fn test_udp_vmess(&self) {
 		println!("\n--------------------------- VMess UDP Inbound ---------------------------\n");
 		{
@@ -41,6 +56,7 @@ impl Tester {
 		}
 	}
 
+	/// Proxy will goes through  -> Proxy server [32211] -> Ehco server [9876]
 	fn test_udp_with_v2ray(&self, label: &str, conf_path: &Path, v2_conf_path: Option<&Path>) {
 		let child = v2_conf_path.map(|v2_conf_path| self.spawn_v2ray(v2_conf_path).unwrap());
 

@@ -21,7 +21,7 @@ use super::{method_to_algo, tcp, utils::salt_len, Error, Method};
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, TcpAcceptor},
+		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
 		socks_addr::ReadError,
 		AsyncReadWrite, BytesStream, GetProtocolName,
 	},
@@ -78,6 +78,7 @@ impl TcpAcceptor for Settings {
 	async fn accept_tcp<'a>(
 		&'a self,
 		stream: BytesStream,
+		_info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		trace!("Accepting shadowsocks inbound");
 		let mut stream = self.transport.accept(stream).await?;

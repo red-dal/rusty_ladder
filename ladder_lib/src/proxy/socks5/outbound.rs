@@ -19,8 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	utils::{
-		auth, Authentication, CommandCode, Reply, ReplyCode, Request, SocksOrIoError,
-		AUTHENTICATION_SUCCESS, SUB_VERS, VER5,
+		AcceptableMethod, Authentication, CommandCode, Reply, ReplyCode, Request, SocksOrIoError,
+		AUTH_SUCCESSFUL, SUB_VERS, VAL_NO_AUTH, VAL_NO_USER_PASS, VER5,
 	},
 	Error,
 };
@@ -32,11 +32,17 @@ use crate::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
 		BytesStream, GetProtocolName, ProxyContext,
 	},
+	proxy::socks5::utils::AUTH_FAILED,
 	transport,
 };
 
-const METHODS_USERNAME: &[u8] = &[auth::NO_AUTH, auth::USERNAME];
-const METHODS_NO_AUTH: &[u8] = &[auth::NO_AUTH];
+const METHODS_USERNAME: &[u8] = &[
+	AcceptableMethod::NoAuthentication as u8,
+	AcceptableMethod::UsernamePassword as u8,
+];
+const METHODS_NO_AUTH: &[u8] = &[AcceptableMethod::NoAuthentication as u8];
+// Both are 0xff.
+const NO_ACCEPTABLE_METHOD:u8 = AUTH_FAILED;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -128,13 +134,9 @@ impl Settings {
 		};
 		trace!("Server asked for authentication with method {}", method);
 
-		match method {
-			auth::NO_AUTH => {
-				// do nothing
-			}
-			auth::USERNAME => {
-				// Send username
-
+		match AcceptableMethod::from_u8(method) {
+			Some(AcceptableMethod::NoAuthentication) => {}
+			Some(AcceptableMethod::UsernamePassword) => {
 				if let Some((user, pass)) = &self.user_pass {
 					let auth = Authentication {
 						user: user.as_bytes().into(),
@@ -147,7 +149,7 @@ impl Settings {
 					stream.write_all(&buf).await?;
 
 					let auth_reply = read_auth_reply(&mut stream).await?;
-					if auth_reply != AUTHENTICATION_SUCCESS {
+					if auth_reply != AUTH_SUCCESSFUL {
 						let msg = format!(
 							"SOCKS5 username/password authentication failed with reply code {}",
 							auth_reply
@@ -156,10 +158,13 @@ impl Settings {
 					}
 				}
 			}
-			_ => {
-				return Err(OutboundError::from(Error::UnsupportedMethod(method)));
+			None => {
+				if method == NO_ACCEPTABLE_METHOD {
+					return Err(Error::Custom("server replied no acceptable method".into()).into());
+				}
+				return Err(OutboundError::from(Error::UnsupportedMethod(vec![method])));
 			}
-		};
+		}
 
 		// send request
 		trace!("Sending request for {} to server.", dst);
@@ -167,7 +172,8 @@ impl Settings {
 			code: CommandCode::Connect as u8,
 			addr: dst.clone(),
 		};
-		request.write_to(&mut buf);
+		buf.clear();
+		request.write_into(&mut buf);
 		stream.write_all(&buf).await?;
 		// read reply
 		let reply = Reply::read(&mut stream).await?;
@@ -243,6 +249,16 @@ impl Authentication<'_> {
 		buf.put_slice(&self.user);
 		buf.put_u8(pass_len);
 		buf.put_slice(&self.pass);
+	}
+}
+
+impl AcceptableMethod {
+	pub fn from_u8(n: u8) -> Option<Self> {
+		match n {
+			VAL_NO_AUTH => Some(Self::NoAuthentication),
+			VAL_NO_USER_PASS => Some(Self::UsernamePassword),
+			_ => None,
+		}
 	}
 }
 

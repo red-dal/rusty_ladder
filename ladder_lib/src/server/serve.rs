@@ -27,7 +27,9 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, FinishHandshake, HandshakeError, TcpAcceptor},
+		inbound::{
+			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
+		},
 		outbound::{Error as OutboundError, TcpConnector},
 		BytesStream, GetProtocolName,
 	},
@@ -237,7 +239,7 @@ impl Server {
 	}
 }
 
-fn read_forever<IO>(mut stream: IO)
+fn silent_drop<IO>(mut stream: IO)
 where
 	IO: AsyncRead + Send + Unpin + 'static,
 {
@@ -281,20 +283,23 @@ impl<'a> InboundConnection<'a> {
 			inbound.protocol_name(),
 			self.src,
 		);
-
-		let accept_res = match inbound.settings.accept_tcp(tcp_stream.into()).await {
+		let info = StreamInfo {
+			peer_addr: tcp_stream.peer_addr()?,
+			local_addr: tcp_stream.local_addr()?,
+		};
+		let accept_res = match inbound.settings.accept_tcp(tcp_stream.into(), Some(info)).await {
 			Ok(res) => res,
 			Err(e) => {
 				match e {
 					AcceptError::Io(e) => return Err(HandshakeError::Io(e).into()),
-					AcceptError::Protocol((stream, e)) => {
+					AcceptError::ProtocolSilentDrop((stream, e)) => {
 						match inbound.err_policy {
 							ErrorHandlingPolicy::Drop => {
 								// do nothing
 							}
 							ErrorHandlingPolicy::UnlimitedTimeout => {
 								// keep reading until the client drops
-								read_forever(stream);
+								silent_drop(stream);
 							}
 						};
 						return Err(HandshakeError::Protocol(e).into());
@@ -305,6 +310,7 @@ impl<'a> InboundConnection<'a> {
 					AcceptError::UdpNotAcceptable => {
 						return Err(HandshakeError::UdpNotAcceptable.into())
 					}
+					AcceptError::Protocol(e) => return Err(HandshakeError::Protocol(e).into()),
 				}
 			}
 		};

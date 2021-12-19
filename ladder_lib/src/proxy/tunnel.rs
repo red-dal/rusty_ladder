@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, TcpAcceptor},
+		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
 		BytesStream, GetProtocolName, Network,
 	},
 };
@@ -58,6 +58,7 @@ impl TcpAcceptor for Settings {
 	async fn accept_tcp<'a>(
 		&'a self,
 		stream: BytesStream,
+		_info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		if self.network.use_tcp() {
 			Ok(AcceptResult::Tcp(
@@ -76,7 +77,7 @@ mod udp_impl {
 	use crate::{
 		prelude::*,
 		protocol::inbound::udp::{
-			PacketInfo, PacketStream, RecvPacket, SendPacket, Session, Acceptor,
+			Acceptor, PacketInfo, PacketStream, RecvPacket, SendPacket, Session,
 		},
 	};
 	use std::io;

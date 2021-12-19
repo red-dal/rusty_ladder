@@ -43,7 +43,15 @@ fn test_integration_udp() {
 
 	let tester = Tester::new();
 	tester.test_udp_tunnel();
+	#[cfg(any(
+		feature = "vmess-inbound-openssl",
+		feature = "vmess-inbound-ring",
+		feature = "vmess-outbound-openssl",
+		feature = "vmess-outbound-ring"
+	))]
 	tester.test_udp_vmess();
+	#[cfg(feature = "socks5-inbound")]
+	tester.test_udp_socks();
 }
 
 #[cfg(all(feature = "use-protobuf", feature = "use-router-regex"))]

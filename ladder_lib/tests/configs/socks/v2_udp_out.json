@@ -1,0 +1,30 @@
+{
+    "log": {
+        "loglevel": "debug"
+    },
+    "inbounds": [
+        {
+            "listen": "127.0.0.1",
+            "port": 32211,
+            "protocol": "dokodemo-door",
+            "settings": {
+                "address": "127.0.0.1",
+                "port": 9876,
+                "network": "udp"
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "protocol": "socks",
+            "settings": {
+                "servers": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 54551
+                    }
+                ]
+            }
+        }
+    ]
+}

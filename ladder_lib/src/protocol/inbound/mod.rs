@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::common::{AsyncReadWrite, GetProtocolName, BytesStream};
+use super::common::{AsyncReadWrite, BytesStream, GetProtocolName};
 use crate::{prelude::*, protocol::outbound};
 use async_trait::async_trait;
 use std::{
@@ -28,10 +28,19 @@ use std::{
 #[cfg(feature = "use-udp")]
 pub mod udp;
 
+#[derive(Debug)]
+pub struct StreamInfo {
+	pub peer_addr: SocketAddr,
+	pub local_addr: SocketAddr,
+}
+
 #[async_trait]
 pub trait TcpAcceptor: GetProtocolName {
-	async fn accept_tcp<'a>(&'a self, stream: BytesStream)
-		-> Result<AcceptResult<'a>, AcceptError>;
+	async fn accept_tcp<'a>(
+		&'a self,
+		stream: BytesStream,
+		info: Option<StreamInfo>,
+	) -> Result<AcceptResult<'a>, AcceptError>;
 }
 
 pub enum AcceptResult<'a> {
@@ -82,7 +91,8 @@ impl From<io::Error> for HandshakeError {
 
 pub enum AcceptError {
 	Io(io::Error),
-	Protocol((Box<dyn AsyncReadWrite>, BoxStdErr)),
+	Protocol(BoxStdErr),
+	ProtocolSilentDrop((Box<dyn AsyncReadWrite>, BoxStdErr)),
 	TcpNotAcceptable,
 	UdpNotAcceptable,
 }
@@ -90,7 +100,7 @@ pub enum AcceptError {
 impl AcceptError {
 	#[inline]
 	pub fn new_protocol(stream: Box<dyn AsyncReadWrite>, e: impl Into<BoxStdErr>) -> Self {
-		AcceptError::Protocol((stream, e.into()))
+		AcceptError::ProtocolSilentDrop((stream, e.into()))
 	}
 
 	#[inline]
@@ -99,7 +109,7 @@ impl AcceptError {
 		stream: Box<dyn AsyncReadWrite>,
 		e: impl Into<BoxStdErr>,
 	) -> Result<T, Self> {
-		Err(AcceptError::Protocol((stream, e.into())))
+		Err(AcceptError::ProtocolSilentDrop((stream, e.into())))
 	}
 }
 
@@ -107,9 +117,12 @@ impl fmt::Display for AcceptError {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
 			AcceptError::Io(e) => write!(f, "inbound handshake IO error ({})", e),
-			AcceptError::Protocol((_, e)) => write!(f, "inbound handshake protocol error ({})", e),
+			AcceptError::ProtocolSilentDrop((_, e)) => {
+				write!(f, "inbound handshake protocol error ({})", e)
+			}
 			AcceptError::TcpNotAcceptable => write!(f, "inbound cannot accept TCP"),
 			AcceptError::UdpNotAcceptable => write!(f, "inbound cannot accept UDP"),
+			AcceptError::Protocol(e) => write!(f, "proxy protocol error ({})", e),
 		}
 	}
 }

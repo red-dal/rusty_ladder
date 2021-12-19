@@ -22,7 +22,7 @@ use crate::proxy::*;
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, TcpAcceptor},
+		inbound::{AcceptError, AcceptResult, StreamInfo, TcpAcceptor},
 		BytesStream, GetProtocolName, Network,
 	},
 	utils::OneOrMany,
@@ -136,8 +136,9 @@ impl TcpAcceptor for Details {
 	async fn accept_tcp<'a>(
 		&'a self,
 		stream: BytesStream,
+		info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
-		dispatch_inbound!(self, Self, s, { s.accept_tcp(stream).await })
+		dispatch_inbound!(self, Self, s, { s.accept_tcp(stream, info).await })
 	}
 }
 

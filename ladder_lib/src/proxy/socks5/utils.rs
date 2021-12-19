@@ -25,16 +25,14 @@ use num_enum::TryFromPrimitive;
 use std::{fmt::Display, io};
 
 pub const VER5: u8 = 5;
+/// Subnegotiation version.
+///
+/// See more at <https://datatracker.ietf.org/doc/html/rfc1929#section-2>
 pub const SUB_VERS: u8 = 1_u8;
-
-#[allow(dead_code)]
-pub mod auth {
-	pub const NO_AUTH: u8 = 0;
-	pub const USERNAME: u8 = 2;
-	pub const NO_ACCEPTABLE: u8 = 0xff;
-}
-
-pub(super) const AUTHENTICATION_SUCCESS: u8 = 0;
+pub(super) const AUTH_SUCCESSFUL: u8 = 0;
+pub(super) const AUTH_FAILED: u8 = 0xff;
+pub(super) const VAL_NO_AUTH: u8 = 0_u8;
+pub(super) const VAL_NO_USER_PASS: u8 = 2_u8;
 
 #[derive(Debug, TryFromPrimitive, PartialEq, Copy, Clone)]
 #[repr(u8)]
@@ -44,8 +42,29 @@ pub enum CommandCode {
 	Udp = 3,
 }
 
+impl Display for CommandCode {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			CommandCode::Connect => write!(f, "CONNECT"),
+			CommandCode::Bind => write!(f, "BIND"),
+			CommandCode::Udp => write!(f, "UDP_ASSOCIATE"),
+		}?;
+		write!(f, "({})", *self as u8)
+	}
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+#[repr(u8)]
+pub enum AcceptableMethod {
+	NoAuthentication = VAL_NO_AUTH,
+	UsernamePassword = VAL_NO_USER_PASS,
+}
+
 #[derive(Debug, TryFromPrimitive, PartialEq, Copy, Clone)]
 #[repr(u8)]
+/// SOCKS5 reply code.
+///
+/// See more at <https://datatracker.ietf.org/doc/html/rfc1928#section-6>.
 pub enum ReplyCode {
 	Succeeded = 0,
 	SocksFailure = 1,
@@ -61,7 +80,7 @@ impl ReplyCode {
 	fn as_str(self) -> &'static str {
 		match self {
 			ReplyCode::Succeeded => "succeeded",
-			ReplyCode::SocksFailure => "socks Failure",
+			ReplyCode::SocksFailure => "socks failure",
 			ReplyCode::NotAllowedByRuleset => "not allowed by ruleset",
 			ReplyCode::HostUnreachable => "host unreachable",
 			ReplyCode::ConnectionsRefused => "connection refused",
@@ -113,7 +132,7 @@ impl Request {
 			Err(e) => {
 				return Err(match e {
 					ReadError::Io(e) => SocksOrIoError::Io(e),
-					_ => SocksOrIoError::Socks(Error::FailedAddressParsing(e)),
+					_ => SocksOrIoError::Socks(Error::CannotReadAddr(e)),
 				})
 			}
 		};
@@ -131,7 +150,7 @@ impl Request {
 	/// | 1  |  1  | X'00' |  1   |     Variable      |    2     |
 	/// +----+-----+-------+------+-------------------+----------+
 	///```
-	pub fn write_to(&self, buf: &mut Vec<u8>) {
+	pub fn write_into(&self, buf: &mut Vec<u8>) {
 		buf.clear();
 		buf.put_u8(VER5);
 		buf.put_u8(self.code);
@@ -171,27 +190,26 @@ impl From<SocksOrIoError> for OutboundError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-	/// SOCKS version received during handshake is wrong. This also contains the wrong version number.
-	#[error("SOCKS5 error (wrong socks version '{0}')")]
+	#[error("wrong socks version '{0}'")]
 	WrongVersion(u8),
-	/// There are no supported authentication methods.
-	/// Or the server send back an unsupported method.
-	#[error("SOCKS5 error (unsupported address type '{0}')")]
-	UnsupportedMethod(u8),
-	/// The type of address requested by the client is not allowed.
-	#[error("SOCKS5 error (unsupported authentication method '{0}')")]
+	#[error("unsupported address type '{0:?}'")]
+	UnsupportedMethod(Vec<u8>),
+	#[error("unsupported authentication method '{0}'")]
 	UnsupportedAddressType(u8),
-	/// The command received is not supported.
-	#[error("SOCKS5 error (unsupported command '{0}')")]
-	UnsupportedCommand(u8),
-	#[error("SOCKS5 error (reply error code '{0}')")]
+	#[error("unknown command code '{0}'")]
+	UnknownCommand(u8),
+	#[error("unsupported command {0}")]
+	UnsupportedCommand(CommandCode),
+	#[error("reply error code '{0}'")]
 	FailedReply(ReplyCode),
-	#[error("SOCKS5 unknown reply code '{0}'")]
+	#[error("unknown reply code '{0}'")]
 	UnknownReplyCode(u8),
-	#[error("SOCKS5 error (failed authentication)")]
+	#[error("failed authentication")]
 	FailedAuthentication,
-	#[error("SOCKS5 error ({0})")]
-	FailedAddressParsing(ReadError),
+	#[error("cannot read address ({0})")]
+	CannotReadAddr(ReadError),
+	#[error("{0}")]
+	Custom(BoxStdErr),
 }
 
 impl From<Error> for OutboundError {

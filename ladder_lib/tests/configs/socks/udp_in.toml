@@ -1,0 +1,7 @@
+[[inbounds]]
+protocol = "socks5"
+addr = "127.0.0.1:54551"
+is_udp_enabled = true
+
+[[outbounds]]
+protocol = "freedom"

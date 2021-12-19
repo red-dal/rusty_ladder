@@ -150,20 +150,24 @@ where
 	I: 'static + TcpAcceptor + Send + Sync,
 {
 	let (stream, _) = listener.accept().await?;
-	let accept_result = inbound.accept_tcp(stream.into()).await;
+	let accept_result = inbound.accept_tcp(stream.into(), None).await;
 	let accept_result = match accept_result {
 		Ok(h) => h,
-		Err(err) => match err {
+		Err(err) => return match err {
 			AcceptError::Io(err) => {
 				error!("{}", err);
-				return Err(err.into());
+				Err(err.into())
 			}
-			AcceptError::Protocol((_, err)) => {
+			AcceptError::ProtocolSilentDrop((_, err)) => {
 				error!("{}", err);
-				return Err(err);
+				Err(err)
 			}
-			AcceptError::TcpNotAcceptable => return Err(HandshakeError::TcpNotAcceptable.into()),
-			AcceptError::UdpNotAcceptable => return Err(HandshakeError::UdpNotAcceptable.into()),
+			AcceptError::TcpNotAcceptable => Err(HandshakeError::TcpNotAcceptable.into()),
+			AcceptError::UdpNotAcceptable => Err(HandshakeError::UdpNotAcceptable.into()),
+			AcceptError::Protocol(err) => {
+				error!("{}", err);
+				Err(err.into())
+			},
 		},
 	};
 
