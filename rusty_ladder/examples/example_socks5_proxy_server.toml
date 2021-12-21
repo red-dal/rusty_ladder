@@ -10,11 +10,13 @@ protocol = "socks5"
 # `use-udp` feature must be enabled to use UDP for SOCKS5 inbound.
 is_udp_enabled = false
 # Authentication.
-# Comment these if you want no authentication.
-[inbounds.users]
-username1 = "password1"
-username2 = "password2"
-username3 = "password3"
+# Uncomment these if you want authentication.
+# ```
+# [inbounds.users]
+# username1 = "password1"
+# username2 = "password2"
+# username3 = "password3"
+# ```
 
 [[outbounds]]
 protocol = "freedom"

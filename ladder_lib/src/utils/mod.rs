@@ -49,7 +49,7 @@ use tokio::io::ReadBuf;
 
 pub use std::time::{SystemTime, UNIX_EPOCH};
 
-use std::convert::{TryFrom, TryInto};
+use std::{convert::{TryFrom, TryInto}, io};
 
 #[allow(dead_code)]
 #[inline]
@@ -144,6 +144,36 @@ impl PollBuffer {
 		is_empty
 	}
 }
+
+pub(crate) trait ReadInt: std::io::Read {
+	/// Read a u8 from stream.
+	///
+	/// # Errors
+	///
+	/// Return the same error as `read_exact`.
+	#[inline]
+	fn read_u8(&mut self) -> io::Result<u8> {
+		self.read_arr::<1>().map(|n| n[0])
+	}
+
+	/// Read a big endian u16 from stream.
+	///
+	/// # Errors
+	///
+	/// Return the same error as `read_exact`.
+	#[inline]
+	fn read_u16(&mut self) -> io::Result<u16> {
+		self.read_arr::<2>().map(u16::from_be_bytes)
+	}
+
+	#[inline]
+	fn read_arr<const N: usize>(&mut self) -> io::Result<[u8; N]> {
+		let mut buf = [0_u8; N];
+		self.read_exact(&mut buf).map(|_| buf)
+	}
+}
+
+impl<T> ReadInt for T where T: std::io::Read {}
 
 #[cfg(test)]
 mod tests {

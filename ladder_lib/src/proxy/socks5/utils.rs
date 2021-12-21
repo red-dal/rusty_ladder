@@ -77,7 +77,8 @@ pub enum ReplyCode {
 }
 
 impl ReplyCode {
-	fn as_str(self) -> &'static str {
+	#[must_use]
+	pub const fn as_str(self) -> &'static str {
 		match self {
 			ReplyCode::Succeeded => "succeeded",
 			ReplyCode::SocksFailure => "socks failure",
@@ -88,6 +89,12 @@ impl ReplyCode {
 			ReplyCode::CommandNotSupported => "command not supported",
 			ReplyCode::AddressTypeNotSupported => "address type not supported",
 		}
+	}
+
+	#[inline]
+	#[must_use]
+	pub const fn val(self) -> u8{
+		self as u8
 	}
 }
 

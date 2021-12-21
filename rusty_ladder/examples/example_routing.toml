@@ -1,0 +1,62 @@
+# *****
+# Please DO NOT use any key or password shown in this file
+# in your environment.
+# ****
+
+[log]
+level = "debug"
+
+# --- Inbounds ---
+
+[[inbounds]]
+addr = "127.0.0.1:10000"
+protocol = "socks5"
+
+# --- Outbounds ---
+
+# Traffic to this outbound will go to TOR.
+[[outbounds]]
+tag = "to-tor"
+addr = "127.0.0.1:9150"
+protocol = "socks5"
+
+# Traffic to this outbound will go to normal proxy.
+[[outbounds]]
+tag = "to-proxy"
+addr = "127.0.0.1:3080"
+protocol = "socks5"
+
+# Traffic to this outbound will use no proxy.
+[[outbounds]]
+tag = "to-freedom"
+protocol = "freedom"
+
+# --- Router ---
+
+# Firstly block all connections going to LAN.
+[[router.rules]]
+dst = [
+    "192.168.0.0/16",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "127.0.0.0/8",
+    "lan",
+    "localhost",
+]
+outbound_tag = "$blocked"
+
+# Secondly route all connections to '.onion' to TOR.
+[[router.rules]]
+dst = ["onion"]
+outbound_tag = "to-tor"
+
+# Thirdly route all connections to 
+# 'google.com', 'duckduckgo.com', 'startpage.com'
+# to proxy.
+[[router.rules]]
+dst = ["google.com", "duckduckgo.com", "startpage.com"]
+outbound_tag = "to-proxy"
+
+# Finally all other connections will go to freedom.
+[[router.rules]]
+outbound_tag = "to-freedom"

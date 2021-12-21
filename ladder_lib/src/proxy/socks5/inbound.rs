@@ -32,6 +32,7 @@ use crate::{
 	},
 	transport,
 };
+use log::{info, trace};
 use std::{collections::HashMap, io};
 
 const HANDSHAKE_BUFFER_CAPACITY: usize = 512;
@@ -117,7 +118,7 @@ impl Settings {
 				success = true;
 			}
 		}
-		log::trace!("SOKCS5 authentication done");
+		trace!("SOKCS5 authentication done");
 		// Reply to client
 		// +----+--------+
 		// |VER | STATUS |
@@ -150,7 +151,7 @@ impl TcpAcceptor for Settings {
 		stream: BytesStream,
 		info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
-		log::info!("Performing SOCKS5 handshake with client ({:?}).", info);
+		info!("Performing SOCKS5 handshake with client ({:?}).", info);
 		let mut stream = self.transport.accept(stream).await?;
 		let mut buf = Vec::with_capacity(HANDSHAKE_BUFFER_CAPACITY);
 		{
@@ -286,12 +287,12 @@ mod udp {
 	use crate::{
 		prelude::BoxStdErr,
 		protocol::{inbound::udp, BytesStream, SocksAddr, SocksDestination},
+		utils::ReadInt,
 	};
 	use async_trait::async_trait;
 	use futures::{future::AbortHandle, pin_mut};
-	use log::debug;
+	use log::{debug, error, trace};
 	use std::{
-		convert::TryFrom,
 		io,
 		net::{IpAddr, SocketAddr},
 		sync::{
@@ -364,36 +365,6 @@ mod udp {
 			return Ok(AcceptResult::Udp(sock));
 		}
 	}
-
-	trait ReadInt: std::io::Read {
-		/// Read a u8 from stream.
-		///
-		/// # Errors
-		///
-		/// Return the same error as `read_exact`.
-		#[inline]
-		fn read_u8(&mut self) -> io::Result<u8> {
-			self.read_arr::<1>().map(|n| n[0])
-		}
-
-		/// Read a big endian u16 from stream.
-		///
-		/// # Errors
-		///
-		/// Return the same error as `read_exact`.
-		#[inline]
-		fn read_u16(&mut self) -> io::Result<u16> {
-			self.read_arr::<2>().map(u16::from_be_bytes)
-		}
-
-		#[inline]
-		fn read_arr<const N: usize>(&mut self) -> io::Result<[u8; N]> {
-			let mut buf = [0_u8; N];
-			self.read_exact(&mut buf).map(|_| buf)
-		}
-	}
-
-	impl<T> ReadInt for T where T: std::io::Read {}
 
 	struct SocketWrapperBuilder {
 		sock: Arc<tokio::net::UdpSocket>,
@@ -468,6 +439,8 @@ mod udp {
 			buf: &mut [u8],
 			src_addr: SocketAddr,
 		) -> Result<udp::PacketInfo, BoxStdErr> {
+			use std::convert::TryFrom;
+
 			// UDP datagram format:
 			//
 			// +----+------+------+----------+----------+----------+
@@ -484,7 +457,6 @@ mod udp {
 
 			let (dst, pos) = {
 				let mut cursor = std::io::Cursor::new(&*buf);
-
 				// Reserved, can be ignored.
 				let _rsv = cursor.read_u16()?;
 				// Whether or not this datagram is one of a number of fragments.
@@ -553,12 +525,12 @@ mod udp {
 						}
 					}
 				};
-				log::trace!("Received datagram of {} bytes from {}", len, src_addr);
+				trace!("Received datagram of {} bytes from {}", len, src_addr);
 				match Self::handle_datagram(&mut buf[..len], src_addr) {
 					Ok(info) => return Ok(info),
 					Err(e) => {
 						// Only log the invalid datagram.
-						log::error!("Invalid SOCKS5 UDP request datagram: {}", e);
+						error!("Invalid SOCKS5 UDP request datagram: {}", e);
 						continue;
 					}
 				}
@@ -636,6 +608,12 @@ impl FinishHandshake for HandshakeHandle {
 			OutboundError::NotAllowed => ReplyCode::NotAllowedByRuleset,
 			_ => ReplyCode::SocksFailure,
 		};
+		debug!(
+			"Sending SOCKS5 reply to client with code {}({}) because of outbound error ({})",
+			reply_code.val(),
+			reply_code,
+			err
+		);
 		write_reply(&mut self.inner, reply_code).await
 	}
 }

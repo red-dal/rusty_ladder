@@ -17,47 +17,51 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use crate::prelude::*;
+use crate::{prelude::*, utils::ReadInt};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use smol_str::SmolStr;
 use std::{
 	borrow::Borrow,
 	fmt::{self, Display},
 	io,
-	num::{NonZeroU16, ParseIntError},
+	num::NonZeroU16,
 	str::FromStr,
 	string,
 };
+
+const EMPTY_STRING: &str = "empty string";
 
 // See more at <https://tools.ietf.org/html/rfc1928>
 #[derive(Debug, Clone, Copy, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum AddrType {
-	Ipv4 = 1,
-	Name = 3,
-	Ipv6 = 4,
+	Ipv4 = 1_u8,
+	Name = 3_u8,
+	Ipv6 = 4_u8,
+}
+
+impl AddrType {
+	#[inline]
+	#[must_use]
+	pub const fn val(self) -> u8 {
+		self as u8
+	}
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReadError {
 	#[error("string is not utf8 ({0})")]
-	StringUtf8(string::FromUtf8Error),
+	StringNotUtf8(string::FromUtf8Error),
 	#[error("str is not utf8 ({0})")]
-	StrUtf8(std::str::Utf8Error),
+	StrNotUtf8(std::str::Utf8Error),
 	#[error("unknown address type {0}")]
 	UnknownAddressType(u8),
-	#[error("'{0}' is not a valid domain ({1})")]
-	InvalidDomain(String, idna::Errors),
-	#[error("empty domain name")]
-	DomainNameEmpty,
-	#[error("domain name length larger than 255")]
-	DomainNameTooLong,
-	#[error("invalid port {0} ({1})")]
-	InvalidPort(String, ParseIntError),
-	#[error("'{0}' is missing the port section")]
-	MissingPort(String),
-	#[error("invalid address {0}")]
-	InvalidFormat(String),
+	#[error("invalid domain ({0})")]
+	InvalidDomain(BoxStdErr),
+	#[error("invalid port ({0})")]
+	InvalidPort(BoxStdErr),
+	#[error("invalid address ({0})")]
+	InvalidAddress(BoxStdErr),
 	#[error("buffer of {buf_len:?} bytes is too small, which required at least {exp_len:?} bytes")]
 	BufferTooSmall { buf_len: usize, exp_len: usize },
 	#[error("IO error ({0})")]
@@ -75,7 +79,9 @@ impl ReadError {
 	}
 }
 
-// -------------------------- SocksDestination --------------------------
+// -------------------------------------------------------
+//                     SocksDestination
+// -------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SocksDestination {
@@ -157,13 +163,13 @@ impl SocksDestination {
 				r.read_exact(&mut len)?;
 				let len = len[0];
 				if len == 0 {
-					return Err(ReadError::DomainNameEmpty);
+					return Err(ReadError::InvalidDomain(EMPTY_STRING.into()));
 				}
 				// Domain length is a u8, which will never be larger than 256.
 				let mut buffer = [0_u8; 256];
 				let buffer = &mut buffer[..len as usize];
 				r.read_exact(buffer)?;
-				let name = std::str::from_utf8(buffer).map_err(ReadError::StrUtf8)?;
+				let name = std::str::from_utf8(buffer).map_err(ReadError::StrNotUtf8)?;
 				SocksDestination::Name(DomainName(name.into()))
 			}
 		})
@@ -179,23 +185,23 @@ impl SocksDestination {
 		r: &mut (impl AsyncRead + Unpin),
 		atyp: AddrType,
 	) -> Result<Self, ReadError> {
-		let dest: SocksDestination = match atyp {
+		Ok(match atyp {
 			AddrType::Ipv4 => Ipv4Addr::from(r.read_u32().await?).into(),
 			AddrType::Ipv6 => Ipv6Addr::from(r.read_u128().await?).into(),
 			AddrType::Name => {
 				let len = r.read_u8().await?;
 				if len == 0 {
-					return Err(ReadError::DomainNameEmpty);
+					return Err(ReadError::InvalidDomain(EMPTY_STRING.into()));
 				}
 				// Domain length is a u8, which will never be larger than 256.
 				let mut buffer = [0_u8; 256];
 				let buffer = &mut buffer[..len as usize];
 				r.read_exact(buffer).await?;
-				let name = std::str::from_utf8(buffer).map_err(ReadError::StrUtf8)?;
+				let name = std::str::from_utf8(buffer).map_err(ReadError::StrNotUtf8)?;
+
 				SocksDestination::from_str(name)?
 			}
-		};
-		Ok(dest)
+		})
 	}
 
 	// ***Serialize
@@ -233,19 +239,26 @@ impl SocksDestination {
 	}
 }
 
-// -------------------------- Traits --------------------------
+// --- Traits ---
 
 impl FromStr for SocksDestination {
 	type Err = ReadError;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		if s.is_empty() {
-			return Err(ReadError::DomainNameEmpty);
+			return Err(ReadError::InvalidDomain(EMPTY_STRING.into()));
 		}
 		let _ip_err = match IpAddr::from_str(s) {
 			Ok(ip) => return Ok(Self::Ip(ip)),
 			Err(e) => e,
 		};
 		DomainName::from_str(s).map(Self::Name)
+	}
+}
+
+impl From<DomainName> for SocksDestination {
+	#[inline]
+	fn from(domain: DomainName) -> Self {
+		Self::Name(domain)
 	}
 }
 
@@ -270,7 +283,7 @@ impl From<IpAddr> for SocksDestination {
 	}
 }
 
-impl fmt::Display for SocksDestination {
+impl Display for SocksDestination {
 	#[inline]
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -280,7 +293,9 @@ impl fmt::Display for SocksDestination {
 	}
 }
 
-// -------------------------- SocksAddr --------------------------
+// -------------------------------------------------------
+//                       SocksAddr
+// -------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SocksAddr {
@@ -328,11 +343,11 @@ impl SocksAddr {
 	where
 		R: std::io::Read,
 	{
-		let atyp_num = read_arr::<_, 1>(r)?[0];
+		let atyp_num = r.read_u8()?;
 		let atyp =
 			AddrType::try_from(atyp_num).map_err(|_| ReadError::UnknownAddressType(atyp_num))?;
 		let dest = SocksDestination::read_from_atyp(r, atyp)?;
-		let port = u16::from_be_bytes(read_arr::<_, 2>(r)?);
+		let port = r.read_u16()?;
 		Ok(Self::new(dest, port))
 	}
 
@@ -420,29 +435,38 @@ impl SocksAddr {
 		if let Ok(addr) = s.parse::<SocketAddr>() {
 			return Ok(addr.into());
 		}
+		if s.is_empty() {
+			return Err(ReadError::InvalidAddress(EMPTY_STRING.into()));
+		}
+		let mut parts = s.split_terminator(':');
 
-		let mut split = s.split_terminator(':');
+		let dest = {
+			let host_str = parts
+				.next()
+				.ok_or_else(|| ReadError::InvalidAddress("missing domain/IP".into()))?;
+			SocksDestination::from_str(host_str)?
+		};
 
-		let host_str = split.next().ok_or(ReadError::DomainNameEmpty)?;
-
-		let port_str = split.next();
-
-		let dest = SocksDestination::from_str(host_str)?;
-
-		let port = if let Some(port_str) = port_str {
-			port_str
-				.parse::<u16>()
-				.map_err(|err| ReadError::InvalidPort(s.to_owned(), err))?
-		} else {
-			// There are no port in the str.
-			default_port.ok_or_else(|| ReadError::MissingPort(s.to_owned()))?
+		let port = {
+			let port_str = parts.next();
+			if let Some(port_str) = port_str {
+				if port_str.is_empty() {
+					return Err(ReadError::InvalidPort(EMPTY_STRING.into()));
+				}
+				port_str
+					.parse::<u16>()
+					.map_err(|err| ReadError::InvalidPort(err.into()))?
+			} else {
+				// There are no port in the str.
+				default_port.ok_or_else(|| ReadError::InvalidAddress("missing port".into()))?
+			}
 		};
 
 		Ok(Self { dest, port })
 	}
 }
 
-// --------------------------- Traits ---------------------------
+// --- Traits ---
 
 impl FromStr for SocksAddr {
 	type Err = ReadError;
@@ -451,10 +475,13 @@ impl FromStr for SocksAddr {
 	}
 }
 
-impl fmt::Display for SocksAddr {
+impl Display for SocksAddr {
 	#[inline]
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}:{}", self.dest, self.port)
+		match &self.dest {
+			SocksDestination::Name(name) => write!(f, "{}:{}", name, self.port),
+			SocksDestination::Ip(ip) => SocketAddr::new(*ip, self.port).fmt(f),
+		}
 	}
 }
 
@@ -551,7 +578,9 @@ mod serde_internal {
 	}
 }
 
-// --------------------------- DomainName ---------------------------
+// -------------------------------------------------------
+//                     DomainName
+// -------------------------------------------------------
 
 /// A domain string that's guaranteed to be at most 255 bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
@@ -584,15 +613,15 @@ impl std::str::FromStr for DomainName {
 
 	fn from_str(v: &str) -> Result<Self, ReadError> {
 		if v.is_empty() {
-			return Err(ReadError::DomainNameEmpty);
+			return Err(ReadError::InvalidDomain(EMPTY_STRING.into()));
 		}
 		if v.len() > 256 {
-			return Err(ReadError::DomainNameTooLong);
+			return Err(ReadError::InvalidDomain("too long".into()));
 		}
 		// Remove the final dot '.' if possible.
 		let v = v.strip_suffix('.').unwrap_or(v);
-		let name = idna::domain_to_ascii_strict(v)
-			.map_err(|e| ReadError::InvalidDomain(v.to_owned(), e))?;
+		let name =
+			idna::domain_to_ascii_strict(v).map_err(|e| ReadError::InvalidDomain(e.into()))?;
 		Ok(Self(SmolStr::new(&name)))
 	}
 }
@@ -640,240 +669,404 @@ impl Display for DomainName {
 	}
 }
 
-// --------------------------- Utils ---------------------------
-
-#[inline]
-fn read_arr<R, const N: usize>(r: &mut R) -> io::Result<[u8; N]>
-where
-	R: std::io::Read,
-{
-	let mut res = [0_u8; N];
-	r.read_exact(&mut res)?;
-	Ok(res)
-}
-
-// --------------------------- Tests ---------------------------
+// -------------------------------------------------------
+//                          Tests
+// -------------------------------------------------------
 
 #[cfg(test)]
-mod host_tests {
+mod dest_tests {
 	use super::*;
-	use std::io::Cursor;
+	use lazy_static::lazy_static;
 
-	#[test]
-	fn test_dest_write_to_v4() {
-		let ip = Ipv4Addr::new(1, 2, 3, 4);
-
-		let mut expected_buffer = vec![];
-		expected_buffer.put_slice(&ip.octets());
-
-		let mut result = vec![];
-		SocksDestination::Ip(ip.into()).write_to_no_atyp(&mut result);
-		assert_eq!(expected_buffer, result);
+	const TEST_IPV4: Ipv4Addr = Ipv4Addr::new(1, 2, 3, 4);
+	const TEST_IPV6: Ipv6Addr = Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8);
+	lazy_static! {
+		static ref TEST_DOMAIN: DomainName = DomainName::from_str("hello.world").unwrap();
 	}
 
 	#[test]
-	fn test_dest_write_to_v6() {
-		let ip = Ipv6Addr::new(1, 1, 2, 2, 3, 3, 4, 4);
-
-		let mut expected_buffer = vec![];
-		expected_buffer.put_slice(&ip.octets());
-
-		let mut result = vec![];
-		SocksDestination::Ip(ip.into()).write_to_no_atyp(&mut result);
-		assert_eq!(expected_buffer, result);
+	fn test_dest_write_to() {
+		let inputs = [
+			SocksDestination::from(TEST_IPV4),
+			SocksDestination::from(TEST_IPV6),
+			SocksDestination::from(TEST_DOMAIN.clone()),
+		];
+		let expected_results = vec![
+			{
+				let mut buf = vec![];
+				buf.put_slice(&TEST_IPV4.octets());
+				buf
+			},
+			{
+				let mut buf = vec![];
+				buf.put_slice(&TEST_IPV6.octets());
+				buf
+			},
+			{
+				let name = TEST_DOMAIN.as_str();
+				let mut buf = vec![];
+				buf.put_u8(name.as_bytes().len() as u8);
+				buf.put_slice(name.as_bytes());
+				buf
+			},
+		];
+		for (input, expected) in inputs.iter().zip(expected_results.iter()) {
+			let mut buf = Vec::new();
+			input.write_to_no_atyp(&mut buf);
+			assert_eq!(&buf, expected, "cannot write {:?} to {:?}", input, expected);
+			assert_eq!(
+				buf.len(),
+				input.serialized_len_atyp() - 1,
+				"cannot write {:?} to {:?}",
+				input,
+				expected
+			);
+		}
 	}
 
 	#[test]
-	fn test_dest_write_to_name() {
-		let name = "hello.world";
-
-		let mut expected_buffer = vec![];
-		expected_buffer.put_u8(name.len() as u8);
-		expected_buffer.put_slice(name.as_bytes());
-
-		let mut result = vec![];
-		SocksDestination::new_domain(name).unwrap().write_to_no_atyp(&mut result);
-		assert_eq!(expected_buffer, result);
-	}
-
-	#[test]
-	fn test_dest_async_read_from_v4() {
-		let ip = Ipv4Addr::new(1, 2, 3, 4);
-
-		let mut input = vec![];
-		input.put_slice(&ip.octets());
-
+	fn test_dest_async_read_from() {
+		let inputs = vec![
+			{
+				let mut buf = vec![];
+				buf.put_slice(&TEST_IPV4.octets());
+				(buf, AddrType::Ipv4)
+			},
+			{
+				let mut buf = vec![];
+				buf.put_slice(&TEST_IPV6.octets());
+				(buf, AddrType::Ipv6)
+			},
+			{
+				let name = TEST_DOMAIN.as_str();
+				let mut buf = vec![];
+				buf.put_u8(name.as_bytes().len() as u8);
+				buf.put_slice(name.as_bytes());
+				(buf, AddrType::Name)
+			},
+		];
+		let expected_results = [
+			SocksDestination::from(TEST_IPV4),
+			SocksDestination::from(TEST_IPV6),
+			SocksDestination::from(TEST_DOMAIN.clone()),
+		];
 		let rt = tokio::runtime::Runtime::new().unwrap();
 		rt.block_on(async move {
-			let result =
-				SocksDestination::async_read_from_atyp(&mut Cursor::new(input), AddrType::Ipv4)
+			for ((input, atyp), expected) in inputs.iter().zip(expected_results.iter()) {
+				let result = SocksDestination::async_read_from_atyp(&mut input.as_slice(), *atyp)
 					.await
 					.unwrap();
-			assert_eq!(result, SocksDestination::Ip(ip.into()));
+				assert_eq!(
+					&result, expected,
+					"cannot parse bytes {:?} to {:?}",
+					input, expected
+				);
+				assert_eq!(
+					result.serialized_len_atyp() - 1,
+					input.len(),
+					"cannot parse bytes {:?} to {:?}",
+					input,
+					expected
+				);
+			}
 		});
 	}
 
 	#[test]
-	fn test_dest_async_read_from_v6() {
-		let ip = Ipv6Addr::new(1, 1, 2, 2, 3, 3, 4, 4);
-
-		let mut input = vec![];
-		input.put_slice(&ip.octets());
-
-		let rt = tokio::runtime::Runtime::new().unwrap();
-		rt.block_on(async move {
-			let result =
-				SocksDestination::async_read_from_atyp(&mut Cursor::new(input), AddrType::Ipv6)
-					.await
-					.unwrap();
-			assert_eq!(result, SocksDestination::Ip(ip.into()));
-		});
+	fn test_dest_read_from() {
+		let inputs = vec![
+			{
+				let mut buf = vec![];
+				buf.put_slice(&TEST_IPV4.octets());
+				(buf, AddrType::Ipv4)
+			},
+			{
+				let mut buf = vec![];
+				buf.put_slice(&TEST_IPV6.octets());
+				(buf, AddrType::Ipv6)
+			},
+			{
+				let name = TEST_DOMAIN.as_str();
+				let mut buf = vec![];
+				buf.put_u8(name.as_bytes().len() as u8);
+				buf.put_slice(name.as_bytes());
+				(buf, AddrType::Name)
+			},
+		];
+		let expected_results = [
+			SocksDestination::from(TEST_IPV4),
+			SocksDestination::from(TEST_IPV6),
+			SocksDestination::from(TEST_DOMAIN.clone()),
+		];
+		for ((input, atyp), expected) in inputs.iter().zip(expected_results.iter()) {
+			let result = SocksDestination::read_from_atyp(&mut input.as_slice(), *atyp).unwrap();
+			assert_eq!(
+				&result, expected,
+				"cannot parse {:?} to {:?}",
+				input, expected
+			);
+			assert_eq!(
+				result.serialized_len_atyp() - 1,
+				input.len(),
+				"cannot parse {:?} to {:?}",
+				input,
+				expected
+			);
+		}
 	}
 
 	#[test]
-	fn test_dest_async_read_from_name() {
-		let name = "helloworld";
-
-		let mut input = vec![];
-		input.put_u8(name.as_bytes().len() as u8);
-		input.put_slice(name.as_bytes());
-
-		let rt = tokio::runtime::Runtime::new().unwrap();
-		rt.block_on(async move {
-			let result =
-				SocksDestination::async_read_from_atyp(&mut Cursor::new(input), AddrType::Name)
-					.await
-					.unwrap();
-			assert_eq!(result, SocksDestination::new_domain(name).unwrap());
-		});
+	fn test_dest_from_str_ipv4() {
+		let inputs = [
+			TEST_IPV4.to_string(),
+			TEST_IPV6.to_string(),
+			TEST_DOMAIN.as_str().to_string(),
+		];
+		let expected_results = [
+			SocksDestination::from(TEST_IPV4),
+			SocksDestination::from(TEST_IPV6),
+			SocksDestination::from(TEST_DOMAIN.clone()),
+		];
+		for (input, expected) in inputs.iter().zip(expected_results.iter()) {
+			assert_eq!(
+				&SocksDestination::from_str(input).unwrap(),
+				expected,
+				"from_str failed on input '{}'",
+				input
+			);
+		}
 	}
 
 	#[test]
-	fn test_dest_read_from_v4() {
-		let ip = Ipv4Addr::new(1, 2, 3, 4);
-		let atyp = AddrType::Ipv4;
-
-		let mut input = vec![];
-		input.put_slice(&ip.octets());
-
-		let result = SocksDestination::read_from_atyp(&mut Cursor::new(&input), atyp).unwrap();
-		assert_eq!(result, SocksDestination::Ip(ip.into()));
-		assert_eq!(result.serialized_len_atyp() - 1, input.len());
-	}
-
-	#[test]
-	fn test_dest_read_from_v6() {
-		let ip = Ipv6Addr::new(1, 1, 2, 2, 3, 3, 4, 4);
-		let atyp = AddrType::Ipv6;
-
-		let mut input = vec![];
-		input.put_slice(&ip.octets());
-
-		let result = SocksDestination::read_from_atyp(&mut Cursor::new(&input), atyp).unwrap();
-		assert_eq!(result, SocksDestination::Ip(ip.into()));
-		assert_eq!(result.serialized_len_atyp() - 1, input.len());
-	}
-
-	#[test]
-	fn test_dest_read_from_name() {
-		let name = "helloworld";
-		let atyp = AddrType::Name;
-
-		let mut input = vec![];
-		input.put_u8(name.as_bytes().len() as u8);
-		input.put_slice(name.as_bytes());
-
-		let result = SocksDestination::read_from_atyp(&mut Cursor::new(&input), atyp).unwrap();
-		assert_eq!(result, SocksDestination::new_domain(name).unwrap());
-		assert_eq!(result.serialized_len_atyp() - 1, input.len());
-	}
-
-	#[test]
-	fn test_dest_parse_ipv4() {
-		let ip = Ipv4Addr::new(1, 2, 3, 4);
-		assert_eq!(
-			SocksDestination::Ip(ip.into()),
-			SocksDestination::from_str(&ip.to_string()).unwrap()
-		)
-	}
-
-	#[test]
-	fn test_dest_parse_ipv6() {
-		let ip = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
-		assert_eq!(
-			SocksDestination::Ip(ip.into()),
-			SocksDestination::from_str(&ip.to_string()).unwrap()
-		)
-	}
-
-	#[test]
-	fn test_dest_parse_name() {
-		let name = "hello.world";
-		assert_eq!(
-			SocksDestination::new_domain(name).unwrap(),
-			SocksDestination::from_str(name).unwrap()
-		)
-	}
-
-	#[test]
-	fn test_dest_parse_error_empty() {
-		assert!(matches!(
-			SocksDestination::from_str("").unwrap_err(),
-			ReadError::DomainNameEmpty
-		));
-	}
-
-	#[test]
-	fn test_dest_parse_error_invalid() {
+	fn test_dest_from_str_error() {
+		assert!(
+			matches!(
+				SocksDestination::from_str("").unwrap_err(),
+				ReadError::InvalidDomain(_)
+			),
+			"empty string should not be accepted"
+		);
 		assert!(
 			matches!(
 				SocksDestination::from_str("bad.host_name").unwrap_err(),
-				ReadError::InvalidDomain(_, _)
+				ReadError::InvalidDomain(_)
 			),
 			"'_' should not be accepted"
 		);
 		assert!(
 			matches!(
 				SocksDestination::from_str("bad*.domain").unwrap_err(),
-				ReadError::InvalidDomain(_, _)
+				ReadError::InvalidDomain(_)
 			),
 			"'*' should not be accepted"
 		);
 	}
 
 	#[test]
-	fn test_dest_display_ipv4() {
-		let ip = Ipv4Addr::new(1, 2, 3, 4);
-		assert_eq!(ip.to_string(), SocksDestination::Ip(ip.into()).to_string());
+	fn test_dest_display() {
+		let inputs = [
+			SocksDestination::from(TEST_IPV4),
+			SocksDestination::from(TEST_IPV6),
+			SocksDestination::from(TEST_DOMAIN.clone()),
+		];
+		let expected_results = [
+			TEST_IPV4.to_string(),
+			TEST_IPV6.to_string(),
+			TEST_DOMAIN.to_string(),
+		];
+		for (input, expected) in inputs.iter().zip(expected_results.iter()) {
+			assert_eq!(
+				&input.to_string(),
+				expected,
+				"{:?} to_string != '{}'",
+				input,
+				expected
+			);
+		}
 	}
 
 	#[test]
-	fn test_dest_display_ipv6() {
-		let ip = Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8);
-		assert_eq!(ip.to_string(), SocksDestination::Ip(ip.into()).to_string());
+	fn test_dest_to_str() {
+		let inputs = [
+			SocksDestination::from(TEST_IPV4),
+			SocksDestination::from(TEST_IPV6),
+			SocksDestination::from(TEST_DOMAIN.clone()),
+		];
+		let expected_results = [
+			Cow::Owned(TEST_IPV4.to_string()),
+			Cow::Owned(TEST_IPV6.to_string()),
+			Cow::Borrowed(TEST_DOMAIN.as_str()),
+		];
+		for (input, expected) in inputs.iter().zip(expected_results.iter()) {
+			assert_eq!(
+				&input.to_str(),
+				expected,
+				"{:?} to_string != '{}'",
+				input,
+				expected
+			);
+		}
+	}
+}
+
+#[cfg(test)]
+mod addr_tests {
+	use super::*;
+	use lazy_static::lazy_static;
+	use std::net::Ipv4Addr;
+
+	const TEST_IPV4: Ipv4Addr = Ipv4Addr::new(1, 2, 3, 4);
+	const TEST_IPV6: Ipv6Addr = Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8);
+	const TEST_PORT: u16 = 54321;
+	lazy_static! {
+		static ref TEST_DOMAIN: DomainName = DomainName::from_str("hello.world").unwrap();
 	}
 
 	#[test]
-	fn test_dest_display_name() {
-		let name = "hello.world";
-		assert_eq!(name, SocksDestination::new_domain(name).unwrap().to_string());
+	fn test_addr_read_from_v4() {
+		let inputs = [
+			{
+				let mut input = vec![];
+				input.put_u8(AddrType::Ipv4.val());
+				input.put_slice(&TEST_IPV4.octets());
+				input.put_u16(TEST_PORT);
+				input
+			},
+			{
+				let mut input = vec![];
+				input.put_u8(AddrType::Ipv6.val());
+				input.put_slice(&TEST_IPV6.octets());
+				input.put_u16(TEST_PORT);
+				input
+			},
+			{
+				let mut input = vec![];
+				input.put_u8(AddrType::Name as u8);
+				input.put_u8(TEST_DOMAIN.len());
+				input.put_slice(TEST_DOMAIN.as_bytes());
+				input.put_u16(TEST_PORT);
+				input
+			},
+		];
+
+		let expected_results = [
+			SocksAddr::new(TEST_IPV4.into(), TEST_PORT),
+			SocksAddr::new(TEST_IPV6.into(), TEST_PORT),
+			SocksAddr::new(TEST_DOMAIN.clone().into(), TEST_PORT),
+		];
+
+		for (input, expected) in inputs.iter().zip(expected_results.iter()) {
+			let result = SocksAddr::read_from(&mut input.as_slice()).unwrap();
+			assert_eq!(
+				&result, expected,
+				"cannot read {:?} into {:?}",
+				input, expected
+			);
+			assert_eq!(
+				result.serialized_len_atyp(),
+				input.len(),
+				"cannot read {:?} into {:?}",
+				input,
+				expected
+			);
+		}
 	}
 
 	#[test]
-	fn test_dest_to_str_ipv4() {
-		let ip = Ipv4Addr::new(1, 2, 3, 4);
-		assert_eq!(ip.to_string(), SocksDestination::Ip(ip.into()).to_str());
+	fn test_addr_from_str_ipv4() {
+		let val = format!("{}", SocketAddr::new(TEST_IPV4.into(), TEST_PORT));
+		assert_eq!(
+			SocksAddr::from_str(&val).unwrap(),
+			SocksAddr::new(TEST_IPV4.into(), TEST_PORT)
+		)
 	}
 
 	#[test]
-	fn test_dest_to_str_ipv6() {
-		let ip = Ipv6Addr::new(1, 2, 3, 4, 5, 6, 7, 8);
-		assert_eq!(ip.to_string(), SocksDestination::Ip(ip.into()).to_str());
+	fn test_addr_from_str_ipv6() {
+		let val = format!("{}", SocketAddr::new(TEST_IPV6.into(), TEST_PORT));
+		assert_eq!(
+			SocksAddr::from_str(&val).unwrap(),
+			SocksAddr::new(TEST_IPV6.into(), TEST_PORT)
+		)
 	}
 
 	#[test]
-	fn test_dest_to_str_name() {
-		let name = "hello.world";
-		assert_eq!(name, SocksDestination::new_domain(name).unwrap().to_str());
+	fn test_addr_from_str_name() {
+		let val = format!("{}:{}", TEST_DOMAIN.as_str(), TEST_PORT);
+		assert_eq!(
+			SocksAddr::from_str(&val).unwrap(),
+			SocksAddr::new(TEST_DOMAIN.clone().into(), TEST_PORT)
+		)
+	}
+
+	#[test]
+	fn test_addr_from_str_error() {
+		{
+			// Address has no port
+			let e = SocksAddr::from_str("hello.world").unwrap_err();
+			if let ReadError::InvalidAddress(_) = e {
+			} else {
+				panic!("{:?} is not the correct type", e);
+			}
+		}
+		{
+			// Bad domain
+			let e = SocksAddr::from_str("bad__.domain:443").unwrap_err();
+			assert!(
+				matches!(e, ReadError::InvalidDomain(_)),
+				"{:?} is not the correct type",
+				e
+			);
+		}
+		{
+			// Bad domain
+			let e = SocksAddr::from_str("bad*.domain:443").unwrap_err();
+			assert!(
+				matches!(e, ReadError::InvalidDomain(_)),
+				"{:?} is not the correct type",
+				e
+			);
+		}
+		{
+			// Bad port
+			let e = SocksAddr::from_str("hello.world:bad_port").unwrap_err();
+			assert!(
+				matches!(e, ReadError::InvalidPort(_)),
+				"{:?} is not the correct type",
+				e
+			);
+		}
+		{
+			// Missing port
+			let e = SocksAddr::from_str("hello.world:").unwrap_err();
+			assert!(
+				matches!(e, ReadError::InvalidAddress(_)),
+				"{:?} is not the correct type",
+				e
+			);
+		}
+	}
+
+	#[test]
+	fn test_addr_display() {
+		let inputs = [
+			SocksAddr::new(TEST_IPV4.into(), TEST_PORT),
+			SocksAddr::new(TEST_IPV6.into(), TEST_PORT),
+			SocksAddr::new(TEST_DOMAIN.clone().into(), TEST_PORT),
+		];
+		let expected_results = [
+			SocketAddr::new(TEST_IPV4.into(), TEST_PORT).to_string(),
+			SocketAddr::new(TEST_IPV6.into(), TEST_PORT).to_string(),
+			format!("{}:{}", TEST_DOMAIN.as_str(), TEST_PORT),
+		];
+		for (input, expected) in inputs.iter().zip(expected_results.iter()) {
+			assert_eq!(
+				&input.to_string(),
+				expected,
+				"cannot use to_string on {:?} to '{}'",
+				input,
+				expected
+			);
+		}
 	}
 }

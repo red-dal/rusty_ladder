@@ -171,18 +171,9 @@ chain-outbound = []
 trojan-outbound = ["sha2", "__transport-outbound"]
 
 # Enable local DNS server.
-local-dns = [
-	"trust-dns-server",
-	"trust-dns-client",
-]
-local-dns-over-openssl = [
-	"local-dns",
-	"__tls_openssl",
-]
-local-dns-over-rustls = [
-	"local-dns",
-	"__tls_rustls",
-]
+local-dns = ["trust-dns-server", "trust-dns-client"]
+local-dns-over-openssl = ["local-dns", "__tls_openssl"]
+local-dns-over-rustls = ["local-dns", "__tls_rustls"]
 
 # Enable serde support for configuration builder.
 use_serde = ["serde"]

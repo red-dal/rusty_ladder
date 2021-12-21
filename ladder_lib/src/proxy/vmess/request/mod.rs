@@ -19,13 +19,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 mod aead;
 
+#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
+use super::crypto::Aes128CfbEncryptor;
 use super::{
-	crypto::{Aes128CfbDecrypter, },
+	crypto::Aes128CfbDecrypter,
 	utils::{self, AddrType, Iv, Key, SecurityType},
 	HeaderMode,
 };
-#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
-use super::crypto::Aes128CfbEncryptor;
 use crate::prelude::*;
 use futures::ready;
 use num_enum::TryFromPrimitive;
