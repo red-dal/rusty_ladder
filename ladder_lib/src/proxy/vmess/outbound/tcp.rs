@@ -153,8 +153,10 @@ impl ResponseHelper {
 					}
 					let len =
 						open_len(buf, &self.response_key, &self.response_iv).map_err(|e| {
-							error!("Cannot decrypt VMess AEAD response ({})", e);
-							io::Error::new(io::ErrorKind::InvalidData, e)
+							io::Error::new(
+								io::ErrorKind::InvalidData,
+								format!("cannot decrypt VMess AEAD response ({})", e),
+							)
 						})?;
 					trace!("VMess AEAD payload length: {}", len);
 					if len == 0 {

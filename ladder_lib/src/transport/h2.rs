@@ -188,11 +188,14 @@ impl Inbound {
 		} else {
 			conn.graceful_shutdown();
 			if let Err(err) = CloseServerFuture::new(conn).await {
-				error!("Error when trying to close HTTP2 connection ({})", err);
-			};
+				return Err(io::Error::new(
+					io::ErrorKind::Other,
+					format!("cannot close H2 connection ({})", err),
+				));
+			}
 			return Err(io::Error::new(
 				io::ErrorKind::Other,
-				"no request from h2 client",
+				"no request from H2 client",
 			));
 		};
 
@@ -269,8 +272,7 @@ impl Inbound {
 	}
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(
 	feature = "use_serde",
 	derive(serde::Deserialize),

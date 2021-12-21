@@ -291,7 +291,7 @@ mod udp {
 	};
 	use async_trait::async_trait;
 	use futures::{future::AbortHandle, pin_mut};
-	use log::{debug, error, trace};
+	use log::{debug, trace, warn};
 	use std::{
 		io,
 		net::{IpAddr, SocketAddr},
@@ -530,7 +530,7 @@ mod udp {
 					Ok(info) => return Ok(info),
 					Err(e) => {
 						// Only log the invalid datagram.
-						error!("Invalid SOCKS5 UDP request datagram: {}", e);
+						warn!("Invalid SOCKS5 UDP request datagram ({}).", e);
 						continue;
 					}
 				}

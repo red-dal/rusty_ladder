@@ -153,7 +153,7 @@ impl<D: Decode> CodecReadHelper<D> {
 					let n = match ready!(poll_read_exact(reader.as_mut(), cx, buf, pos)) {
 						Ok(n) => n,
 						Err(e) => {
-							error!(
+							debug!(
 								"Error occurred while trying to read {} bytes ({})",
 								buf.len(),
 								e
@@ -177,7 +177,7 @@ impl<D: Decode> CodecReadHelper<D> {
 					let mut read_buf = ReadBuf::new(buf.as_mut_slice());
 					if let Err(e) = ready!(reader.as_mut().poll_read(cx, &mut read_buf)) {
 						self.state = DecodeState::Closed;
-						error!("Error occurred while trying to read some bytes ({})", e);
+						debug!("Error occurred while trying to read some bytes ({})", e);
 						// Clean up buffer.
 						buf.clear();
 						buf.shrink_to_fit();

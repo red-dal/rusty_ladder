@@ -201,12 +201,16 @@ impl codec::Decode for Decoder {
 
 						assert_eq!(buf.len(), 2 + aead::TAG_LEN);
 						if let Err(e) = dec.open_inplace(buf, &[]) {
-							error!(
-								"Cannot decrypt Shadowsocks length data ({} bytes) {:?}",
-								buf.len(),
-								buf
-							);
-							return Err(Error::FailedCrypto(e).into());
+							return Err(Error::FailedCrypto(
+								format!(
+									"Cannot decrypt Shadowsocks length data of {} bytes {:?} ({})",
+									buf.len(),
+									buf,
+									e
+								)
+								.into(),
+							)
+							.into());
 						};
 						if let Some(len) = NonZeroU16::new(buf.as_slice().get_u16()) {
 							// Change state and tell reader
@@ -224,11 +228,15 @@ impl codec::Decode for Decoder {
 						let len = usize::from(len.get());
 						assert_eq!(buf.len(), len + aead::TAG_LEN);
 						if let Err(e) = dec.open_inplace(buf, &[]) {
-							error!(
-								"Cannot decrypt shadowsocks payload data ({} bytes)",
-								buf.len()
-							);
-							return Err(Error::FailedCrypto(e).into());
+							return Err(Error::FailedCrypto(
+								format!(
+									"cannot decrypt shadowsocks payload data of {} bytes ({})",
+									buf.len(),
+									e
+								)
+								.into(),
+							)
+							.into());
 						};
 						buf.truncate(len);
 						*state = DecodeState::Length;

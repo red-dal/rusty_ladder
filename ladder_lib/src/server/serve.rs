@@ -149,7 +149,7 @@ impl Server {
 		monitor: Option<Monitor>,
 	) -> Result<(), BoxStdErr> {
 		let inbound = &self.inbounds[inbound_ind];
-		warn!(
+		info!(
 			"Serving TCP on {} for inbound '{}'",
 			inbound.addr, inbound.tag
 		);
@@ -287,7 +287,11 @@ impl<'a> InboundConnection<'a> {
 			peer_addr: tcp_stream.peer_addr()?,
 			local_addr: tcp_stream.local_addr()?,
 		};
-		let accept_res = match inbound.settings.accept_tcp(tcp_stream.into(), Some(info)).await {
+		let accept_res = match inbound
+			.settings
+			.accept_tcp(tcp_stream.into(), Some(info))
+			.await
+		{
 			Ok(res) => res,
 			Err(e) => {
 				match e {
@@ -355,10 +359,10 @@ impl<'a> InboundConnection<'a> {
 			return Err(err.into());
 		};
 
+		let route_str = new_route_name(self.src, dst, self.inbound, outbound);
 		info!(
-			"{} Proxy route: {}.",
-			self.conn_id_str,
-			new_route_name(self.src, dst, self.inbound, outbound)
+			"{} Proxy route found: {}. Trying to make connection with outbound...",
+			self.conn_id_str, route_str
 		);
 
 		let out_stream = self
@@ -373,73 +377,78 @@ impl<'a> InboundConnection<'a> {
 				return Err(err.into());
 			}
 		};
-
-		trace!("{} Connection to outbound established.", self.conn_id_str);
+		debug!(
+			"{} Connection to outbound established. Finishing handshake with inbound...",
+			self.conn_id_str
+		);
 		let in_stream = handshake_handler.finish().await?;
-
-		trace!("{} Handshake with inbound finished.", self.conn_id_str);
-
-		return proxy_stream(
-			&self.conn_id_str,
-			dst,
-			&self.stat_handle,
-			in_stream,
-			out_stream,
-			self.server.relay_buffer_size,
-			self.server.relay_timeout_secs,
-		)
+		debug!("{} Handshake with inbound finished. Start relaying traffic between inbound and outbound...", self.conn_id_str);
+		return ProxyStreamHandler {
+			conn_id_str: &self.conn_id_str,
+			route_str: &route_str,
+			stat_handle: &self.stat_handle,
+			in_ps: in_stream,
+			out_ps: out_stream,
+			relay_buffer_size: self.server.relay_buffer_size,
+			relay_timeout_secs: self.server.relay_timeout_secs,
+		}
+		.run()
 		.await;
 	}
 }
 
-async fn proxy_stream<'a>(
+struct ProxyStreamHandler<'a> {
 	conn_id_str: &'a str,
-	dst_addr: &'a SocksAddr,
+	route_str: &'a str,
 	stat_handle: &'a Option<SessionHandle>,
 	in_ps: BytesStream,
 	out_ps: BytesStream,
 	relay_buffer_size: usize,
 	relay_timeout_secs: usize,
-) -> Result<(), Error> {
-	let start_time = Instant::now();
-	let recv = Counter::new(0);
-	let send = Counter::new(0);
+}
 
-	if let Some(stat_handle) = stat_handle {
-		stat_handle.set_proxying(recv.clone(), send.clone());
+impl<'a> ProxyStreamHandler<'a> {
+	async fn run(self) -> Result<(), Error> {
+		let start_time = Instant::now();
+		let recv = Counter::new(0);
+		let send = Counter::new(0);
+
+		if let Some(stat_handle) = self.stat_handle {
+			stat_handle.set_proxying(recv.clone(), send.clone());
+		}
+
+		let relay_result = Relay {
+			conn_id: self.conn_id_str,
+			recv: Some(recv.clone()),
+			send: Some(send.clone()),
+			buffer_size: self.relay_buffer_size,
+			timeout_secs: self.relay_timeout_secs,
+		}
+		.relay_stream(self.in_ps.r, self.in_ps.w, self.out_ps.r, self.out_ps.w)
+		.await;
+
+		let end_time = Instant::now();
+
+		let recv_count = recv.get();
+		let send_count = send.get();
+		// print result
+		let msg = format!(
+			"{} {} finished with {} received, {} sent and lasted {} secs.",
+			self.conn_id_str,
+			self.route_str,
+			BytesCount(recv_count),
+			BytesCount(send_count),
+			(end_time - start_time).as_secs(),
+		);
+
+		if let Err(e) = relay_result {
+			warn!("{} But an error occurred ({}).", msg, e);
+			return Err(e.into());
+		}
+		info!("{}", msg);
+
+		Ok(())
 	}
-
-	let relay_result = Relay {
-		conn_id: conn_id_str,
-		recv: Some(recv.clone()),
-		send: Some(send.clone()),
-		buffer_size: relay_buffer_size,
-		timeout_secs: relay_timeout_secs,
-	}
-	.relay_stream(in_ps.r, in_ps.w, out_ps.r, out_ps.w)
-	.await;
-
-	let end_time = Instant::now();
-
-	let recv_count = recv.get();
-	let send_count = send.get();
-	// print result
-	let msg = format!(
-		"{} Proxy to '{}' finished with {} received, {} sent and lasted {} secs.",
-		conn_id_str,
-		dst_addr,
-		BytesCount(recv_count),
-		BytesCount(send_count),
-		(end_time - start_time).as_secs(),
-	);
-
-	if let Err(e) = relay_result {
-		error!("{} But an error occurred ({}).", msg, e);
-		return Err(e.into());
-	}
-	warn!("{}", msg);
-
-	Ok(())
 }
 
 #[inline]
@@ -450,7 +459,7 @@ fn new_route_name(
 	outbound: &Outbound,
 ) -> Cow<'static, str> {
 	format!(
-		"'{}'--[{}, {}]--[{}, {}]->'{}'",
+		"['{}'--{}({})--{}({})--'{}']",
 		src_addr,
 		inbound.tag,
 		inbound.settings.protocol_name(),
@@ -463,5 +472,5 @@ fn new_route_name(
 
 #[inline]
 fn format_conn_id(conn_id: u64, inbound_tag: &str) -> String {
-	format!("{:#06x} ({})", conn_id, inbound_tag)
+	format!("[{:#06x} {}]", conn_id, inbound_tag)
 }

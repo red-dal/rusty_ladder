@@ -249,7 +249,6 @@ where
 		Ok(len) => len,
 		Err(err) => {
 			let msg = format!("cannot decrypt VMess AEAD length ({})", err);
-			error!("{}", msg);
 			return Err(msg.into());
 		}
 	};
@@ -261,7 +260,6 @@ where
 		Ok(payload) => payload,
 		Err(err) => {
 			let msg = format!("cannot decrypt VMess AEAD payload ({})", err);
-			error!("{}", msg);
 			return Err(msg.into());
 		}
 	};
