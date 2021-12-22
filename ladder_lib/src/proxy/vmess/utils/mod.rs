@@ -24,14 +24,8 @@ mod error;
 
 use std::num::NonZeroUsize;
 
-pub(super) use error::Error;
-pub type Key = [u8; 16];
-pub type Iv = [u8; 16];
-#[allow(dead_code)]
-pub type AuthId = [u8; AUTH_LENGTH];
-
 use super::HeaderMode;
-use crate::{non_zeros, prelude::*, utils::read_u16};
+use crate::{non_zeros, prelude::*};
 use digest::{Digest, ExtendableOutput, XofReader};
 use md5::{digest, Md5};
 use num_enum::TryFromPrimitive;
@@ -39,8 +33,12 @@ use sha2::Sha256;
 use sha3::{Sha3XofReader, Shake128};
 use uuid::Uuid;
 
+pub const AUTH_ID_LEN: usize = 16;
 
-pub const AUTH_LENGTH: usize = 16;
+pub(super) use error::Error;
+pub type Key = [u8; 16];
+pub type Iv = [u8; 16];
+pub type AuthId = [u8; AUTH_ID_LEN];
 
 const KEY_OFFSET_BYTES: &[u8] = b"c48619fe-8f02-49e0-b9e9-edf763e17e21";
 
@@ -136,8 +134,7 @@ impl LengthReader for ShakeLengthReader {
 		let mask = self.update();
 		// ignore the padding
 		let (len_buf, _padding) = buf.split_at(2);
-		// let len = BigEndian::read_u16(buf);
-		let len = read_u16(len_buf);
+		let len = (&*len_buf).get_u16();
 		let payload_len = len ^ mask;
 		Ok(payload_len)
 	}
@@ -204,7 +201,7 @@ impl LengthReader for PlainLengthReader {
 
 	#[inline]
 	fn read_length(&mut self, buf: &[u8]) -> Result<u16, BoxStdErr> {
-		let len = read_u16(buf);
+		let len = (&*buf).get_u16();
 		Ok(len)
 	}
 
@@ -259,7 +256,7 @@ pub fn new_cmd_key(id: &Uuid) -> [u8; 16] {
 }
 
 #[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
-pub fn new_auth(time: i64, uuid: &Uuid) -> Result<[u8; AUTH_LENGTH], Error> {
+pub fn new_auth(time: i64, uuid: &Uuid) -> Result<[u8; AUTH_ID_LEN], Error> {
 	use hmac::{Hmac, Mac, NewMac};
 	type HmacMd5 = Hmac<Md5>;
 	let time = time.to_be_bytes();

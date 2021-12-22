@@ -111,7 +111,7 @@ impl Settings {
 
 		trace!("Trojan request header length: {} bytes", req_buf.len());
 
-		let write_half = LazyWriteHalf::new_not_lazy(stream.w, req_buf);
+		let write_half = LazyWriteHalf::new(stream.w, req_buf);
 		let stream = BytesStream::new(stream.r, Box::new(write_half));
 		Ok(stream)
 	}
@@ -170,7 +170,7 @@ mod udp_impl {
 			socks_addr::ReadError,
 			BoxRead, BytesStream, ProxyContext,
 		},
-		utils::{read_u16, LazyWriteHalf},
+		utils::LazyWriteHalf,
 	};
 	use async_trait::async_trait;
 	use std::io;
@@ -196,7 +196,18 @@ mod udp_impl {
 	#[async_trait]
 	impl RecvPacket for UdpReadHalf {
 		async fn recv_src(&mut self, buf: &mut [u8]) -> std::io::Result<(usize, SocksAddr)> {
+			// Each UDP packet has the following format:
+			//
+			// +------+----------+----------+--------+---------+----------+
+			// | ATYP | DST.ADDR | DST.PORT | Length |  CRLF   | Payload  |
+			// +------+----------+----------+--------+---------+----------+
+			// |  1   | Variable |    2     |   2    | X'0D0A' | Variable |
+			// +------+----------+----------+--------+---------+----------+
+			//
+			// See more at <https://github.com/trojan-gfw/trojan/blob/master/docs/protocol.md>
+
 			debug_assert!(buf.len() > 4 * 1024);
+			// Reading address (ATYP, DST.ADDR, DST.PORT)
 			let src = SocksAddr::async_read_from(&mut self.inner)
 				.await
 				.map_err(|e| {
@@ -206,14 +217,14 @@ mod udp_impl {
 						io::Error::new(io::ErrorKind::InvalidData, e)
 					}
 				})?;
-
-			let mut tmp = [0_u8; 4];
-			self.inner.read_exact(&mut tmp).await?;
-
-			let (len, crlf) = tmp.split_at(2);
-
-			let len = read_u16(len) as usize;
-
+			// Reading length and CRLF
+			let (len, crlf) = {
+				let mut tmp = [0_u8; 4];
+				let len = [tmp[0], tmp[1]];
+				let crlf = [tmp[2], tmp[3]];
+				self.inner.read_exact(&mut tmp).await?;
+				(usize::from(u16::from_be_bytes(len)), crlf)
+			};
 			if crlf != CRLF {
 				return Err(io::Error::new(
 					io::ErrorKind::InvalidData,
@@ -230,7 +241,7 @@ mod udp_impl {
 					),
 				));
 			}
-
+			// Reading payload
 			self.inner.read_exact(&mut buf[..len]).await?;
 			return Ok((len, src));
 		}
@@ -314,7 +325,7 @@ mod udp_impl {
 			self.settings.addr.write_to(&mut req_buf);
 			req_buf.put_slice(CRLF);
 
-			let write_half = LazyWriteHalf::new_not_lazy(stream.w, req_buf);
+			let write_half = LazyWriteHalf::new(stream.w, req_buf);
 
 			let read_half = UdpReadHalf::new(stream.r);
 			let write_half = UdpWriteHalf::new(write_half);

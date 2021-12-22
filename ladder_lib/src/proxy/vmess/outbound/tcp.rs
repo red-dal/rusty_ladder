@@ -511,7 +511,7 @@ where
 		),
 	};
 
-	let w = LazyWriteHalf::new_not_lazy(w, request_data);
+	let w = LazyWriteHalf::new(w, request_data);
 	let r = ZeroReadHalf {
 		r,
 		state: Some((

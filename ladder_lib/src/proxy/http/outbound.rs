@@ -27,7 +27,6 @@ use crate::{
 		BytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
-	utils::BufferedReadHalf,
 };
 use http::{header, Request, StatusCode};
 
@@ -139,7 +138,16 @@ impl Settings {
 			}
 		}
 
-		let rh = BufferedReadHalf::new(stream.r, leftover);
+		let rh = if leftover.is_empty() {
+			stream.r
+		} else {
+			Box::new(AsyncReadExt::chain(
+				std::io::Cursor::new(leftover),
+				stream.r,
+			))
+		};
+
+		// let rh = BufferedReadHalf::new(stream.r, leftover);
 		Ok(BytesStream::new(Box::new(rh), stream.w))
 	}
 }

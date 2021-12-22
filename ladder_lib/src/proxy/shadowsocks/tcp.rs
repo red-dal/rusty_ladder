@@ -266,7 +266,10 @@ impl Encoder {
 		}
 	}
 
-	#[allow(dead_code)]
+	#[cfg(any(
+		feature = "shadowsocks-outbound-openssl",
+		feature = "shadowsocks-outbound-ring"
+	))]
 	pub fn encode_into_lazy(&mut self, src: &[u8]) -> Result<(), BoxStdErr> {
 		Self::priv_encode(&mut self.enc, src, &mut self.lazy_buf)
 	}

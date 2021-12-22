@@ -25,7 +25,7 @@ mod udp;
 use super::{
 	aead_header::auth_id,
 	request::ReadRequestError,
-	utils::{new_cmd_key, new_response_key_and_iv, AuthId, Error, AUTH_LENGTH},
+	utils::{new_cmd_key, new_response_key_and_iv, AuthId, Error},
 	Command, HeaderMode, Request, Response, SecurityType,
 };
 use crate::{
@@ -217,7 +217,7 @@ impl Settings {
 	}
 
 	#[inline]
-	async fn get_user_from_auth(&self, auth: &[u8; AUTH_LENGTH]) -> Option<(UserInfo, HeaderMode)> {
+	async fn get_user_from_auth(&self, auth: &AuthId) -> Option<(UserInfo, HeaderMode)> {
 		// If legacy method is disabled, this will always be None
 		#[cfg(feature = "vmess-legacy-auth")]
 		if let Some(info) = self.check_auth_legacy(auth).await {

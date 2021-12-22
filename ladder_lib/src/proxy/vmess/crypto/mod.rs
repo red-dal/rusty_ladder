@@ -30,7 +30,6 @@ pub type Block = [u8; AES_KEY_LEN];
 ///
 /// Decryptor cannot check whether `block` has been modified.
 #[inline]
-#[allow(dead_code)]
 pub fn encrypt_aes_128(key: &Block, block: &mut Block) {
     inner::encrypt_aes_128(key, block);
 }
@@ -40,7 +39,6 @@ pub fn encrypt_aes_128(key: &Block, block: &mut Block) {
 /// There is NO guarantee that `block` has not been modified during
 /// transmission.
 #[inline]
-#[allow(dead_code)]
 pub fn decrypt_aes_128(key: &Block, block: &mut Block) {
     inner::decrypt_aes_128(key, block);
 }

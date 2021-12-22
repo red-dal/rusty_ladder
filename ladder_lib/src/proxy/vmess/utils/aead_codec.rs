@@ -20,10 +20,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::{Iv, LengthReader, LengthWriter};
 use crate::{
 	prelude::*,
-	utils::codec::{Decode, Encode},
 	utils::{
-		crypto::aead::{Decrypt, Decryptor, Encrypt, Encryptor, nonce, NONCE_LEN, TAG_LEN},
-		read_u16,
+		codec::{Decode, Encode},
+		crypto::aead::{nonce, Decrypt, Decryptor, Encrypt, Encryptor, NONCE_LEN, TAG_LEN},
 	},
 };
 use rand::thread_rng;
@@ -58,7 +57,7 @@ impl nonce::Sequence for VmessNonceSequence {
 	#[inline]
 	fn update(&mut self) {
 		let count_buf = &mut self.nonce[..2];
-		let mut count = read_u16(count_buf);
+		let mut count = (&*count_buf).get_u16();
 		count = count.wrapping_add(1);
 		count_buf.copy_from_slice(&count.to_be_bytes());
 	}

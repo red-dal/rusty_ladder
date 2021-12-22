@@ -17,13 +17,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::super::{
-	aead_header::{kdf, new_aead_decryptor, new_aead_encryptor},
-	utils::Error,
-};
 use super::{Iv, Key};
-use crate::utils::{append_mut, crypto::aead::{Decrypt, Encrypt}};
-use crate::{prelude::*, utils::read_u16};
+use crate::{
+	prelude::*,
+	proxy::vmess::{
+		aead_header::{kdf, new_aead_decryptor, new_aead_encryptor},
+		utils::Error,
+	},
+	utils::{
+		append_mut,
+		crypto::aead::{Decrypt, Encrypt},
+	},
+};
 
 const AEAD_RESP_HEADER_LEN_KEY: &[u8] = b"AEAD Resp Header Len Key";
 const AEAD_RESP_HEADER_LEN_IV: &[u8] = b"AEAD Resp Header Len IV";
@@ -45,9 +50,9 @@ pub fn open_len(buf: &mut [u8], response_key: &Key, response_iv: &Iv) -> Result<
 		.open_inplace(buf, &[])
 		.map_err(Error::new_crypto)?;
 
-	let len = read_u16(&buf[..2]);
+	let len = (&*buf).get_u16();
 
-	Ok(len as usize)
+	Ok(usize::from(len))
 }
 
 #[allow(dead_code)]
@@ -59,7 +64,6 @@ pub fn open_payload<'a>(
 	debug_assert!(buf.len() > 16);
 	let key = kdf::new_16(response_key, [AEAD_RESP_HEADER_KEY].iter().copied());
 	let iv = kdf::new_12(response_iv, [AEAD_RESP_HEADER_IV].iter().copied());
-
 	let buf = new_aead_decryptor(&key, &iv)
 		.open_inplace(buf, &[])
 		.map_err(Error::new_crypto)?;
@@ -67,6 +71,7 @@ pub fn open_payload<'a>(
 	Ok(buf)
 }
 
+#[allow(dead_code)]
 pub fn seal_response(response_buf: &[u8], response_key: &Key, response_iv: &Iv) -> Vec<u8> {
 	let mut result = Vec::with_capacity(64);
 	// Encrypting response length.

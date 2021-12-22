@@ -27,7 +27,10 @@ use std::{
 use tokio::io::{AsyncRead, ReadBuf};
 
 /// Poll read exactly `dst.len()` bytes into dst.
-/// Returns `Err(UnexpectedEof)` if an eof is reached when there are some bytes read into the buffer but the buffer is not full.
+/// 
+/// Returns `Err(UnexpectedEof)` if an eof is reached when there are some 
+/// bytes read into the buffer but the buffer is not full.
+/// 
 /// Returns 'Ok(n)' otherwise, where `n` is `dst.len()` when the buffer is full,
 /// and `n` is 0 where an eof is reached but buffer is still empty.
 #[allow(dead_code)]
@@ -61,6 +64,7 @@ where
 	Poll::Ready(Ok(buf.len()))
 }
 
+#[allow(dead_code)]
 pub fn poll_write_all<W>(
 	mut writer: Pin<&mut W>,
 	cx: &mut Context<'_>,

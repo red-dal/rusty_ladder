@@ -25,135 +25,37 @@ use std::{
 	task::{Context, Poll},
 };
 
-#[derive(PartialEq, Eq)]
-enum LazyState {
-	Lazy,
-	Buffering(usize),
-	Done,
-}
-
-struct LazyWriteHelper {
-	buf: Vec<u8>,
-	state: LazyState,
-	lazy: bool,
-}
-
-impl LazyWriteHelper {
-	#[inline]
-	pub fn new(buf: Vec<u8>) -> Self {
-		Self {
-			buf,
-			state: LazyState::Lazy,
-			lazy: true,
-		}
-	}
-
-	#[inline]
-	#[allow(dead_code)]
-	pub fn stop_being_lazy(&mut self) {
-		debug_assert!(self.state == LazyState::Lazy);
-		self.lazy = false;
-		if self.buf.is_empty() {
-			self.state = LazyState::Done;
-		}
-	}
-
-	pub fn poll_write<W>(
-		&mut self,
-		writer: &mut W,
-		cx: &mut Context<'_>,
-		src: &[u8],
-	) -> Poll<Result<usize, io::Error>>
-	where
-		W: AsyncWrite + Unpin,
-	{
-		loop {
-			match &mut self.state {
-				LazyState::Lazy => {
-					self.buf.put(src);
-					if self.lazy {
-						return Ok(src.len()).into();
-					}
-					self.state = LazyState::Buffering(0);
-				}
-				LazyState::Buffering(pos) => {
-					if !self.buf.is_empty() {
-						ready!(poll_write_all(Pin::new(writer), cx, pos, &self.buf))?;
-					}
-					self.buf = Vec::new();
-					self.state = LazyState::Done;
-					return Ok(src.len()).into();
-				}
-				LazyState::Done => return Pin::new(writer).poll_write(cx, src),
-			}
-		}
-	}
-
-	pub fn poll_flush<W>(&mut self, writer: &mut W, cx: &mut Context) -> Poll<io::Result<()>>
-	where
-		W: AsyncWrite + Unpin,
-	{
-		loop {
-			match &mut self.state {
-				LazyState::Lazy => {
-					if self.buf.is_empty() {
-						self.state = LazyState::Done;
-					} else {
-						self.state = LazyState::Buffering(0);
-					}
-				}
-				LazyState::Buffering(pos) => {
-					ready!(poll_write_all(Pin::new(writer), cx, pos, &self.buf))?;
-					self.buf = Vec::new();
-					self.state = LazyState::Done;
-				}
-				LazyState::Done => return Pin::new(writer).poll_flush(cx),
-			}
-		}
-	}
-}
-
-impl Default for LazyWriteHelper {
-	#[inline]
-	fn default() -> Self {
-		Self::new(Vec::new())
-	}
-}
-
-pub struct LazyWriteHalf<W: AsyncWrite + Unpin> {
-	inner: W,
-	writer: LazyWriteHelper,
-	done_flushing: bool,
+enum State {
+	BuildingBuffer,
+	WritingFromBuffer(usize),
+	WritingDirectly,
 }
 
 #[allow(dead_code)]
+pub struct LazyWriteHalf<W: AsyncWrite + Unpin> {
+	pub inner: W,
+	state: State,
+	buf: Vec<u8>,
+}
+
 impl<W: AsyncWrite + Unpin> LazyWriteHalf<W> {
-	#[inline]
 	pub fn new(w: W, data: Vec<u8>) -> Self {
-		let mut res = Self {
-			inner: w,
-			writer: LazyWriteHelper::new(data),
-			done_flushing: false,
+		let (state, buf) = if data.is_empty() {
+			(State::WritingDirectly, Vec::new())
+		} else {
+			(State::BuildingBuffer, data)
 		};
-		res.stop_being_lazy();
-		res
-	}
-
-	pub fn new_not_lazy(w: W, data: Vec<u8>) -> Self {
-		let mut res = Self::new(w, data);
-		res.stop_being_lazy();
-		res
-	}
-
-	#[inline]
-	pub fn stop_being_lazy(&mut self) {
-		self.writer.stop_being_lazy();
+		Self {
+			inner: w,
+			state,
+			buf,
+		}
 	}
 
 	#[inline]
 	#[allow(dead_code)]
-	pub fn inner(self) -> W {
-		self.inner
+	fn buf(&self) -> &Vec<u8> {
+		&self.buf
 	}
 }
 
@@ -165,53 +67,155 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for LazyWriteHalf<W> {
 		src: &[u8],
 	) -> Poll<Result<usize, io::Error>> {
 		let me = self.get_mut();
-		me.writer.poll_write(&mut me.inner, cx, src)
+
+		loop {
+			match &mut me.state {
+				State::BuildingBuffer => {
+					me.buf.extend_from_slice(src);
+					me.state = State::WritingFromBuffer(0);
+				}
+				State::WritingFromBuffer(pos) => {
+					ready!(poll_write_all(
+						Pin::new(&mut me.inner),
+						cx,
+						pos,
+						me.buf.as_slice()
+					))?;
+					// Change state and release the buffer.
+					me.state = State::WritingDirectly;
+					me.buf = Vec::new();
+					return Poll::Ready(Ok(src.len()));
+				}
+				State::WritingDirectly => {
+					return Pin::new(&mut me.inner).poll_write(cx, src);
+				}
+			}
+		}
 	}
 
 	#[inline]
 	fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
 		let me = self.get_mut();
-		me.writer.poll_flush(&mut me.inner, cx)
+		loop {
+			match &mut me.state {
+				State::BuildingBuffer => {
+					// Immediately change state.
+					me.state = State::WritingFromBuffer(0);
+				}
+				State::WritingFromBuffer(pos) => {
+					ready!(poll_write_all(
+						Pin::new(&mut me.inner),
+						cx,
+						pos,
+						me.buf.as_slice()
+					))?;
+					// Change state and release the buffer.
+					me.state = State::WritingDirectly;
+					me.buf = Vec::new();
+				}
+				State::WritingDirectly => {
+					return Pin::new(&mut me.inner).poll_flush(cx);
+				}
+			}
+		}
 	}
 
 	#[inline]
 	fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-		let me = self.get_mut();
-		loop {
-			if me.done_flushing {
-				return Pin::new(&mut me.inner).poll_shutdown(cx);
-			}
-			ready!(me.writer.poll_flush(&mut me.inner, cx))?;
-			me.done_flushing = true;
-		}
+		let mut me = self.get_mut();
+		ready!(Pin::new(&mut me).poll_flush(cx))?;
+		Pin::new(&mut me.inner).poll_shutdown(cx)
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use std::io::Cursor;
 	use tokio::runtime::Runtime;
 
 	#[test]
-	fn test_lazy_buf_writer() {
-		// init writer
-		let cursor = Cursor::new(Vec::<u8>::with_capacity(4096));
+	fn test_lazy_init() {
+		Runtime::new().unwrap().block_on(async {
+			let short_vec = b"HelloWorld".repeat(10);
+			let long_vec = b"SomeSuperLongString".repeat(1024);
+			let inputs = [
+				// Empty
+				(Vec::new(), 0_usize),
+				// Empty input should always be replaced with empty Vec no matter the capacity
+				(Vec::with_capacity(1024), 0_usize),
+				(short_vec.clone(), short_vec.capacity()),
+				(long_vec.clone(), long_vec.capacity()),
+			];
+			for (input, expected_capacity) in inputs {
+				let w = LazyWriteHalf::new(Vec::new(), input.clone());
+				assert_eq!(&input, w.buf());
+				assert_eq!(expected_capacity, w.buf().capacity())
+			}
+		})
+	}
 
-		let rt = Runtime::new().unwrap();
-		rt.block_on(async {
-			// write something
-			let mut data: Vec<u8> = Vec::with_capacity(4096);
-			data.extend_from_slice(b"Hello world. This is some data.");
+	#[test]
+	fn test_lazy_write_multiple() {
+		Runtime::new().unwrap().block_on(async {
+			let header_data = b"This is some header data.".repeat(32);
 
-			let mut writer = LazyWriteHalf::new(cursor, data.clone());
-			writer.stop_being_lazy();
-			writer.write(b"This is some other data.").await.unwrap();
+			let inputs = [
+				b"[Payload]".repeat(16),
+				b"[two]".repeat(32),
+				b"[3]".repeat(64),
+			];
+			let expected_outputs = {
+				let mut buf = header_data.clone();
+				let mut outputs = Vec::new();
+				for input in &inputs {
+					buf.extend(input);
+					outputs.push(buf.clone());
+				}
+				outputs
+			};
+			let mut w = LazyWriteHalf::new(Vec::new(), header_data.clone());
+			assert_eq!(
+				w.buf(),
+				&header_data,
+				"before writing the internal buffer should be the same as data"
+			);
+			for (input, output) in inputs.iter().zip(expected_outputs.iter()) {
+				w.write(input).await.unwrap();
+				assert_eq!(&w.inner, output);
+				assert!(
+					w.buf().is_empty() && w.buf().capacity() == 0,
+					"after writing the internal buffer should be EMPTY and not with len {} and capacity {}",
+					w.buf().len(),
+					w.buf().capacity()
+				);
+			}
+		});
+	}
 
-			let result = writer.inner.into_inner();
-
-			assert_eq!(&result[..data.len()], &data[..]);
-			assert_eq!(&result[data.len()..], b"This is some other data.");
+	#[test]
+	fn test_lazy_flush() {
+		Runtime::new().unwrap().block_on(async {
+			let header_data = b"This is some header data.".repeat(32);
+			let expected = header_data.clone();
+			let output = {
+				let output_buf = Vec::new();
+				let mut w = LazyWriteHalf::new(output_buf, header_data.clone());
+				assert_eq!(
+					w.buf(),
+					&header_data,
+					"before flushing the internal buffer should be the same as data"
+				);
+				assert_eq!(w.buf(), &header_data);
+				w.flush().await.unwrap();
+				assert!(
+					w.buf().is_empty() && w.buf().capacity() == 0,
+					"after flushing the internal buffer should be EMPTY and not with len {} and capacity {}",
+					w.buf().len(),
+					w.buf().capacity()
+				);
+				w.inner
+			};
+			assert_eq!(output, expected);
 		});
 	}
 }

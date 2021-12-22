@@ -17,7 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::PollBuffer;
 use crate::{prelude::*, protocol::BytesStream};
 use async_tungstenite::{
 	tokio::{accept_hdr_async, client_async, TokioAdapter},
@@ -166,7 +165,7 @@ fn new_404_response<B>(body: B) -> http::Response<B> {
 #[derive(Debug)]
 enum ReadingState {
 	Reading,
-	Buffering(PollBuffer),
+	Buffering(PollBuffer<Vec<u8>>),
 }
 
 #[derive(Debug)]
@@ -298,5 +297,98 @@ where
 	fn from(stream: StreamWrapper<S>) -> Self {
 		let (rh, wh) = tokio::io::split(stream);
 		BytesStream::new(Box::new(rh), Box::new(wh))
+	}
+}
+
+#[derive(Debug)]
+pub struct PollBuffer<T: AsRef<[u8]>> {
+	pub inner: T,
+	pub pos: usize,
+}
+
+impl<T: AsRef<[u8]>> PollBuffer<T> {
+	pub fn new(inner: T) -> Self {
+		Self { inner, pos: 0 }
+	}
+
+	#[inline]
+	pub fn remaining(&self) -> usize {
+		self.inner.as_ref().len() - self.pos
+	}
+
+	/// Returns `true` if `self.pos` has reached the end.
+	pub fn copy_to(&mut self, dst: &mut ReadBuf<'_>) -> bool {
+		let mut is_empty = false;
+
+		let copy_len = std::cmp::min(self.remaining(), dst.remaining());
+		let next_pos = self.pos + copy_len;
+		dst.put_slice(&self.inner.as_ref()[self.pos..next_pos]);
+
+		self.pos = next_pos;
+		if self.pos == self.inner.as_ref().len() {
+			is_empty = true;
+		}
+
+		is_empty
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use tokio::io::ReadBuf;
+
+	use super::PollBuffer;
+
+	#[test]
+	fn test_poll_buffer() {
+		let mut poll_buf = PollBuffer::new(vec![3_u8; 256]);
+		for (n, i) in poll_buf.inner.iter_mut().enumerate() {
+			*i = n as u8;
+		}
+		{
+			assert_eq!(poll_buf.pos, 0);
+
+			let mut buf = vec![0_u8; 100];
+			let mut read_buf = ReadBuf::new(&mut buf);
+			let is_empty = poll_buf.copy_to(&mut read_buf);
+
+			assert!(!is_empty);
+			assert_eq!(read_buf.remaining(), 0);
+			assert_eq!(poll_buf.pos, 100);
+			assert_eq!(
+				read_buf.filled(),
+				&poll_buf.inner[poll_buf.pos - read_buf.filled().len()..poll_buf.pos]
+			);
+		}
+		{
+			assert_eq!(poll_buf.pos, 100);
+
+			let mut buf = vec![0_u8; 100];
+			let mut read_buf = ReadBuf::new(&mut buf);
+			let is_empty = poll_buf.copy_to(&mut read_buf);
+
+			assert!(!is_empty);
+			assert_eq!(read_buf.remaining(), 0);
+			assert_eq!(poll_buf.pos, 200);
+			assert_eq!(
+				read_buf.filled(),
+				&poll_buf.inner[poll_buf.pos - read_buf.filled().len()..poll_buf.pos]
+			);
+		}
+		{
+			assert_eq!(poll_buf.pos, 200);
+
+			let mut buf = vec![0_u8; 100];
+			let mut read_buf = ReadBuf::new(&mut buf);
+			let is_empty = poll_buf.copy_to(&mut read_buf);
+
+			assert!(is_empty);
+			assert_eq!(read_buf.remaining(), 100 - 56);
+			assert_eq!(poll_buf.pos, 256);
+			assert_eq!(
+				read_buf.filled(),
+				&poll_buf.inner[poll_buf.pos - read_buf.filled().len()..poll_buf.pos]
+			);
+		}
 	}
 }

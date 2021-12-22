@@ -17,8 +17,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{super::crypto, kdf};
-use crc::crc32;
+use super::kdf;
+use crate::proxy::vmess::utils::AuthId;
 
 // Auth ID in plain text:
 // +-----------+------+------+
@@ -37,12 +37,11 @@ use crc::crc32;
 /// See more at <https://github.com/v2fly/v2fly-github-io/issues/20>
 const AUTH_ID_ENCRYPTION: &[u8] = b"AES Auth ID Encryption";
 
-const AUTH_ID_LEN: usize = 16;
-type AuthId = [u8; AUTH_ID_LEN];
-
 #[allow(dead_code)]
-pub fn new(cmd_key: &[u8; AUTH_ID_LEN], salt: [u8; 4], time: i64) -> AuthId {
-	let mut auth_id = [0_u8; AUTH_ID_LEN];
+pub fn new(cmd_key: &AuthId, salt: [u8; 4], time: i64) -> AuthId {
+	use crc::crc32;
+
+	let mut auth_id = AuthId::default();
 	// Timestamp
 	auth_id[..8].copy_from_slice(&time.to_be_bytes());
 	// Rand
@@ -54,14 +53,15 @@ pub fn new(cmd_key: &[u8; AUTH_ID_LEN], salt: [u8; 4], time: i64) -> AuthId {
 	let key = kdf::new_16(cmd_key.as_ref(), [AUTH_ID_ENCRYPTION].iter().copied());
 	let auth_id_ref = &mut auth_id;
 
-	crypto::encrypt_aes_128(&key, auth_id_ref);
+	crate::proxy::vmess::crypto::encrypt_aes_128(&key, auth_id_ref);
 	auth_id
 }
 
 #[cfg(any(feature = "vmess-inbound-openssl", feature = "vmess-inbound-ring"))]
 mod inbound {
-	use super::{crypto, kdf, AUTH_ID_ENCRYPTION};
-	use crate::{proxy::vmess::utils::AuthId, utils::read_i64};
+	use super::{kdf, AuthId, AUTH_ID_ENCRYPTION};
+	use crate::proxy::vmess::crypto;
+	use bytes::Buf;
 	use crc::crc32;
 	use uuid::Uuid;
 
@@ -82,7 +82,7 @@ mod inbound {
 		let expected_hash = crc32::checksum_ieee(data);
 
 		if hash == expected_hash.to_be_bytes() {
-			let time = read_i64(&auth_id[..8]);
+			let time = (&auth_id[..8]).get_i64();
 			Some(time)
 		} else {
 			None

@@ -24,12 +24,13 @@ use super::utils::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, FinishHandshake, HandshakeError, TcpAcceptor, StreamInfo},
+		inbound::{
+			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
+		},
 		outbound::Error as OutboundError,
 		BytesStream, GetProtocolName,
 	},
 	transport,
-	utils::BufferedReadHalf,
 };
 use http::{header, uri::Scheme, Method, StatusCode, Uri};
 use std::{
@@ -219,9 +220,12 @@ impl FinishHandshake for HandshakeFinisher {
 		// Put leftover bytes into buffer to send to server
 		sent_buf.extend(&self.leftover);
 
-		let r = BufferedReadHalf::new(client_stream.r, sent_buf);
+		let r = Box::new(AsyncReadExt::chain(
+			io::Cursor::new(sent_buf),
+			client_stream.r,
+		));
 
-		Ok(BytesStream::new(Box::new(r), client_stream.w))
+		Ok(BytesStream::new(r, client_stream.w))
 	}
 
 	async fn finish_err(self: Box<Self>, err: &OutboundError) -> Result<(), HandshakeError> {

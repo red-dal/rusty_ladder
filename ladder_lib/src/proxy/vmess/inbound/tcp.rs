@@ -148,7 +148,7 @@ where
 	} else {
 		// Write response data first.
 		trace!("Creating VMess zero stream.");
-		let w = LazyWriteHalf::new_not_lazy(w, response_data);
+		let w = LazyWriteHalf::new(w, response_data);
 		(ReadHalf::Plain(r), WriteHalf::Plain(w))
 	}
 }

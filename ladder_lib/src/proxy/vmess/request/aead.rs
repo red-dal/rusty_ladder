@@ -17,16 +17,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::super::{
-	aead_header::{auth_id, kdf, new_aead_decryptor, new_aead_encryptor},
-	utils::Error,
-};
 use crate::{
 	prelude::*,
+	proxy::vmess::{
+		aead_header::{auth_id, kdf, new_aead_decryptor, new_aead_encryptor},
+		utils::Error,
+	},
 	utils::{
 		append_mut, append_u16_mut,
 		crypto::aead::{Decrypt, Encrypt},
-		read_u16,
 	},
 };
 
@@ -149,7 +148,7 @@ pub fn open_len(
 	decryptor
 		.open_inplace(buf, auth_id)
 		.map_err(Error::new_crypto)?;
-	let len = read_u16(&buf[..2]) as usize;
+	let len = usize::from((&*buf).get_u16());
 	Ok(len)
 }
 
@@ -175,7 +174,7 @@ pub fn open_payload<'a>(
 
 #[cfg(test)]
 mod tests {
-	use super::super::{write_request_to, Command, Request, utils};
+	use super::super::{utils, write_request_to, Command, Request};
 	use super::*;
 	use crate::utils::timestamp_now;
 	use std::convert::TryInto;

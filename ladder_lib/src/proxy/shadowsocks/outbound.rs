@@ -94,8 +94,6 @@ impl Settings {
 			let mut addr_buf = Vec::with_capacity(dst.serialized_len_atyp());
 			dst.write_to(&mut addr_buf);
 
-			// crypt_write.encode_into_buffer(&addr_buf)?;
-			// crypt_write.write_all(&mut addr_buf).await?;
 			crypt_write
 				.encoder
 				.encode_into_lazy(&addr_buf)
@@ -110,7 +108,7 @@ impl Settings {
 			// Without encryption
 			let mut addr_buf = Vec::with_capacity(dst.serialized_len_atyp());
 			dst.write_to(&mut addr_buf);
-			let write_half = LazyWriteHalf::new_not_lazy(stream.w, addr_buf);
+			let write_half = LazyWriteHalf::new(stream.w, addr_buf);
 			Ok(BytesStream::new(Box::new(stream.r), Box::new(write_half)))
 		}
 	}

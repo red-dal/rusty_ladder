@@ -16,11 +16,9 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
-
-use super::{HeaderMode, Iv, Key, crypto::Aes128CfbEncryptor};
-
 mod aead;
-use aead::seal_response;
+
+use super::{crypto::Aes128CfbEncryptor, HeaderMode, Iv, Key};
 
 #[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
 pub(super) use aead::{open_len, open_payload};
@@ -62,7 +60,7 @@ impl Response {
 		}
 	}
 
-	pub fn encode(&self, response_key: &Key, response_iv: &Iv, mode: HeaderMode) -> Vec<u8> {
+	pub fn encode(&self, response_key: &Key, response_iv: &Iv, mode: super::HeaderMode) -> Vec<u8> {
 		let response_buf = [self.v, self.opt, self.cmd, self.cmd_len];
 		match mode {
 			HeaderMode::Legacy => {
@@ -70,7 +68,7 @@ impl Response {
 				Aes128CfbEncryptor::new(response_key, response_iv).encrypt(&mut res);
 				res
 			}
-			HeaderMode::Aead => seal_response(&response_buf, response_key, response_iv),
+			HeaderMode::Aead => aead::seal_response(&response_buf, response_key, response_iv),
 		}
 	}
 }
