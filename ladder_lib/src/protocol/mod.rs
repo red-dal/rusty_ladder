@@ -24,6 +24,6 @@ pub mod socks_addr;
 mod common;
 mod proxy_context;
 
-pub use common::{AsyncReadWrite, BoxRead, BoxWrite, BytesStream, GetProtocolName, Network};
+pub use common::*;
 pub use proxy_context::{GetConnectorError, ProxyContext};
 pub use socks_addr::{SocksAddr, SocksDestination};

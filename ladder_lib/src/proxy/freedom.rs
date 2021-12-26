@@ -21,7 +21,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector},
-		BytesStream, GetProtocolName, ProxyContext,
+		BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
 use async_trait::async_trait;
@@ -42,7 +42,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = context.dial_tcp(dst).await?;
 		Ok(stream.into())
 	}
@@ -53,7 +53,7 @@ mod udp_impl {
 	use super::Settings;
 	use crate::protocol::{
 		outbound::{
-			udp::{socket, ConnectSocket, GetConnector, SocketOrTunnelStream, Connector},
+			udp::{socket, ConnectSocket, Connector, GetConnector, SocketOrTunnelStream},
 			Error as OutboundError,
 		},
 		ProxyContext,

@@ -30,9 +30,8 @@ use futures::{
 };
 use std::{io, time::Duration};
 use stream_copier::StreamCopier;
-use tokio::time::timeout;
+use tokio::{time::timeout, io::AsyncBufRead};
 
-const DEFAULT_BUFFER_SIZE: usize = 16 * 1024;
 const OTHER_TASK_TIMEOUT: Duration = Duration::from_millis(2000);
 
 const STOPPED: bool = true;
@@ -48,7 +47,6 @@ pub struct Relay<'a> {
 	pub conn_id: &'a str,
 	pub recv: Option<Counter>,
 	pub send: Option<Counter>,
-	pub buffer_size: usize,
 	pub timeout_secs: usize,
 }
 
@@ -59,7 +57,6 @@ impl<'a> Relay<'a> {
 			conn_id,
 			recv: None,
 			send: None,
-			buffer_size: DEFAULT_BUFFER_SIZE,
 			timeout_secs: DEFAULT_TIMEOUT_SECS,
 		}
 	}
@@ -81,8 +78,8 @@ impl Relay<'_> {
 		ow: OW,
 	) -> io::Result<(IR, IW, OR, OW)>
 	where
-		IR: AsyncRead + Unpin + Send + 'static,
-		OR: AsyncRead + Unpin + Send + 'static,
+		IR: AsyncBufRead + Unpin + Send + 'static,
+		OR: AsyncBufRead + Unpin + Send + 'static,
 		IW: AsyncWrite + Unpin + Send + 'static,
 		OW: AsyncWrite + Unpin + Send + 'static,
 	{
@@ -103,7 +100,6 @@ impl Relay<'_> {
 			count: recv,
 			tag: recv_tag.clone(),
 			is_reading_stopped: is_stopped.clone(),
-			buffer_size: self.buffer_size,
 			is_active: is_active.clone(),
 		}
 		.run();
@@ -115,7 +111,6 @@ impl Relay<'_> {
 			count: send,
 			tag: send_tag.clone(),
 			is_reading_stopped: is_stopped.clone(),
-			buffer_size: self.buffer_size,
 			is_active: is_active.clone(),
 		}
 		.run();

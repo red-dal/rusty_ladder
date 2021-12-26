@@ -24,7 +24,7 @@ use super::super::{
 use super::Request;
 use crate::{
 	prelude::*,
-	protocol::{BoxRead, BoxWrite},
+	protocol::{BoxBufRead, BoxWrite},
 	proxy::vmess::utils::ShakeLengthWriter,
 	utils::{
 		codec::{Decode, Encode, FrameReader, FrameWriter},
@@ -79,8 +79,13 @@ pub enum ReadHalf<R: AsyncRead + Unpin> {
 }
 
 impl<R: 'static + AsyncRead + Unpin + Send + Sync> ReadHalf<R> {
-	pub fn into_boxed(self) -> BoxRead {
-		dispatch!(self, Self, r, { Box::new(r) })
+	pub fn into_boxed(self) -> BoxBufRead {
+		match self {
+			ReadHalf::Plain(r) => Box::new(tokio::io::BufReader::new(r)),
+			ReadHalf::PlainChunk(r) => Box::new(r),
+			ReadHalf::PlainChunkMask(r) => Box::new(r),
+			ReadHalf::Aead(r) => Box::new(r),
+		}
 	}
 }
 

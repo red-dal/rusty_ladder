@@ -30,7 +30,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BytesStream, GetProtocolName, ProxyContext,
+		BufBytesStream, BytesStream, GetProtocolName, ProxyContext,
 	},
 	proxy::socks5::utils::AUTH_FAILED,
 	transport,
@@ -42,7 +42,7 @@ const METHODS_USERNAME: &[u8] = &[
 ];
 const METHODS_NO_AUTH: &[u8] = &[AcceptableMethod::NoAuthentication as u8];
 // Both are 0xff.
-const NO_ACCEPTABLE_METHOD:u8 = AUTH_FAILED;
+const NO_ACCEPTABLE_METHOD: u8 = AUTH_FAILED;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -103,7 +103,7 @@ impl Settings {
 		&'a self,
 		mut stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		debug!(
 			"Creating SOCKS5 connection to '{}', dst: '{}'",
 			&self.addr, dst
@@ -182,7 +182,7 @@ impl Settings {
 		if rep_code != ReplyCode::Succeeded {
 			return Err(Error::FailedReply(rep_code).into());
 		}
-		Ok(stream)
+		Ok(BufBytesStream::from_bytes_stream(stream))
 	}
 }
 
@@ -199,7 +199,7 @@ impl TcpStreamConnector for Settings {
 		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		self.priv_connect(stream, dst).await
 	}
@@ -216,7 +216,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		self.priv_connect(stream, dst).await
 	}

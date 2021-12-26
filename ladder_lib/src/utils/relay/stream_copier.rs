@@ -19,15 +19,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	atomic_values::{Counter, Switch},
-	STOPPED, ACTIVE
+	ACTIVE, STOPPED,
 };
 use crate::prelude::*;
 use std::io;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 /// Copy bytes from `r` to `w`.
 pub(super) struct StreamCopier<R, W>
 where
-	R: AsyncRead + Unpin + Send + 'static,
+	R: AsyncBufRead + Unpin + Send + 'static,
 	W: AsyncWrite + Unpin + Send + 'static,
 {
 	pub r: R,
@@ -35,27 +36,29 @@ where
 	pub count: Counter,
 	pub tag: Arc<str>,
 	pub is_reading_stopped: Switch,
-	pub buffer_size: usize,
 	pub is_active: Switch,
 }
 
 impl<R, W> StreamCopier<R, W>
 where
-	R: AsyncRead + Unpin + Send + 'static,
+	R: AsyncBufRead + Unpin + Send + 'static,
 	W: AsyncWrite + Unpin + Send + 'static,
 {
 	pub async fn run(mut self) -> (R, W, io::Result<()>) {
-		let mut buffer = vec![0_u8; self.buffer_size];
 		loop {
-			trace!("{} Reading from read_half...", self.tag);
-			let n = match self.r.read(&mut buffer).await {
+			trace!("{} Filling read_half's internal buffer...", self.tag);
+			let data = match self.r.fill_buf().await {
 				Ok(res) => res,
 				Err(err) => return (self.r, self.w, Err(err)),
 			};
-			trace!("{} Done reading from read_half, n: {}", self.tag, n);
+			trace!(
+				"{} Done filling read_half, data.len(): {}",
+				self.tag,
+				data.len()
+			);
 			self.is_active.set(ACTIVE);
 
-			if n == 0 {
+			if data.is_empty() {
 				debug!(
 					"{} read_half reach EOF, shutting down write_half.",
 					self.tag
@@ -73,36 +76,34 @@ where
 				return (self.r, self.w, res);
 			}
 
-			let data = &buffer[..n];
 			debug_assert!(!data.is_empty());
 
-			let mut pos: usize = 0;
-			while pos < data.len() {
-				trace!("{} Writing into write_half...", self.tag);
-				let n = match self.w.write(&data[pos..]).await {
-					Ok(n) => n,
-					Err(err) => {
-						let res = if self.is_reading_stopped.get() == STOPPED {
-							debug!("{} Error occurred when trying to write data to write_half ({}), but ignored because other read_half is stopped", self.tag, err);
-							Ok(())
-						} else {
-							debug!(
-								"{} Error occurred when trying to write data to write_half ({})",
-								self.tag, err
-							);
-							Err(err)
-						};
-						return (self.r, self.w, res);
-					}
-				};
-				trace!("{} Done writing into write_half, n: {}", self.tag, n);
-				self.is_active.set(ACTIVE);
-				if n == 0 {
-					return (self.r, self.w, Err(io::ErrorKind::WriteZero.into()));
+			trace!("{} Writing into write_half...", self.tag);
+			let write_amt = match self.w.write(data).await {
+				Ok(n) => n,
+				Err(err) => {
+					let res = if self.is_reading_stopped.get() == STOPPED {
+						debug!("{} Error occurred when trying to write data to write_half ({}), but ignored because other read_half is stopped", self.tag, err);
+						Ok(())
+					} else {
+						debug!(
+							"{} Error occurred when trying to write data to write_half ({})",
+							self.tag, err
+						);
+						Err(err)
+					};
+					return (self.r, self.w, res);
 				}
-				pos += n;
-				self.count.add(n as u64);
+			};
+			trace!("{} Done writing into write_half, write_amt: {}", self.tag, write_amt);
+			if write_amt == 0 {
+				return (self.r, self.w, Err(io::ErrorKind::WriteZero.into()));
 			}
+			self.is_active.set(ACTIVE);
+			// Advance the buffer position in self.r
+			self.r.consume(write_amt);
+			// Update traffic counter
+			self.count.add(write_amt as u64);
 		}
 	}
 }

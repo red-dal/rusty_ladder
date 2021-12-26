@@ -22,7 +22,7 @@ use crate::{
 	protocol::{
 		inbound::{AcceptError, AcceptResult, HandshakeError, TcpAcceptor},
 		outbound::{TcpConnector, TcpStreamConnector},
-		AsyncReadWrite, GetConnectorError, ProxyContext,
+		AsyncReadWrite, GetConnectorError, ProxyContext, BufBytesStream,
 	},
 	utils::relay::{Counter, Relay},
 };
@@ -183,8 +183,7 @@ where
 			let out_stream = TcpStream::connect(target_addr).await?;
 			let in_stream = handshake_handler.finish().await?;
 
-			let (in_reader, in_writer) = tokio::io::split(in_stream);
-			let (out_reader, out_writer) = tokio::io::split(out_stream);
+			let out_stream = BufBytesStream::from(out_stream);
 
 			let recv = Counter::new(0);
 			let send = Counter::new(0);
@@ -195,7 +194,7 @@ where
 				send: Some(send.clone()),
 				..Relay::default()
 			}
-			.relay_stream(in_reader, in_writer, out_reader, out_writer)
+			.relay_stream(in_stream.r, in_stream.w, out_stream.r, out_stream.w)
 			.await?;
 		}
 		#[cfg(feature = "use-udp")]

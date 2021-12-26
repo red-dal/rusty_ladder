@@ -26,7 +26,7 @@ use std::{
 	pin::Pin,
 	task::{Context, Poll},
 };
-use tokio::io::{AsyncRead, ReadBuf};
+use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 
 pub trait Decode: Send + Sync + Unpin {
 	fn expected_len(&self) -> Option<NonZeroUsize>;
@@ -357,6 +357,67 @@ where
 					.into()
 				}
 			}
+		}
+	}
+}
+
+impl<D, R> AsyncBufRead for FrameReader<D, R>
+where
+	D: Decode,
+	R: AsyncRead + Unpin,
+{
+	fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
+		let me = self.get_mut();
+		loop {
+			match &mut me.state {
+				FrameReadState::ReadingDecoding => {
+					if let Err(e) = ready!(me.codec_reader.poll_read_decode(
+						Pin::new(&mut me.r),
+						cx,
+						&mut me.buf
+					)) {
+						me.state = FrameReadState::Closed;
+						return Err(e).into();
+					}
+					// Empty buf means EOF.
+					if me.buf.is_empty() {
+						me.state = FrameReadState::Closed;
+						// Release memory.
+						me.buf = Vec::new();
+						return Ok(me.buf.as_slice()).into();
+					}
+					// Next starts buffering.
+					me.state = FrameReadState::Buffering { pos: 0 };
+				}
+				FrameReadState::Buffering { pos } => {
+					if *pos == me.buf.len() {
+						// Buffer empty, try to fill it.
+						me.state = FrameReadState::ReadingDecoding;
+					} else {
+						return Ok(&me.buf[*pos..]).into();
+					}
+				},
+				FrameReadState::Closed => {
+					return Err(io::Error::new(
+						io::ErrorKind::BrokenPipe,
+						"ReadHelper already closed.",
+					))
+					.into();
+				}
+			}
+		}
+	}
+
+	fn consume(self: Pin<&mut Self>, amt: usize) {
+		let me = self.get_mut();
+		if let FrameReadState::Buffering { pos } = &mut me.state {
+			*pos += amt;
+			debug_assert!(*pos <= me.buf.len());
+			if *pos == me.buf.len() {
+				me.state = FrameReadState::ReadingDecoding;
+			}
+		} else {
+			panic!("Cannot consume when FrameReadState is not Buffering. poll_fill_buf must be polled first.");
 		}
 	}
 }

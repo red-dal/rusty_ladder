@@ -57,6 +57,7 @@ pub struct Server {
 	/// TCP connection will be dropped if it cannot be established within this amount of time.
 	dial_tcp_timeout: Duration, 
 	outbound_handshake_timeout: Duration,
+	// TODO: add buffer size to BufReader
 	relay_buffer_size: usize,
 	relay_timeout_secs: usize,
 	#[cfg(feature = "use-udp")]

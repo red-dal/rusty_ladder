@@ -32,7 +32,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
-		BytesStream, GetProtocolName,
+		BufBytesStream, BytesStream, GetProtocolName,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -388,13 +388,13 @@ where
 	W: 'static + AsyncWrite + Unpin + Send + Sync,
 {
 	match cmd {
-		Command::Tcp => {
-			let stream = BytesStream::new(read_half.into_boxed(), write_half.into_boxed());
-			Ok(AcceptResult::Tcp(
-				Box::new(PlainHandshakeHandler(stream)),
-				dst,
-			))
-		}
+		Command::Tcp => Ok(AcceptResult::Tcp(
+			Box::new(PlainHandshakeHandler(BufBytesStream {
+				r: read_half.into_boxed(),
+				w: write_half.into_boxed(),
+			})),
+			dst,
+		)),
 		Command::Udp => {
 			#[cfg(feature = "use-udp")]
 			{

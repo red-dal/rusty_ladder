@@ -28,7 +28,7 @@ use crate::{
 			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
 		},
 		outbound::Error as OutboundError,
-		AsyncReadWrite, BytesStream, GetProtocolName,
+		AsyncReadWrite, BufBytesStream, BytesStream, GetProtocolName,
 	},
 	transport,
 };
@@ -152,7 +152,8 @@ impl TcpAcceptor for Settings {
 		info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		info!("Performing SOCKS5 handshake with client ({:?}).", info);
-		let mut stream = self.transport.accept(stream).await?;
+		let stream = self.transport.accept(stream).await?;
+		let mut stream = BufBytesStream::from_bytes_stream(stream);
 		let mut buf = Vec::with_capacity(HANDSHAKE_BUFFER_CAPACITY);
 		{
 			let methods = Methods::read(&mut stream, &mut buf).await;
@@ -286,7 +287,7 @@ mod udp {
 	};
 	use crate::{
 		prelude::BoxStdErr,
-		protocol::{inbound::udp, BytesStream, SocksAddr, SocksDestination},
+		protocol::{inbound::udp, AsyncReadWrite, BufBytesStream, SocksAddr, SocksDestination},
 		utils::ReadInt,
 	};
 	use async_trait::async_trait;
@@ -307,7 +308,7 @@ mod udp {
 	impl Settings {
 		pub(super) async fn handle_udp(
 			&self,
-			mut stream: BytesStream,
+			mut stream: BufBytesStream,
 			request: Request,
 			buf: &mut Vec<u8>,
 			info: StreamInfo,
@@ -384,7 +385,7 @@ mod udp {
 			))
 		}
 
-		fn build(self, mut stream: BytesStream) -> udp::PacketStream {
+		fn build(self, mut stream: impl 'static + AsyncReadWrite) -> udp::PacketStream {
 			use tokio::io::AsyncReadExt;
 			let is_shutdown = Arc::new(AtomicBool::new(false));
 
@@ -591,12 +592,12 @@ mod udp {
 }
 
 struct HandshakeHandle {
-	pub inner: BytesStream,
+	pub inner: BufBytesStream,
 }
 
 #[async_trait]
 impl FinishHandshake for HandshakeHandle {
-	async fn finish(mut self: Box<Self>) -> Result<BytesStream, HandshakeError> {
+	async fn finish(mut self: Box<Self>) -> Result<BufBytesStream, HandshakeError> {
 		write_reply(&mut self.inner, ReplyCode::Succeeded).await?;
 		Ok(self.inner)
 	}

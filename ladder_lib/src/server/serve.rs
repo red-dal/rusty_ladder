@@ -31,7 +31,7 @@ use crate::{
 			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
 		},
 		outbound::{Error as OutboundError, TcpConnector},
-		BytesStream, GetProtocolName,
+		BufBytesStream, GetProtocolName,
 	},
 	utils::{
 		relay::{Counter, Relay},
@@ -226,7 +226,7 @@ impl Server {
 		outbound_ind: usize,
 		dst_addr: &SocksAddr,
 		stat_handle: &Option<SessionHandle>,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		if let Some(stat_handle) = stat_handle {
 			stat_handle.set_connecting(outbound_ind, outbound.tag.clone(), dst_addr.clone());
 		}
@@ -389,7 +389,6 @@ impl<'a> InboundConnection<'a> {
 			stat_handle: &self.stat_handle,
 			in_ps: in_stream,
 			out_ps: out_stream,
-			relay_buffer_size: self.server.relay_buffer_size,
 			relay_timeout_secs: self.server.relay_timeout_secs,
 		}
 		.run()
@@ -401,9 +400,8 @@ struct ProxyStreamHandler<'a> {
 	conn_id_str: &'a str,
 	route_str: &'a str,
 	stat_handle: &'a Option<SessionHandle>,
-	in_ps: BytesStream,
-	out_ps: BytesStream,
-	relay_buffer_size: usize,
+	in_ps: BufBytesStream,
+	out_ps: BufBytesStream,
 	relay_timeout_secs: usize,
 }
 
@@ -421,7 +419,6 @@ impl<'a> ProxyStreamHandler<'a> {
 			conn_id: self.conn_id_str,
 			recv: Some(recv.clone()),
 			send: Some(send.clone()),
-			buffer_size: self.relay_buffer_size,
 			timeout_secs: self.relay_timeout_secs,
 		}
 		.relay_stream(self.in_ps.r, self.in_ps.w, self.out_ps.r, self.out_ps.w)

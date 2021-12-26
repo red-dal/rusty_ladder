@@ -23,7 +23,7 @@ use crate::{
 	protocol::{
 		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
 		socks_addr::ReadError,
-		AsyncReadWrite, BytesStream, GetProtocolName,
+		AsyncReadWrite, BufBytesStream, BytesStream, GetProtocolName,
 	},
 	transport,
 	utils::crypto::aead::Algorithm,
@@ -109,7 +109,10 @@ impl TcpAcceptor for Settings {
 				}
 			};
 			trace!("Shadowsocks target address: {}", addr);
-			let crypt_stream = BytesStream::new(Box::new(crypt_read), Box::new(crypt_write));
+			let crypt_stream = BufBytesStream {
+				r: Box::new(crypt_read),
+				w: Box::new(crypt_write),
+			};
 
 			Ok(AcceptResult::Tcp(
 				Box::new(PlainHandshakeHandler(crypt_stream)),
@@ -131,7 +134,7 @@ impl TcpAcceptor for Settings {
 			trace!("Shadowsocks target address: {}", addr);
 
 			Ok(AcceptResult::Tcp(
-				Box::new(PlainHandshakeHandler(stream)),
+				Box::new(PlainHandshakeHandler(BufBytesStream::from_bytes_stream(stream))),
 				addr,
 			))
 		}

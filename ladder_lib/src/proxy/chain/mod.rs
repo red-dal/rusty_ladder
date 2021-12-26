@@ -23,7 +23,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BytesStream, GetConnectorError, GetProtocolName, ProxyContext,
+		BufBytesStream, GetConnectorError, GetProtocolName, ProxyContext,
 	},
 };
 
@@ -49,7 +49,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		debug_assert!(!self.chain.is_empty());
 
 		let mut tag_iter = self.chain.iter();
@@ -77,7 +77,9 @@ impl TcpConnector for Settings {
 
 		while let Some(node) = nodes_iter.next() {
 			let next_addr = nodes_iter.peek().map_or(dst, |node| node.addr());
-			stream = node.connect_stream(stream, next_addr, context).await?;
+			stream = node
+				.connect_stream(stream.into_bytes_stream(), next_addr, context)
+				.await?;
 		}
 
 		Ok(stream)

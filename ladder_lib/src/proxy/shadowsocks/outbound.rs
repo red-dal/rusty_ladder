@@ -22,7 +22,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BytesStream, GetProtocolName, ProxyContext,
+		BytesStream, GetProtocolName, ProxyContext, BufBytesStream
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, LazyWriteHalf},
@@ -72,7 +72,7 @@ impl Settings {
 		&'a self,
 		stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		debug!(
 			"Creating Shadowsocks connection to '{}', target: '{}'",
 			&self.addr, dst
@@ -100,16 +100,16 @@ impl Settings {
 				.map_err(OutboundError::Protocol)?;
 
 			trace!("Shadowsocks request sent");
-			Ok(BytesStream::new(
-				Box::new(crypt_read),
-				Box::new(crypt_write),
-			))
+			Ok(BufBytesStream {
+				r: Box::new(crypt_read),
+				w: Box::new(crypt_write),
+			})
 		} else {
 			// Without encryption
 			let mut addr_buf = Vec::with_capacity(dst.serialized_len_atyp());
 			dst.write_to(&mut addr_buf);
 			let write_half = LazyWriteHalf::new(stream.w, addr_buf);
-			Ok(BytesStream::new(Box::new(stream.r), Box::new(write_half)))
+			Ok(BufBytesStream::from_raw(stream.r, Box::new(write_half)))
 		}
 	}
 }
@@ -127,7 +127,7 @@ impl TcpStreamConnector for Settings {
 		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		self.priv_connect(stream, dst).await
 	}
@@ -144,7 +144,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		self.priv_connect(stream, dst).await
 	}

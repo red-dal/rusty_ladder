@@ -28,7 +28,7 @@ use crate::{
 			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
 		},
 		outbound::Error as OutboundError,
-		BytesStream, GetProtocolName,
+		BufBytesStream, BytesStream, GetProtocolName,
 	},
 	transport,
 };
@@ -182,7 +182,7 @@ impl<'a> HandshakeFinisher {
 
 #[async_trait]
 impl FinishHandshake for HandshakeFinisher {
-	async fn finish(mut self: Box<Self>) -> Result<BytesStream, HandshakeError> {
+	async fn finish(mut self: Box<Self>) -> Result<BufBytesStream, HandshakeError> {
 		let mut sent_buf = Vec::new();
 		let mut client_stream = self.stream;
 		let request = self.req;
@@ -225,7 +225,7 @@ impl FinishHandshake for HandshakeFinisher {
 			client_stream.r,
 		));
 
-		Ok(BytesStream::new(r, client_stream.w))
+		Ok(BufBytesStream::from_raw(r, client_stream.w))
 	}
 
 	async fn finish_err(self: Box<Self>, err: &OutboundError) -> Result<(), HandshakeError> {

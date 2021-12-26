@@ -17,7 +17,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::common::{AsyncReadWrite, BytesStream, GetProtocolName};
+use super::{
+	common::{AsyncReadWrite, BytesStream, GetProtocolName},
+	BufBytesStream,
+};
 use crate::{prelude::*, protocol::outbound};
 use async_trait::async_trait;
 use std::{
@@ -34,6 +37,7 @@ pub struct StreamInfo {
 	pub local_addr: SocketAddr,
 }
 
+// TODO: More description
 #[async_trait]
 pub trait TcpAcceptor: GetProtocolName {
 	async fn accept_tcp<'a>(
@@ -51,15 +55,15 @@ pub enum AcceptResult<'a> {
 
 #[async_trait]
 pub trait FinishHandshake: Send {
-	async fn finish(self: Box<Self>) -> Result<BytesStream, HandshakeError>;
+	async fn finish(self: Box<Self>) -> Result<BufBytesStream, HandshakeError>;
 	async fn finish_err(self: Box<Self>, err: &outbound::Error) -> Result<(), HandshakeError>;
 }
 
-pub struct PlainHandshakeHandler(pub BytesStream);
+pub struct PlainHandshakeHandler(pub BufBytesStream);
 
 #[async_trait]
 impl FinishHandshake for PlainHandshakeHandler {
-	async fn finish(self: Box<Self>) -> Result<BytesStream, HandshakeError> {
+	async fn finish(self: Box<Self>) -> Result<BufBytesStream, HandshakeError> {
 		return Ok(self.0);
 	}
 

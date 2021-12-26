@@ -29,7 +29,7 @@ use super::super::{
 use super::HeaderMode;
 use crate::{
 	prelude::*,
-	protocol::{outbound::Error as OutboundError, BytesStream},
+	protocol::{outbound::Error as OutboundError, BufBytesStream},
 	utils::{
 		codec::{Decode, Encode, FrameReader, FrameWriter},
 		crypto::aead::{Algorithm, Decrypt, Decryptor, Encrypt, Encryptor, Key as AeadKey},
@@ -413,15 +413,15 @@ where
 	),
 }
 
-impl<R, W> From<PlainStream<R, W>> for BytesStream
+impl<R, W> From<PlainStream<R, W>> for BufBytesStream
 where
 	R: 'static + AsyncRead + Unpin + Send + Sync,
 	W: 'static + AsyncWrite + Unpin + Send + Sync,
 {
 	fn from(s: PlainStream<R, W>) -> Self {
 		match s {
-			PlainStream::Masking((r, w)) => BytesStream::new(Box::new(r), Box::new(w)),
-			PlainStream::NoMasking((r, w)) => BytesStream::new(Box::new(r), Box::new(w)),
+			PlainStream::Masking((r, w)) => BufBytesStream::from_raw(Box::new(r), Box::new(w)),
+			PlainStream::NoMasking((r, w)) => BufBytesStream::from_raw(Box::new(r), Box::new(w)),
 		}
 	}
 }

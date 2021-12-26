@@ -24,7 +24,7 @@ use crate::{
 	protocol::{
 		self,
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BytesStream,
+		BufBytesStream,
 	},
 };
 
@@ -148,7 +148,7 @@ impl TcpConnector for Details {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn protocol::ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		return dispatch_outbound!(self, Self, s, { s.connect(dst, context).await });
 	}
 }

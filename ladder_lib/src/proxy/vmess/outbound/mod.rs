@@ -23,6 +23,7 @@ mod udp;
 
 use super::utils::{Error, SecurityType};
 use super::{Command, HeaderMode, Request};
+use crate::protocol::BufBytesStream;
 use crate::{
 	prelude::*,
 	protocol::{
@@ -126,7 +127,7 @@ impl Settings {
 		&'a self,
 		stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		info!(
 			"Creating VMess TCP connection to '{}', target: '{}'",
 			&self.addr, dst
@@ -160,7 +161,7 @@ impl Settings {
 				req.opt.clear_chunk_stream();
 				req.opt.clear_chunk_masking();
 				let (r, w) = tcp::new_outbound_zero(stream.r, stream.w, req, &self.id, time, mode);
-				return Ok(BytesStream::new(Box::new(r), Box::new(w)));
+				return Ok(BufBytesStream::from_raw(Box::new(r), Box::new(w)));
 			}
 			SecurityType::None => {
 				let stream = tcp::new_outbound_plain(stream.r, stream.w, req, &self.id, time, mode);
@@ -185,7 +186,7 @@ impl Settings {
 		let (read_half, write_half) =
 			tcp::new_outbound_aead(stream.r, stream.w, req, &self.id, time, algo, mode)?;
 
-		Ok(BytesStream::new(Box::new(read_half), Box::new(write_half)))
+		Ok(BufBytesStream::from_raw(Box::new(read_half), Box::new(write_half)))
 	}
 }
 
@@ -203,7 +204,7 @@ impl TcpStreamConnector for Settings {
 		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
@@ -220,7 +221,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}

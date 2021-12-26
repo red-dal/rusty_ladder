@@ -24,7 +24,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BytesStream, GetProtocolName, ProxyContext,
+		BufBytesStream, BytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 };
@@ -75,7 +75,7 @@ impl Settings {
 		&'a self,
 		mut stream: BytesStream,
 		dst: &'a SocksAddr,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		debug!(
 			"Creating HTTP proxy connection to '{}', dst: '{}'",
 			self.addr, dst
@@ -146,9 +146,7 @@ impl Settings {
 				stream.r,
 			))
 		};
-
-		// let rh = BufferedReadHalf::new(stream.r, leftover);
-		Ok(BytesStream::new(Box::new(rh), stream.w))
+		Ok(BufBytesStream::from_raw(rh, stream.w))
 	}
 }
 
@@ -165,7 +163,7 @@ impl TcpConnector for Settings {
 		&self,
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = self.transport.connect(&self.addr, context).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
@@ -185,7 +183,7 @@ impl TcpStreamConnector for Settings {
 		stream: BytesStream,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
-	) -> Result<BytesStream, OutboundError> {
+	) -> Result<BufBytesStream, OutboundError> {
 		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
