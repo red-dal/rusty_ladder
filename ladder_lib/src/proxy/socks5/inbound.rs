@@ -396,6 +396,9 @@ mod udp {
 				let is_shutdown = is_shutdown_clone;
 				let mut buf = [0_u8; 512];
 				loop {
+					if is_shutdown.load(Ordering::Relaxed) {
+						break;
+					}
 					match stream.read(&mut buf).await {
 						Ok(n) => {
 							if n == 0 {
@@ -433,6 +436,13 @@ mod udp {
 		shutdown_notify: Arc<Notify>,
 		is_shutdown: Arc<AtomicBool>,
 		stream_abort_handle: AbortHandle,
+	}
+
+	impl Drop for SocketWrapper {
+		fn drop(&mut self) {
+			self.is_shutdown.store(true, Ordering::Relaxed);
+			self.stream_abort_handle.abort();
+		}
 	}
 
 	impl SocketWrapper {

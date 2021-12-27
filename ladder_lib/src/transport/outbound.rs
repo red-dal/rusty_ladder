@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::prelude::*;
 #[allow(unused_imports)]
-use crate::protocol::{ProxyContext, BytesStream};
+use crate::protocol::{BytesStream, ProxyContext};
 use std::io;
 
 #[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -53,13 +53,16 @@ impl Default for Settings {
 }
 
 impl Settings {
-	pub async fn connect_stream<'a>(
+	pub async fn connect_stream<'a, IO>(
 		&'a self,
-		stream: BytesStream,
+		stream: IO,
 		#[allow(unused_variables)] addr: &'a SocksAddr,
-	) -> io::Result<BytesStream> {
+	) -> io::Result<BytesStream>
+	where
+		IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync + Into<BytesStream>,
+	{
 		Ok(match self {
-			Settings::None => stream,
+			Settings::None => stream.into(),
 			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 			Settings::Tls(s) => s.connect(stream, addr).await?.into(),
 			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]

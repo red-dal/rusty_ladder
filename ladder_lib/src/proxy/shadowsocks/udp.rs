@@ -54,7 +54,7 @@ use crate::{
 		socks_addr::ReadError,
 	},
 	utils::crypto::aead::{
-		Algorithm, nonce::CounterSequence, Decrypt, Decryptor, Encrypt, Encryptor, TAG_LEN,
+		nonce::CounterSequence, Algorithm, Decrypt, Decryptor, Encrypt, Encryptor, TAG_LEN,
 	},
 };
 use bytes::Bytes;
@@ -182,7 +182,7 @@ impl ReadHelper {
 	async fn recv_src<R>(
 		&mut self,
 		reader: &mut R,
-		mut dest: &mut [u8],
+		dest: &mut [u8],
 	) -> std::io::Result<(usize, SocksAddr)>
 	where
 		R: RecvPacket + ?Sized,
@@ -191,7 +191,7 @@ impl ReadHelper {
 		debug_assert!(dest.len() > salt_len + TAG_LEN);
 
 		// ignore source addr
-		let (len, _src_addr) = reader.recv_src(&mut dest).await?;
+		let (len, _src_addr) = reader.recv_src(dest).await?;
 		// buffer for handling the datagram
 		let dest = &mut dest[..len];
 
@@ -277,13 +277,13 @@ impl PlainReadHelper {
 	async fn recv_src<R>(
 		&mut self,
 		reader: &mut R,
-		mut buf: &mut [u8],
+		buf: &mut [u8],
 	) -> std::io::Result<(usize, SocksAddr)>
 	where
 		R: RecvPacket + ?Sized,
 	{
 		debug_assert!(buf.len() > 16);
-		let (len, _src_addr) = reader.recv_src(&mut buf).await?;
+		let (len, _src_addr) = reader.recv_src(buf).await?;
 		// buffer for handling the datagram
 		let buffer = &mut buf[..len];
 

@@ -100,7 +100,7 @@ impl Monitor {
 	/// # Panics
 	///
 	/// Panics if a connection with the same id is already registered.
-	#[cfg(feature="use-udp")]
+	#[cfg(feature = "use-udp")]
 	#[must_use]
 	pub fn register_udp_session(&self, args: RegisterArgs) -> SessionHandle {
 		let sess_id = args.conn_id;
@@ -150,9 +150,11 @@ impl Internal {
 		let conn_id = args.conn_id;
 		// no connections should share the same id
 
-		if self.conns.contains_key(&conn_id) {
-			panic!("Connection with id {} already in the monitor", conn_id);
-		}
+		assert!(
+			!self.conns.contains_key(&conn_id),
+			"Connection with id {} already in the monitor",
+			conn_id
+		);
 
 		self.conns.insert(
 			conn_id,

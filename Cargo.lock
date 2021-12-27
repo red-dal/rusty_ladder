@@ -1631,6 +1631,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "smol_str",
  "thiserror",
  "time 0.3.5",
  "tokio",

@@ -48,12 +48,6 @@ impl BytesStream {
 	}
 }
 
-impl From<(BoxRead, BoxWrite)> for BytesStream {
-	fn from((r, w): (BoxRead, BoxWrite)) -> Self {
-		Self { r, w }
-	}
-}
-
 impl AsyncRead for BytesStream {
 	#[inline]
 	fn poll_read(
@@ -96,6 +90,7 @@ impl From<tokio::net::TcpStream> for BytesStream {
 // --------------------------------------------
 //               BufBytesStream
 // --------------------------------------------
+
 pub struct BufBytesStream {
 	pub r: BoxBufRead,
 	pub w: BoxWrite,

@@ -21,6 +21,7 @@ use crate::prelude::BoxStdErr;
 #[allow(unused_imports)]
 use crate::protocol::BytesStream;
 use std::io;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
 use super::ws;
@@ -48,9 +49,12 @@ impl Default for Settings {
 }
 
 impl Settings {
-	pub async fn accept(&self, stream: BytesStream) -> io::Result<BytesStream> {
+	pub async fn accept<IO>(&self, stream: IO) -> io::Result<BytesStream>
+	where
+		IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync + Into<BytesStream>,
+	{
 		Ok(match self {
-			Settings::None => stream,
+			Settings::None => stream.into(),
 			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 			Settings::Tls(s) => s.accept(stream).await?.into(),
 			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]

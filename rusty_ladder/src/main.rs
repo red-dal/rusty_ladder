@@ -109,8 +109,6 @@ fn serve(opts: AppOptions) -> Result<(), Error> {
 	let config_path = Path::new(config_path_str);
 	let config_path = config_path.canonicalize()?;
 
-	let config_file = io::BufReader::new(File::open(&config_path)?);
-
 	// Get config format
 	let format = if let Some(mut val) = opts.format {
 		val.make_ascii_lowercase();
@@ -131,7 +129,8 @@ fn serve(opts: AppOptions) -> Result<(), Error> {
 		));
 	};
 
-	let conf = read_config(config_file, &format).map_err(Error::Config)?;
+	let conf = read_config(io::BufReader::new(File::open(&config_path)?), &format)
+		.map_err(Error::Config)?;
 
 	let rt = Runtime::new()?;
 
@@ -144,7 +143,11 @@ fn serve(opts: AppOptions) -> Result<(), Error> {
 	{
 		// Initialize logger
 		init_logger(&conf.log).map_err(Error::Config)?;
-		let server = Arc::new(conf.server.build().map_err(|e| Error::Config(Box::new(e)))?);
+		let server = Arc::new(
+			conf.server
+				.build()
+				.map_err(|e| Error::Config(Box::new(e)))?,
+		);
 		if let Err(err) = rt.block_on(server.serve(None)) {
 			return Err(Error::Runtime(err));
 		};

@@ -15,13 +15,6 @@
 # outbound_handshake_timeout_ms = 20000
 ## ```
 
-## Buffer size for relaying.
-##
-## Default: 16
-## ```
-# relay_buffer_size_kb = 16
-## ```
-
 ## Session will be dropped if there are no bytes transferred within
 ## this amount of time.
 ## Optional.

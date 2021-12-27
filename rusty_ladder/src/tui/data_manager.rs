@@ -103,7 +103,7 @@ fn compare_with_column(a: &Snapshot, b: &Snapshot, col: Option<ColumnIndex>) -> 
 		ColumnIndex::ConnId => cmp_with(a, b, |item| &item.basic.conn_id),
 		ColumnIndex::Inbound => cmp_with(a, b, |item| &item.basic.inbound_tag),
 		ColumnIndex::Outbound => cmp_with(a, b, |item| {
-			item.outbound_tag().map_or("", |tag| tag.as_str())
+			item.outbound_tag().map_or("", smol_str::SmolStr::as_str)
 		}),
 		ColumnIndex::Dst => cmp_with(a, b, Snapshot::to),
 		ColumnIndex::Recv => cmp_with(a, b, Snapshot::recv),

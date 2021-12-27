@@ -21,8 +21,6 @@ use super::{inbound, outbound, Api, Server};
 use crate::{prelude::*, router};
 use std::{collections::HashMap, time::Duration};
 
-const KB: usize = 1024;
-
 #[cfg(feature = "local-dns")]
 use super::dns;
 
@@ -50,10 +48,6 @@ const fn default_dial_tcp_timeout_ms() -> u64 {
 
 const fn default_outbound_handshake_timeout_ms() -> u64 {
 	20_000
-}
-
-const fn default_relay_buffer_size_kb() -> usize {
-	16
 }
 
 const fn default_relay_timeout_secs() -> usize {
@@ -97,11 +91,6 @@ pub struct Builder {
 		serde(default = "default_outbound_handshake_timeout_ms")
 	)]
 	pub outbound_handshake_timeout_ms: u64,
-	/// Buffer size for relaying.
-	///
-	/// Default: 16
-	#[cfg_attr(feature = "use_serde", serde(default = "default_relay_buffer_size_kb"))]
-	pub relay_buffer_size_kb: usize,
 	/// Session will be dropped if there are no bytes transferred within
 	/// this amount of time.
 	///
@@ -193,7 +182,6 @@ impl Builder {
 			self.outbound_handshake_timeout_ms,
 			"outbound_handshake_timeout_ms",
 		)?;
-		check_zero_usize(self.relay_buffer_size_kb, "relay_buffer_size_kb")?;
 		check_zero_usize(self.relay_timeout_secs, "relay_timeout_secs")?;
 
 		#[cfg(feature = "use-udp")]
@@ -210,7 +198,6 @@ impl Builder {
 			outbound_tags,
 			dial_tcp_timeout: Duration::from_millis(self.dial_tcp_timeout_ms),
 			outbound_handshake_timeout: Duration::from_millis(self.outbound_handshake_timeout_ms),
-			relay_buffer_size: self.relay_buffer_size_kb * KB,
 			relay_timeout_secs: self.relay_timeout_secs,
 			#[cfg(feature = "use-udp")]
 			udp_session_timeout: Duration::from_millis(self.udp_session_timeout_ms),
