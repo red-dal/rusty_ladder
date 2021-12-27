@@ -1,37 +1,32 @@
+[global]
+    ## TCP connection will be dropped if it cannot be established within
+    ## this amount of time.
+    ## Optional.
+    ##
+    ## Default: 10000
+    dial_tcp_timeout_ms = 10000
 
-## TCP connection will be dropped if it cannot be established within
-## this amount of time.
-##
-## Default: 10000
-## ```
-# dial_tcp_timeout_ms = 10000
-## ```
+    ## Outbound handshake will be dropped if it cannot be completed within
+    ## this amount of time. 
+    ## Optional.
+    ##
+    ## Default: 20000
+    outbound_handshake_timeout_ms = 20000
 
-## Outbound handshake will be dropped if it cannot be completed within
-## this amount of time. 
-##
-## Default: 20000
-## ```
-# outbound_handshake_timeout_ms = 20000
-## ```
+    ## Session will be dropped if there are no bytes transferred within
+    ## this amount of time.
+    ## Optional.
+    ##
+    ## Defaults: 300
+    relay_timeout_secs = 300
 
-## Session will be dropped if there are no bytes transferred within
-## this amount of time.
-## Optional.
-##
-## Defaults: 300
-## ```
-# relay_timeout_secs = 300
-## ```
-
-## Udp socket/tunnel session will be dropped if there is no read or write for more than
-## this amount of time.
-## Optional.
-##
-## Defaults: 20000
-## ```
-# udp_session_timeout_ms = 20000
-## ```
+    ## Udp socket/tunnel session will be dropped if there is no read or write for more than
+    ## this amount of time.
+    ## Optional.
+    ## Feature `use-udp` must be enabled.
+    ##
+    ## Defaults: 20000
+    udp_session_timeout_ms = 20000
 
 ## Logging settings.
 ## Optional.

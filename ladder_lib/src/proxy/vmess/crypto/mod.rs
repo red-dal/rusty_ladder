@@ -39,6 +39,7 @@ pub fn encrypt_aes_128(key: &Block, block: &mut Block) {
 /// There is NO guarantee that `block` has not been modified during
 /// transmission.
 #[inline]
+#[allow(dead_code)]
 pub fn decrypt_aes_128(key: &Block, block: &mut Block) {
     inner::decrypt_aes_128(key, block);
 }

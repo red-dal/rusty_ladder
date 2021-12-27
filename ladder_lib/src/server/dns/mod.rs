@@ -18,16 +18,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 // mod connector;
-mod dns_server_addr;
 mod dns_client;
+mod dns_server_addr;
 
 use super::Server;
-use crate::{
-	prelude::*,
-	protocol::{outbound::Error as OutboundError, BytesStream},
-};
-use dns_server_addr::DnsServerAddr;
+use crate::{prelude::*, protocol::outbound::Error as OutboundError};
 use dns_client::DnsClient;
+use dns_server_addr::DnsServerAddr;
 use futures::Future;
 use std::{
 	io,
@@ -52,7 +49,7 @@ pub struct Config {
 	/// Address of DNS server.
 	server_addr: DnsServerAddr,
 	/// Which outbound should be used as transport.
-	/// 
+	///
 	/// Only DNS over TCP/TLS is supported.
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	outbound_tag: Option<Tag>,

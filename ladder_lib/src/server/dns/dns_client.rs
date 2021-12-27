@@ -17,12 +17,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{
-	BoxBackgroundFut, BytesStream, DnsServerAddr, DnsError, Server, TokioToFutureAdapter,
-};
+use super::{BoxBackgroundFut, DnsError, DnsServerAddr, Server, TokioToFutureAdapter};
 use crate::{
 	prelude::*,
-	protocol::{outbound::TcpConnector, ProxyContext},
+	protocol::{outbound::TcpConnector, BufBytesStream, ProxyContext},
 };
 use futures::{FutureExt, TryFutureExt};
 use std::io;
@@ -70,7 +68,9 @@ impl DnsClient {
 				Err(e) => {
 					error!(
 						"Cannot established DNS connection to {} ({}), remaining retries: {}",
-						self.server_addr, e, RETRY_COUNT - 1 - i,
+						self.server_addr,
+						e,
+						RETRY_COUNT - 1 - i,
 					);
 				}
 			}
@@ -213,7 +213,7 @@ async fn create_transport_stream_timedout(
 	addr: &SocksAddr,
 	ctx: &Server,
 	outbound_tag: Option<&Tag>,
-) -> Result<BytesStream, BoxStdErr> {
+) -> Result<BufBytesStream, BoxStdErr> {
 	let outbound = outbound_tag
 		.map(|tag| {
 			ctx.get_outbound(tag)

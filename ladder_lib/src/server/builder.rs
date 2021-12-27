@@ -59,23 +59,13 @@ const fn default_udp_session_timeout_ms() -> u64 {
 	20_000
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[cfg_attr(
 	feature = "use_serde",
 	derive(serde::Deserialize),
 	serde(deny_unknown_fields)
 )]
-pub struct Builder {
-	pub inbounds: Vec<inbound::Builder>,
-	pub outbounds: Vec<outbound::Builder>,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub router: router::Builder,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub api: Api,
-	#[cfg(feature = "local-dns")]
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub dns: Option<dns::Config>,
-
+pub struct Global {
 	/// TCP connection will be dropped if it cannot be established within
 	/// this amount of time.
 	///
@@ -107,6 +97,38 @@ pub struct Builder {
 		serde(default = "default_udp_session_timeout_ms")
 	)]
 	pub udp_session_timeout_ms: u64,
+}
+
+impl Default for Global {
+	fn default() -> Self {
+		Self {
+			dial_tcp_timeout_ms: default_dial_tcp_timeout_ms(),
+			outbound_handshake_timeout_ms: default_outbound_handshake_timeout_ms(),
+			relay_timeout_secs: default_relay_timeout_secs(),
+			#[cfg(feature = "use-udp")]
+			udp_session_timeout_ms: default_udp_session_timeout_ms(),
+		}
+	}
+}
+
+#[derive(Debug, Default)]
+#[cfg_attr(
+	feature = "use_serde",
+	derive(serde::Deserialize),
+	serde(deny_unknown_fields)
+)]
+pub struct Builder {
+	pub inbounds: Vec<inbound::Builder>,
+	pub outbounds: Vec<outbound::Builder>,
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub router: router::Builder,
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub api: Api,
+	#[cfg(feature = "local-dns")]
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub dns: Option<dns::Config>,
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub global: Global,
 }
 
 impl Builder {
@@ -177,15 +199,15 @@ impl Builder {
 			}
 		}
 
-		check_zero(self.dial_tcp_timeout_ms, "dial_tcp_timeout_ms")?;
+		check_zero(self.global.dial_tcp_timeout_ms, "dial_tcp_timeout_ms")?;
 		check_zero(
-			self.outbound_handshake_timeout_ms,
+			self.global.outbound_handshake_timeout_ms,
 			"outbound_handshake_timeout_ms",
 		)?;
-		check_zero_usize(self.relay_timeout_secs, "relay_timeout_secs")?;
+		check_zero_usize(self.global.relay_timeout_secs, "relay_timeout_secs")?;
 
 		#[cfg(feature = "use-udp")]
-		check_zero(self.udp_session_timeout_ms, "udp_session_timeout_ms")?;
+		check_zero(self.global.udp_session_timeout_ms, "udp_session_timeout_ms")?;
 
 		Ok(Server {
 			inbounds,
@@ -196,11 +218,13 @@ impl Builder {
 			dns: self.dns,
 			inbound_tags,
 			outbound_tags,
-			dial_tcp_timeout: Duration::from_millis(self.dial_tcp_timeout_ms),
-			outbound_handshake_timeout: Duration::from_millis(self.outbound_handshake_timeout_ms),
-			relay_timeout_secs: self.relay_timeout_secs,
+			dial_tcp_timeout: Duration::from_millis(self.global.dial_tcp_timeout_ms),
+			outbound_handshake_timeout: Duration::from_millis(
+				self.global.outbound_handshake_timeout_ms,
+			),
+			relay_timeout_secs: self.global.relay_timeout_secs,
 			#[cfg(feature = "use-udp")]
-			udp_session_timeout: Duration::from_millis(self.udp_session_timeout_ms),
+			udp_session_timeout: Duration::from_millis(self.global.udp_session_timeout_ms),
 		})
 	}
 }

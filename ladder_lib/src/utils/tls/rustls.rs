@@ -48,7 +48,7 @@ impl Acceptor {
 			// 	.set_single_cert_with_ocsp_and_sct(cert, key, vec![], vec![])
 			// 	.map_err(SslError::Other)?;
 		}
-		let alpns = alpns.into_iter().map(|a| a.to_vec()).collect::<Vec<_>>();
+		let alpns = alpns.into_iter().map(<[u8]>::to_vec).collect::<Vec<_>>();
 		config.alpn_protocols = alpns;
 		let config = Arc::new(config);
 		Ok(Acceptor {
@@ -86,7 +86,7 @@ impl Connector {
 				.add_pem_file(&mut std::io::BufReader::new(ca_file))
 				.map_err(|_| SslError::CannotParseCertificateFile)?;
 		}
-		let alpns = alpns.into_iter().map(|a| a.to_vec()).collect::<Vec<_>>();
+		let alpns = alpns.into_iter().map(<[u8]>::to_vec).collect::<Vec<_>>();
 		config.alpn_protocols = alpns;
 		Ok(Self {
 			inner: Arc::new(config).into(),

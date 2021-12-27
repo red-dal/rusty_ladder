@@ -39,6 +39,7 @@ pub struct LazyWriteHalf<W: AsyncWrite + Unpin> {
 }
 
 impl<W: AsyncWrite + Unpin> LazyWriteHalf<W> {
+	#[allow(dead_code)]
 	pub fn new(w: W, data: Vec<u8>) -> Self {
 		let (state, buf) = if data.is_empty() {
 			(State::WritingDirectly, Vec::new())
