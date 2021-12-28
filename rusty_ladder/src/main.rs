@@ -22,69 +22,74 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![allow(clippy::default_trait_access)]
 
 use config::Config;
-use gumdrop::Options;
-use std::{borrow::Cow, ffi::OsStr, fs::File, io, path::Path, sync::Arc};
+use std::{
+	borrow::Cow,
+	fs::File,
+	io::{self, Read},
+	sync::Arc,
+};
+use structopt::StructOpt;
 use tokio::runtime::Runtime;
 
 type BoxStdErr = Box<dyn std::error::Error + Send + Sync>;
 
-const DEFAULT_CONF_PATH: &str = "config.toml";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const DEFAULT_CONF_FORMAT: ConfigFormat = ConfigFormat::Toml;
 
 #[cfg(feature = "use-tui")]
 mod tui;
 
-#[derive(Options)]
+#[derive(StructOpt)]
+#[structopt(name = "rusty_ladder")]
 pub struct AppOptions {
-	#[options(help = "Print help message.")]
-	help: bool,
-
-	#[cfg(feature = "use-tui")]
+	/// Enable TUI.
+	#[structopt(long)]
 	tui: bool,
 
-	#[options(help = "Set the format of the config file. Can be 'toml' or 'json'.")]
+	/// Set the format of the config file. Can be 'toml' (default) or 'json'.
+	#[structopt(short, long)]
 	format: Option<String>,
 
-	#[options(help = "Set the path of the config file. 'config.toml' is used by default.")]
+	/// Read config from file. STDIN will be used if not specified.
+	#[structopt(short, long)]
 	config: Option<String>,
 
-	#[options(help = "Print version")]
+	/// Print version.
+	#[structopt(long)]
 	version: bool,
 }
 
-enum ConfigFileFormat {
+enum ConfigFormat {
 	Toml,
 	Json,
 }
 
-impl ConfigFileFormat {
+impl ConfigFormat {
 	fn from_str(s: &str) -> Option<Self> {
-		Some(match s {
+		let mut s = s.to_string();
+		s.make_ascii_lowercase();
+		Some(match s.as_str() {
 			"toml" => Self::Toml,
 			"json" => Self::Json,
 			_ => return None,
 		})
 	}
-
-	fn from_os_str(s: &OsStr) -> Option<Self> {
-		if s.eq_ignore_ascii_case("toml") {
-			Some(Self::Toml)
-		} else if s.eq_ignore_ascii_case("json") {
-			Some(Self::Json)
-		} else {
-			None
-		}
-	}
 }
 
-fn read_config<R: io::Read>(mut reader: R, format: &ConfigFileFormat) -> Result<Config, BoxStdErr> {
+fn read_conf_str(path: Option<&str>) -> Result<String, std::io::Error> {
+	let mut conf_str = String::with_capacity(1024);
+	if let Some(path) = path {
+		File::open(path)?.read_to_string(&mut conf_str)?;
+	} else {
+		std::io::stdin().read_to_string(&mut conf_str)?;
+	}
+	Ok(conf_str)
+}
+
+fn read_config(conf_str: &str, format: &ConfigFormat) -> Result<Config, BoxStdErr> {
 	let conf: Config = match format {
-		ConfigFileFormat::Toml => {
-			let mut content = String::new();
-			reader.read_to_string(&mut content)?;
-			toml::from_str(&content)?
-		}
-		ConfigFileFormat::Json => serde_json::from_reader(reader)?,
+		ConfigFormat::Toml => toml::from_str(conf_str)?,
+		ConfigFormat::Json => serde_json::from_str(conf_str)?,
 	};
 	Ok(conf)
 }
@@ -101,36 +106,21 @@ enum Error {
 	Runtime(BoxStdErr),
 }
 
-fn serve(opts: AppOptions) -> Result<(), Error> {
-	let config_path_str: &str = opts.config.as_deref().unwrap_or(DEFAULT_CONF_PATH);
+fn serve(opts: &AppOptions) -> Result<(), Error> {
+	let conf = {
+		let format = if let Some(s) = &opts.format {
+			ConfigFormat::from_str(s).ok_or_else(|| {
+				Error::Input(format!("unknown config format from settings value '{}'", s).into())
+			})?
+		} else {
+			DEFAULT_CONF_FORMAT
+		};
 
-	println!("Reading config file '{}'", config_path_str);
+		let conf_str = read_conf_str(opts.config.as_deref())
+			.map_err(|e| Error::Input(format!("cannot read config: {}", e).into()))?;
 
-	let config_path = Path::new(config_path_str);
-	let config_path = config_path.canonicalize()?;
-
-	// Get config format
-	let format = if let Some(mut val) = opts.format {
-		val.make_ascii_lowercase();
-		ConfigFileFormat::from_str(&val).ok_or_else(|| {
-			Error::Input(format!("Unknown config file format from settings value '{}'", val).into())
-		})?
-	} else if let Some(ext) = config_path.extension() {
-		ConfigFileFormat::from_os_str(ext).ok_or_else(|| {
-			if let Some(ext) = ext.to_str() {
-				Error::Input(format!("Unknown file extension '{}'", ext).into())
-			} else {
-				Error::Input("Unknown file extension".into())
-			}
-		})?
-	} else {
-		return Err(Error::Input(
-			"Unable to determine config file format.".into(),
-		));
+		read_config(&conf_str, &format).map_err(Error::Config)?
 	};
-
-	let conf = read_config(io::BufReader::new(File::open(&config_path)?), &format)
-		.map_err(Error::Config)?;
 
 	let rt = Runtime::new()?;
 
@@ -141,6 +131,11 @@ fn serve(opts: AppOptions) -> Result<(), Error> {
 	}
 	#[cfg(not(feature = "use-tui"))]
 	{
+		if opts.tui {
+			return Err(Error::Input(
+				"feature `use-tui` must be enabled to use TUI".into(),
+			));
+		}
 		// Initialize logger
 		init_logger(&conf.log).map_err(Error::Config)?;
 		let server = Arc::new(
@@ -157,12 +152,12 @@ fn serve(opts: AppOptions) -> Result<(), Error> {
 }
 
 fn main() {
-	let opts = AppOptions::parse_args_default_or_exit();
+	let opts = AppOptions::from_args();
 	if opts.version {
 		println!("{}", VERSION);
 		return;
 	}
-	if let Err(err) = serve(opts) {
+	if let Err(err) = serve(&opts) {
 		println!("Error happened during initialization:\n {}\n", err);
 		std::process::exit(match err {
 			Error::Io(_) => exitcode::IOERR,

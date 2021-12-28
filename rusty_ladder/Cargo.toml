@@ -80,7 +80,7 @@ ladder_lib = { version = "*", path = "../ladder_lib", default-features = false, 
 serde = { version = "1.0" }
 serde_json = "1.0"
 toml = "0.5"
-gumdrop = "0.8"
+structopt = "0.3"
 log = { version = "0.4", default-features = false, features = [
     "std",
     "release_max_level_info",
