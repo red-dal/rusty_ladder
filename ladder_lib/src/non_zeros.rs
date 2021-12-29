@@ -17,86 +17,44 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-#![deny(unsafe_code)]
+use lazy_static::lazy_static;
+use std::num::{NonZeroU16, NonZeroU8};
 
-#[allow(dead_code, unsafe_code)]
-mod unsafe_codes {
-	use std::num::{NonZeroU16, NonZeroU8, NonZeroUsize};
-
-	pub const fn u8_to_u16(small: NonZeroU8) -> NonZeroU16 {
-		// Casting u8 -> u16 is perfectly fine.
-		let val = small.get() as u16;
-		unsafe { NonZeroU16::new_unchecked(val) }
-	}
-
-	pub const fn u8_to_usize(small: NonZeroU8) -> NonZeroUsize {
-		// Casting u8 -> usize is perfectly fine.
-		let val = small.get() as usize;
-		unsafe { NonZeroUsize::new_unchecked(val) }
-	}
-
-	pub const fn u16_to_usize(small: NonZeroU16) -> NonZeroUsize {
-		// Casting u16 -> usize is fine.
-		// Most platforms have memory larger than 256 bytes.
-		let val = small.get() as usize;
-		unsafe { NonZeroUsize::new_unchecked(val) }
-	}
-
-	pub const fn add_u8(a: NonZeroU8, b: NonZeroU8) -> NonZeroU16 {
-		let a = a.get() as u16;
-		let b = b.get() as u16;
-		unsafe { NonZeroU16::new_unchecked(a + b) }
-	}
-
-    // Only on at least 32 bits platform.
-    #[cfg(any(target_pointer_width="32", target_pointer_width="64"))]
-    pub const fn add_u16(a: NonZeroU16, b: NonZeroU16) -> NonZeroUsize {
-        let a = a.get() as usize;
-        let b = b.get() as usize;
-        unsafe { NonZeroUsize::new_unchecked(a + b) }
-    }
-
-    // Only on at least 32 bits platform.
-    #[cfg(any(target_pointer_width="32", target_pointer_width="64"))]
-    pub const fn add_u8_u16(a: NonZeroU8, b: NonZeroU16) -> NonZeroUsize {
-        add_u16(u8_to_u16(a), b)
-    }
-
-	macro_rules! make_nonzero {
-		($t:ty, $name:ident, $val:literal) => {
-			pub const $name: $t = unsafe { <$t>::new_unchecked($val) };
-		};
-	}
-
-	macro_rules! make_u8 {
-		($name:ident, $val:literal) => {
-			make_nonzero!(NonZeroU8, $name, $val);
-		};
-	}
-
-	macro_rules! make_u16 {
-		($name:ident, $val:literal) => {
-			make_nonzero!(NonZeroU16, $name, $val);
-		};
-	}
-
-	make_u8!(U8_1, 1_u8);
-	make_u8!(U8_2, 2_u8);
-	make_u8!(U8_4, 4_u8);
-	make_u8!(U8_6, 6_u8);
-	make_u8!(U8_8, 8_u8);
-	make_u8!(U8_10, 10_u8);
-	make_u8!(U8_12, 12_u8);
-	make_u8!(U8_16, 16_u8);
-	make_u8!(U8_18, 18_u8);
-	make_u8!(U8_32, 32_u8);
-	make_u8!(U8_64, 64_u8);
-	make_u8!(U8_128, 128_u8);
-
-	make_u16!(U16_256, 256_u16);
-	make_u16!(U16_512, 512_u16);
+macro_rules! make_nonzero {
+	($t:ty, $name:ident, $val:literal) => {
+		lazy_static! {
+			pub static ref $name: $t = <$t>::new($val).unwrap();
+		}
+	};
 }
-pub use unsafe_codes::*;
+
+macro_rules! make_u8 {
+	($name:ident, $val:literal) => {
+		make_nonzero!(NonZeroU8, $name, $val);
+	};
+}
+
+macro_rules! make_u16 {
+	($name:ident, $val:literal) => {
+		make_nonzero!(NonZeroU16, $name, $val);
+	};
+}
+
+make_u8!(U8_1, 1_u8);
+make_u8!(U8_2, 2_u8);
+make_u8!(U8_4, 4_u8);
+make_u8!(U8_6, 6_u8);
+make_u8!(U8_8, 8_u8);
+make_u8!(U8_10, 10_u8);
+make_u8!(U8_12, 12_u8);
+make_u8!(U8_16, 16_u8);
+make_u8!(U8_18, 18_u8);
+make_u8!(U8_32, 32_u8);
+make_u8!(U8_64, 64_u8);
+make_u8!(U8_128, 128_u8);
+
+make_u16!(U16_256, 256_u16);
+make_u16!(U16_512, 512_u16);
 
 #[cfg(test)]
 mod tests {

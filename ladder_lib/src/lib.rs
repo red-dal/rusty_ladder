@@ -19,35 +19,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #![deny(clippy::all)]
 #![warn(clippy::pedantic)]
+#![forbid(unsafe_code)]
 
 // TODO:
 // - Balancer
 // - Clean up trait
-// - Impl AsyncBufRead for BytesStream
 
-/// Some common non zero values that needs unsafe to initialize.
-/// Use value here to avoid using unwrap.
 mod non_zeros;
-
-// All codes below forbid unsafe.
-
-#[forbid(unsafe_code)]
 mod prelude;
-#[forbid(unsafe_code)]
-pub mod protocol;
-#[forbid(unsafe_code)]
-pub mod proxy;
-#[forbid(unsafe_code)]
-pub mod router;
-#[forbid(unsafe_code)]
-pub mod server;
-#[cfg(test)]
-#[forbid(unsafe_code)]
-mod test_utils;
-#[forbid(unsafe_code)]
 mod transport;
-#[forbid(unsafe_code)]
 mod utils;
+
+pub mod protocol;
+pub mod proxy;
+pub mod router;
+pub mod server;
+
+#[cfg(test)]
+mod test_utils;
 
 pub use server::{stat::Monitor, BuildError as ServerBuildError, Builder as ServerBuilder, Server};
 pub use utils::BytesCount;

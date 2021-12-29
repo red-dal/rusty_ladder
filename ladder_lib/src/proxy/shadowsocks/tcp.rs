@@ -80,7 +80,7 @@ use crate::{
 	},
 };
 use bytes::Bytes;
-use std::num::NonZeroU16;
+use std::num::{NonZeroU16, NonZeroUsize};
 
 const MAX_PAYLOAD_SIZE: u16 = 16 * 1024 - 1;
 
@@ -148,8 +148,10 @@ impl codec::Decode for Decoder {
 			ReadState::Salt { key: _ } => Some(self.algo.key_size().into()),
 			ReadState::Decrypt { dec: _, state } => match state {
 				// Length part is always ( 2 + TAG_LEN (16 bytes) = 18 bytes ).
-				DecodeState::Length => Some(non_zeros::U8_18.into()),
-				DecodeState::Payload(len) => Some(non_zeros::add_u8_u16(aead::TAG_LEN_N, *len)),
+				DecodeState::Length => Some((*non_zeros::U8_18).into()),
+				DecodeState::Payload(len) => {
+					Some(NonZeroUsize::new(aead::TAG_LEN + usize::from(len.get())).unwrap())
+				}
 			},
 		}
 	}

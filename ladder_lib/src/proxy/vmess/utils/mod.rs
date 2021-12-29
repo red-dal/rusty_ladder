@@ -127,7 +127,7 @@ impl ShakeLengthReader {
 
 impl LengthReader for ShakeLengthReader {
 	fn length_buffer_size(&self) -> NonZeroUsize {
-		non_zeros::u8_to_usize(non_zeros::U8_2)
+		NonZeroUsize::from(*non_zeros::U8_2)
 	}
 
 	fn read_length(&mut self, buf: &[u8]) -> Result<u16, BoxStdErr> {
@@ -196,7 +196,7 @@ pub struct PlainLengthReader;
 impl LengthReader for PlainLengthReader {
 	#[inline]
 	fn length_buffer_size(&self) -> NonZeroUsize {
-		non_zeros::u8_to_usize(non_zeros::U8_2)
+		NonZeroUsize::from(*non_zeros::U8_2)
 	}
 
 	#[inline]

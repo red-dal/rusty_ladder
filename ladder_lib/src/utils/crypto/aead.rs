@@ -25,11 +25,8 @@ use std::num::NonZeroU8;
 
 pub use super::inner_aead::{Decryptor, Encryptor};
 
-pub const TAG_LEN_N: NonZeroU8 = non_zeros::U8_16; // 16 bytes
-pub const TAG_LEN: usize = TAG_LEN_N.get() as usize;
-
-pub const NONCE_LEN_N: NonZeroU8 = non_zeros::U8_12; // 12 bytes
-pub const NONCE_LEN: usize = NONCE_LEN_N.get() as usize; // 12 bytes
+pub const TAG_LEN: usize = 16;
+pub const NONCE_LEN: usize = 12;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -45,8 +42,8 @@ impl Algorithm {
 	#[allow(dead_code)]
 	pub fn key_size(self) -> NonZeroU8 {
 		match self {
-			Self::Aes128Gcm => non_zeros::U8_16,
-			Self::Aes256Gcm | Self::ChaCha20Poly1305 => non_zeros::U8_32,
+			Self::Aes128Gcm => *non_zeros::U8_16,
+			Self::Aes256Gcm | Self::ChaCha20Poly1305 => *non_zeros::U8_32,
 		}
 	}
 }
