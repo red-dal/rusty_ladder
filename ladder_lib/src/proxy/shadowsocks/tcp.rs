@@ -68,7 +68,7 @@ use super::{key_to_session_key, utils::salt_len, Error};
 use crate::{
 	non_zeros,
 	prelude::*,
-	protocol::{BoxRead, BoxWrite, BytesStream},
+	protocol::{AsyncReadWrite, BoxRead, BoxWrite},
 	utils::{
 		append_mut, append_u16_mut,
 		codec::{self, FrameReader, FrameWriter},
@@ -98,17 +98,18 @@ pub type CryptFrameReader = FrameReader<Decoder, BoxRead>;
 pub type CryptFrameWriter = FrameWriter<Encoder, BoxWrite>;
 
 pub fn new_crypt_stream(
-	stream: BytesStream,
+	stream: Box<dyn AsyncReadWrite>,
 	algo: Algorithm,
 	password: Bytes,
 	local_salt: Vec<u8>,
 ) -> (CryptFrameReader, CryptFrameWriter) {
+	let (r, w) = stream.split();
 	let w = FrameWriter::new(
 		MAX_PAYLOAD_SIZE.into(),
 		Encoder::new(algo, default_write_nonce(), &password, local_salt),
-		stream.w,
+		w,
 	);
-	let r = FrameReader::new(Decoder::new(algo, password), stream.r);
+	let r = FrameReader::new(Decoder::new(algo, password), r);
 	(r, w)
 }
 

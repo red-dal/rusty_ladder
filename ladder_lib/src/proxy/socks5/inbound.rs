@@ -28,7 +28,7 @@ use crate::{
 			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
 		},
 		outbound::Error as OutboundError,
-		AsyncReadWrite, BufBytesStream, BytesStream, GetProtocolName,
+		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	transport,
 };
@@ -148,18 +148,18 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		info!("Performing SOCKS5 handshake with client ({:?}).", info);
 		let stream = self.transport.accept(stream).await?;
-		let mut stream = BufBytesStream::from_bytes_stream(stream);
+		let mut stream = BufBytesStream::from(stream);
 		let mut buf = Vec::with_capacity(HANDSHAKE_BUFFER_CAPACITY);
 		{
 			let methods = Methods::read(&mut stream, &mut buf).await;
 			let methods = match methods {
 				Ok(m) => m,
-				Err(e) => return invalid_request(Box::new(stream), e),
+				Err(e) => return invalid_request(stream, e),
 			};
 			let acceptable_method = methods.choose(!self.users.is_empty());
 			if let Some(acceptable_method) = acceptable_method {

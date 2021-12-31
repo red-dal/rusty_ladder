@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::{http_utils, tls};
 use crate::{
 	prelude::*,
-	protocol::BytesStream,
+	protocol::AsyncReadWrite,
 	utils::websocket::{self, Stream as WsStream},
 };
 use std::{collections::HashMap, io};
@@ -43,20 +43,66 @@ pub enum ClientStream<IO: AsyncRead + AsyncWrite + Unpin> {
 	Tls(Box<SecureClientStream<IO>>),
 }
 
-impl<IO> From<ClientStream<IO>> for BytesStream
+impl<IO> AsyncRead for ClientStream<IO>
 where
 	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
 {
-	fn from(s: ClientStream<IO>) -> Self {
-		match s {
-			ClientStream::Raw(stream) => {
-				let (r, w) = tokio::io::split(stream);
-				BytesStream::new(Box::new(r), Box::new(w))
-			}
-			ClientStream::Tls(stream) => {
-				let (r, w) = tokio::io::split(stream);
-				BytesStream::new(Box::new(r), Box::new(w))
-			}
+	fn poll_read(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+		buf: &mut tokio::io::ReadBuf<'_>,
+	) -> std::task::Poll<io::Result<()>> {
+		match self.get_mut() {
+			Self::Raw(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
+			Self::Tls(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
+		}
+	}
+}
+
+impl<IO> AsyncWrite for ClientStream<IO>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+	fn poll_write(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+		buf: &[u8],
+	) -> std::task::Poll<Result<usize, io::Error>> {
+		match self.get_mut() {
+			Self::Raw(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
+			Self::Tls(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
+		}
+	}
+
+	fn poll_flush(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<Result<(), io::Error>> {
+		match self.get_mut() {
+			Self::Raw(s) => Pin::new(s.as_mut()).poll_flush(cx),
+			Self::Tls(s) => Pin::new(s.as_mut()).poll_flush(cx),
+		}
+	}
+
+	fn poll_shutdown(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<Result<(), io::Error>> {
+		match self.get_mut() {
+			Self::Raw(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
+			Self::Tls(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
+		}
+	}
+}
+
+impl<IO> AsyncReadWrite for ClientStream<IO>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
+		match *self {
+			Self::Raw(stream) => stream.split(),
+			Self::Tls(stream) => stream.split(),
 		}
 	}
 }
@@ -66,19 +112,71 @@ pub enum ServerStream<IO: AsyncRead + AsyncWrite + Unpin> {
 	Tls(Box<SecureServerStream<IO>>),
 }
 
-impl<IO> From<ServerStream<IO>> for BytesStream
+impl<IO> AsyncRead for ServerStream<IO>
 where
 	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
 {
-	fn from(s: ServerStream<IO>) -> Self {
-		match s {
+	fn poll_read(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+		buf: &mut tokio::io::ReadBuf<'_>,
+	) -> std::task::Poll<io::Result<()>> {
+		match self.get_mut() {
+			ServerStream::Raw(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
+			ServerStream::Tls(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
+		}
+	}
+}
+
+impl<IO> AsyncWrite for ServerStream<IO>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+	fn poll_write(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+		buf: &[u8],
+	) -> std::task::Poll<Result<usize, io::Error>> {
+		match self.get_mut() {
+			ServerStream::Raw(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
+			ServerStream::Tls(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
+		}
+	}
+
+	fn poll_flush(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<Result<(), io::Error>> {
+		match self.get_mut() {
+			ServerStream::Raw(s) => Pin::new(s.as_mut()).poll_flush(cx),
+			ServerStream::Tls(s) => Pin::new(s.as_mut()).poll_flush(cx),
+		}
+	}
+
+	fn poll_shutdown(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<Result<(), io::Error>> {
+		match self.get_mut() {
+			ServerStream::Raw(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
+			ServerStream::Tls(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
+		}
+	}
+}
+
+impl<IO> AsyncReadWrite for ServerStream<IO>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
+		match *self {
 			ServerStream::Raw(stream) => {
 				let (r, w) = tokio::io::split(*stream);
-				BytesStream::new(Box::new(r), Box::new(w))
+				(Box::new(r), Box::new(w))
 			}
 			ServerStream::Tls(stream) => {
 				let (r, w) = tokio::io::split(*stream);
-				BytesStream::new(Box::new(r), Box::new(w))
+				(Box::new(r), Box::new(w))
 			}
 		}
 	}

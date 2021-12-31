@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::{
-	common::{AsyncReadWrite, BytesStream, GetProtocolName},
+	common::{AsyncReadWrite, GetProtocolName},
 	BufBytesStream,
 };
 use crate::{prelude::*, protocol::outbound};
@@ -42,7 +42,7 @@ pub struct StreamInfo {
 pub trait TcpAcceptor: GetProtocolName {
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError>;
 }

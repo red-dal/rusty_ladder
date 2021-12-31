@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use crate::{prelude::*, protocol::BytesStream};
+use crate::{prelude::*, protocol::AsyncReadWrite};
 use async_tungstenite::{
 	tokio::{accept_hdr_async, client_async, TokioAdapter},
 	tungstenite::{
@@ -169,18 +169,12 @@ enum ReadingState {
 }
 
 #[derive(Debug)]
-pub struct StreamWrapper<S>
-where
-	S: ItemStream<Item = Result<Message, WsError>> + ItemSink<Message, Error = WsError> + Unpin,
-{
+pub struct StreamWrapper<S: Unpin> {
 	inner: S,
 	state: ReadingState,
 }
 
-impl<S> StreamWrapper<S>
-where
-	S: ItemStream<Item = Result<Message, WsError>> + ItemSink<Message, Error = WsError> + Unpin,
-{
+impl<S: Unpin> StreamWrapper<S> {
 	fn new(inner: S) -> Self {
 		Self {
 			inner,
@@ -191,7 +185,7 @@ where
 
 impl<S> AsyncRead for StreamWrapper<S>
 where
-	S: ItemStream<Item = Result<Message, WsError>> + ItemSink<Message, Error = WsError> + Unpin,
+	S: ItemStream<Item = Result<Message, WsError>> + Unpin,
 {
 	fn poll_read(
 		self: Pin<&mut Self>,
@@ -243,7 +237,7 @@ where
 
 impl<S> AsyncWrite for StreamWrapper<S>
 where
-	S: ItemStream<Item = Result<Message, WsError>> + ItemSink<Message, Error = WsError> + Unpin,
+	S: ItemSink<Message, Error = WsError> + Unpin,
 {
 	fn poll_write(
 		self: Pin<&mut Self>,
@@ -277,15 +271,7 @@ where
 	}
 }
 
-#[inline]
-fn to_io_err(err: WsError) -> io::Error {
-	if let WsError::Io(err) = err {
-		return err;
-	}
-	io::Error::new(io::ErrorKind::Other, err)
-}
-
-impl<S> From<StreamWrapper<S>> for BytesStream
+impl<S> AsyncReadWrite for StreamWrapper<S>
 where
 	S: 'static
 		+ ItemStream<Item = Result<Message, WsError>>
@@ -294,10 +280,18 @@ where
 		+ Sync
 		+ Unpin,
 {
-	fn from(stream: StreamWrapper<S>) -> Self {
-		let (rh, wh) = tokio::io::split(stream);
-		BytesStream::new(Box::new(rh), Box::new(wh))
+	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
+		let (r, w) = tokio::io::split(*self);
+		(Box::new(r), Box::new(w))
 	}
+}
+
+#[inline]
+fn to_io_err(err: WsError) -> io::Error {
+	if let WsError::Io(err) = err {
+		return err;
+	}
+	io::Error::new(io::ErrorKind::Other, err)
 }
 
 #[derive(Debug)]

@@ -1,5 +1,5 @@
 use super::ConfigError;
-use crate::protocol::{BytesStream, SocksAddr, SocksDestination};
+use crate::protocol::{AsyncReadWrite, SocksAddr, SocksDestination};
 use std::{io, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_rustls::rustls;
@@ -111,22 +111,16 @@ impl Connector {
 	}
 }
 
-impl<RW> From<ClientStream<RW>> for BytesStream
-where
-	RW: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync,
-{
-	fn from(s: ClientStream<RW>) -> Self {
-		let (r, w) = tokio::io::split(s);
-		BytesStream::new(Box::new(r), Box::new(w))
+impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite for ClientStream<IO> {
+	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
+		let (r, w) = tokio::io::split(*self);
+		(Box::new(r), Box::new(w))
 	}
 }
 
-impl<RW> From<ServerStream<RW>> for BytesStream
-where
-	RW: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync,
-{
-	fn from(s: ServerStream<RW>) -> Self {
-		let (r, w) = tokio::io::split(s);
-		BytesStream::new(Box::new(r), Box::new(w))
+impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite for ServerStream<IO> {
+	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
+		let (r, w) = tokio::io::split(*self);
+		(Box::new(r), Box::new(w))
 	}
 }

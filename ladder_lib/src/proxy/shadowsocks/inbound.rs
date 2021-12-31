@@ -23,7 +23,7 @@ use crate::{
 	protocol::{
 		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
 		socks_addr::ReadError,
-		AsyncReadWrite, BufBytesStream, BytesStream, GetProtocolName,
+		AsyncReadWrite, BufBytesStream, CompositeBytesStream, GetProtocolName,
 	},
 	transport,
 	utils::crypto::aead::Algorithm,
@@ -77,7 +77,7 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		_info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		trace!("Accepting shadowsocks inbound");
@@ -102,10 +102,11 @@ impl TcpAcceptor for Settings {
 					return Err(e.into());
 				}
 				Err(e) => {
-					return invalid_request(
-						BytesStream::new(Box::new(crypt_read), Box::new(crypt_write)),
-						e,
-					);
+					let raw_stream = CompositeBytesStream {
+						r: crypt_read.r,
+						w: crypt_write.w,
+					};
+					return invalid_request(Box::new(raw_stream), e);
 				}
 			};
 			trace!("Shadowsocks target address: {}", addr);
@@ -134,7 +135,7 @@ impl TcpAcceptor for Settings {
 			trace!("Shadowsocks target address: {}", addr);
 
 			Ok(AcceptResult::Tcp(
-				Box::new(PlainHandshakeHandler(BufBytesStream::from_bytes_stream(stream))),
+				Box::new(PlainHandshakeHandler(BufBytesStream::from(stream))),
 				addr,
 			))
 		}
@@ -166,8 +167,8 @@ where
 
 #[inline]
 fn invalid_request<T>(
-	stream: impl 'static + AsyncReadWrite,
+	stream: Box<dyn AsyncReadWrite>,
 	e: impl Into<Error>,
 ) -> Result<T, AcceptError> {
-	Err(AcceptError::new_protocol(Box::new(stream), e.into()))
+	Err(AcceptError::new_protocol(stream, e.into()))
 }

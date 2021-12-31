@@ -23,7 +23,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{AcceptError, AcceptResult, StreamInfo, TcpAcceptor},
-		BytesStream, GetProtocolName, Network,
+		AsyncReadWrite, GetProtocolName, Network,
 	},
 	utils::OneOrMany,
 };
@@ -135,7 +135,7 @@ impl GetProtocolName for Details {
 impl TcpAcceptor for Details {
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		dispatch_inbound!(self, Self, s, { s.accept_tcp(stream, info).await })

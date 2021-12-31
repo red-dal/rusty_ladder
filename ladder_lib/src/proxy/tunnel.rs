@@ -21,7 +21,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
-		BufBytesStream, BytesStream, GetProtocolName, Network,
+		AsyncReadWrite, BufBytesStream, GetProtocolName, Network,
 	},
 };
 
@@ -57,14 +57,12 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		_info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		if self.network.use_tcp() {
 			Ok(AcceptResult::Tcp(
-				Box::new(PlainHandshakeHandler(BufBytesStream::from_bytes_stream(
-					stream,
-				))),
+				Box::new(PlainHandshakeHandler(BufBytesStream::from(stream))),
 				self.dst.clone(),
 			))
 		} else {

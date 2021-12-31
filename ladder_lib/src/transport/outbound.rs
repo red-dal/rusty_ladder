@@ -17,9 +17,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use crate::prelude::*;
 #[allow(unused_imports)]
-use crate::protocol::{BytesStream, ProxyContext};
+use crate::protocol::ProxyContext;
+use crate::{prelude::*, protocol::AsyncReadWrite};
 use std::io;
 
 #[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -57,16 +57,16 @@ impl Settings {
 		&'a self,
 		stream: IO,
 		#[allow(unused_variables)] addr: &'a SocksAddr,
-	) -> io::Result<BytesStream>
+	) -> io::Result<Box<dyn AsyncReadWrite>>
 	where
-		IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync + Into<BytesStream>,
+		IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync + Into<Box<dyn AsyncReadWrite>>,
 	{
 		Ok(match self {
 			Settings::None => stream.into(),
 			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-			Settings::Tls(s) => s.connect(stream, addr).await?.into(),
+			Settings::Tls(s) => Box::new(s.connect(stream, addr).await?),
 			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-			Settings::Ws(s) => s.connect(stream, addr).await?.into(),
+			Settings::Ws(s) => Box::new(s.connect(stream, addr).await?),
 			#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
 			Settings::H2(s) => s.connect(stream, addr).await?,
 			#[cfg(feature = "browser-transport")]
@@ -83,19 +83,19 @@ impl Settings {
 		&self,
 		addr: &SocksAddr,
 		context: &dyn ProxyContext,
-	) -> io::Result<BytesStream> {
+	) -> io::Result<Box<dyn AsyncReadWrite>> {
 		debug!("Establishing transport connection to {}", addr);
 		Ok(match self {
-			Settings::None => context.dial_tcp(addr).await?.into(),
+			Settings::None => Box::new(context.dial_tcp(addr).await?),
 			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 			Settings::Tls(s) => {
 				let stream = context.dial_tcp(addr).await?;
-				s.connect(stream, addr).await?.into()
+				Box::new(s.connect(stream, addr).await?)
 			}
 			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
 			Settings::Ws(s) => {
 				let stream = context.dial_tcp(addr).await?;
-				s.connect(stream, addr).await?.into()
+				Box::new(s.connect(stream, addr).await?)
 			}
 			#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
 			Settings::H2(s) => {

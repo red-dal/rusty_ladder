@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::ConfigError;
-use crate::{prelude::*, protocol::BytesStream};
+use crate::{prelude::*, protocol::AsyncReadWrite};
 use openssl::ssl::{self, Ssl, SslAcceptor, SslConnector, SslFiletype, SslMethod, SslRef};
 use std::io;
 use tokio_openssl::SslStream;
@@ -143,12 +143,9 @@ fn make_io_error(err: openssl::ssl::Error) -> io::Error {
 	}
 }
 
-impl<RW> From<SslStream<RW>> for BytesStream
-where
-	RW: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
-{
-	fn from(stream: SslStream<RW>) -> Self {
-		let (rh, wh) = tokio::io::split(stream);
-		BytesStream::new(Box::new(rh), Box::new(wh))
+impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite for SslStream<IO> {
+	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
+		let (r, w) = tokio::io::split(*self);
+		(Box::new(r), Box::new(w))
 	}
 }

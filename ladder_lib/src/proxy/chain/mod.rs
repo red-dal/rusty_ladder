@@ -78,7 +78,7 @@ impl TcpConnector for Settings {
 		while let Some(node) = nodes_iter.next() {
 			let next_addr = nodes_iter.peek().map_or(dst, |node| node.addr());
 			stream = node
-				.connect_stream(stream.into_bytes_stream(), next_addr, context)
+				.connect_stream(Box::new(stream), next_addr, context)
 				.await?;
 		}
 

@@ -289,7 +289,7 @@ impl<'a> InboundConnection<'a> {
 		};
 		let accept_res = match inbound
 			.settings
-			.accept_tcp(tcp_stream.into(), Some(info))
+			.accept_tcp(Box::new(tcp_stream), Some(info))
 			.await
 		{
 			Ok(res) => res,

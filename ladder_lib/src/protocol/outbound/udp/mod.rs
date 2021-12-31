@@ -17,8 +17,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
+use crate::protocol::AsyncReadWrite;
+
 use super::{
-	super::{common::BytesStream, ProxyContext, SocksAddr},
+	super::{ProxyContext, SocksAddr},
 	Error,
 };
 use async_trait::async_trait;
@@ -50,7 +52,7 @@ pub trait ConnectSocketOverTcp: Send + Sync {
 
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		context: &'a dyn ProxyContext,
 	) -> Result<SocketOrTunnelStream, Error>;
 }
@@ -82,7 +84,7 @@ pub trait ConnectTunnelOverTcp: Send + Sync {
 	async fn connect_stream<'a>(
 		&'a self,
 		dst: &'a SocksAddr,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		context: &'a dyn ProxyContext,
 	) -> Result<SocketOrTunnelStream, Error>;
 }

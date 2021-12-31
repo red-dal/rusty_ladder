@@ -22,7 +22,7 @@ use crate::{
 	protocol::{
 		inbound::{AcceptError, AcceptResult, HandshakeError, TcpAcceptor},
 		outbound::{TcpConnector, TcpStreamConnector},
-		AsyncReadWrite, GetConnectorError, ProxyContext, BufBytesStream,
+		AsyncReadWrite, BufBytesStream, GetConnectorError, ProxyContext,
 	},
 	utils::relay::{Counter, Relay},
 };
@@ -71,7 +71,7 @@ pub fn run_proxy_test<I, Out: TcpStreamConnector>(
 
 		let out_stream = TcpStream::connect(&in_addr).await.unwrap();
 		let mut out_stream = outbound
-			.connect_stream(out_stream.into(), &echo_addr.into(), &DummyTcpContext())
+			.connect_stream(Box::new(out_stream), &echo_addr.into(), &DummyTcpContext())
 			.await
 			.unwrap();
 		proxy_stream_for_test(&mut out_stream).await;
@@ -150,7 +150,7 @@ where
 	I: 'static + TcpAcceptor + Send + Sync,
 {
 	let (stream, _) = listener.accept().await?;
-	let accept_result = inbound.accept_tcp(stream.into(), None).await;
+	let accept_result = inbound.accept_tcp(Box::new(stream), None).await;
 	let accept_result = match accept_result {
 		Ok(h) => h,
 		Err(err) => return match err {

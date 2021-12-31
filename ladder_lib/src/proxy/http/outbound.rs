@@ -24,7 +24,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BufBytesStream, BytesStream, GetProtocolName, ProxyContext,
+		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 };
@@ -73,7 +73,7 @@ impl Settings {
 	/// Connect to `stream` after it's connected on a transport layer.
 	async fn priv_connect<'a>(
 		&'a self,
-		mut stream: BytesStream,
+		mut stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 	) -> Result<BufBytesStream, OutboundError> {
 		debug!(
@@ -138,15 +138,13 @@ impl Settings {
 			}
 		}
 
+		let (rh, wh) = stream.split();
 		let rh = if leftover.is_empty() {
-			stream.r
+			rh
 		} else {
-			Box::new(AsyncReadExt::chain(
-				std::io::Cursor::new(leftover),
-				stream.r,
-			))
+			Box::new(AsyncReadExt::chain(std::io::Cursor::new(leftover), rh))
 		};
-		Ok(BufBytesStream::from_raw(rh, stream.w))
+		Ok(BufBytesStream::from_raw(rh, wh))
 	}
 }
 
@@ -180,7 +178,7 @@ impl crate::protocol::outbound::udp::GetConnector for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {

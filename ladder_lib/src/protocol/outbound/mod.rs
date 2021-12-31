@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{common::{BytesStream, BufBytesStream}, ProxyContext};
+use super::{common::BufBytesStream, AsyncReadWrite, ProxyContext};
 use crate::prelude::*;
 use std::io;
 
@@ -37,14 +37,13 @@ pub trait TcpConnector: Send + Sync {
 pub trait TcpStreamConnector: Send + Sync {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, Error>;
 
 	fn addr(&self) -> &SocksAddr;
 }
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

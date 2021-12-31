@@ -22,7 +22,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BytesStream, GetProtocolName, ProxyContext, BufBytesStream
+		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, LazyWriteHalf},
@@ -70,7 +70,7 @@ pub struct Settings {
 impl Settings {
 	async fn priv_connect<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 	) -> Result<BufBytesStream, OutboundError> {
 		debug!(
@@ -108,8 +108,9 @@ impl Settings {
 			// Without encryption
 			let mut addr_buf = Vec::with_capacity(dst.serialized_len_atyp());
 			dst.write_to(&mut addr_buf);
-			let write_half = LazyWriteHalf::new(stream.w, addr_buf);
-			Ok(BufBytesStream::from_raw(stream.r, Box::new(write_half)))
+			let (r, w) = stream.split();
+			let write_half = LazyWriteHalf::new(w, addr_buf);
+			Ok(BufBytesStream::from_raw(r, Box::new(write_half)))
 		}
 	}
 }
@@ -124,7 +125,7 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {

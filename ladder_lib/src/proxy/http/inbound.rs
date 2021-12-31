@@ -28,7 +28,7 @@ use crate::{
 			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
 		},
 		outbound::Error as OutboundError,
-		BufBytesStream, BytesStream, GetProtocolName,
+		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	transport,
 };
@@ -99,7 +99,7 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		_info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		let mut stream = self.transport.accept(stream).await?;
@@ -109,9 +109,7 @@ impl TcpAcceptor for Settings {
 			Err(ReadError::BadRequest(e)) => {
 				return write_err_response(&mut stream, StatusCode::BAD_REQUEST, e).await;
 			}
-			Err(ReadError::Protocol(e)) => {
-				return Err(AcceptError::new_protocol(Box::new(stream), e))
-			}
+			Err(ReadError::Protocol(e)) => return Err(AcceptError::new_protocol(stream, e)),
 			Err(ReadError::Partial) => {
 				debug!("Only partial HTTP request is read.");
 				return Err(AcceptError::Io(io::Error::new(
@@ -165,13 +163,13 @@ async fn write_err_response<T, W: AsyncWrite + Unpin>(
 }
 
 struct HandshakeFinisher {
-	stream: BytesStream,
+	stream: Box<dyn AsyncReadWrite>,
 	req: http::Request<()>,
 	leftover: Vec<u8>,
 }
 
 impl<'a> HandshakeFinisher {
-	fn new(stream: BytesStream, req: http::Request<()>, leftover: Vec<u8>) -> Self {
+	fn new(stream: Box<dyn AsyncReadWrite>, req: http::Request<()>, leftover: Vec<u8>) -> Self {
 		Self {
 			stream,
 			req,
@@ -220,12 +218,10 @@ impl FinishHandshake for HandshakeFinisher {
 		// Put leftover bytes into buffer to send to server
 		sent_buf.extend(&self.leftover);
 
-		let r = Box::new(AsyncReadExt::chain(
-			io::Cursor::new(sent_buf),
-			client_stream.r,
-		));
+		let (r, w) = client_stream.split();
+		let r = Box::new(AsyncReadExt::chain(io::Cursor::new(sent_buf), r));
 
-		Ok(BufBytesStream::from_raw(r, client_stream.w))
+		Ok(BufBytesStream::from_raw(r, w))
 	}
 
 	async fn finish_err(self: Box<Self>, err: &OutboundError) -> Result<(), HandshakeError> {

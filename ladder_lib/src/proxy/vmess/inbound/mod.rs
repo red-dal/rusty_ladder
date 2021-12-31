@@ -32,7 +32,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
-		BufBytesStream, BytesStream, GetProtocolName,
+		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -242,7 +242,7 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		_info: Option<StreamInfo>,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		debug!("Accepting VMess handshake");
@@ -276,7 +276,7 @@ impl TcpAcceptor for Settings {
 					return Err(AcceptError::Io(err));
 				}
 				ReadRequestError::Invalid(err) => {
-					return AcceptError::new_protocol_err(Box::new(stream), err);
+					return AcceptError::new_protocol_err(stream, err);
 				}
 			},
 		};
@@ -293,10 +293,7 @@ impl TcpAcceptor for Settings {
 		let algo = match req.sec {
 			SecurityType::Aes128Cfb => {
 				// This can be IO error
-				return AcceptError::new_protocol_err(
-					Box::new(stream),
-					Error::StreamEncryptionNotSupported,
-				);
+				return AcceptError::new_protocol_err(stream, Error::StreamEncryptionNotSupported);
 			}
 			SecurityType::Auto | SecurityType::Chacha20Poly1305 => {
 				Some(Algorithm::ChaCha20Poly1305)
@@ -311,12 +308,13 @@ impl TcpAcceptor for Settings {
 		};
 
 		let cmd = req.cmd;
+		let (r, w) = stream.split();
 
 		#[allow(clippy::option_if_let_else)]
 		let (r, w) = if let Some(algo) = algo {
 			tcp::new_inbound_aead(
-				stream.r,
-				stream.w,
+				r,
+				w,
 				algo,
 				&req,
 				&response_data,
@@ -324,7 +322,7 @@ impl TcpAcceptor for Settings {
 				&response_iv,
 			)
 		} else {
-			tcp::new_inbound_plain(stream.r, stream.w, &req, response_data, &response_iv)
+			tcp::new_inbound_plain(r, w, &req, response_data, &response_iv)
 		};
 
 		make_result(cmd, dst, r, w)
@@ -333,10 +331,10 @@ impl TcpAcceptor for Settings {
 
 #[inline]
 fn invalid_request<T>(
-	stream: BytesStream,
+	stream: Box<dyn AsyncReadWrite>,
 	err: impl Into<Cow<'static, str>>,
 ) -> Result<T, AcceptError> {
-	AcceptError::new_protocol_err(Box::new(stream), Error::new_invalid_request(err))
+	AcceptError::new_protocol_err(stream, Error::new_invalid_request(err))
 }
 
 #[derive(Clone)]

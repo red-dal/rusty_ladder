@@ -49,7 +49,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BufBytesStream, BytesStream, GetProtocolName, ProxyContext,
+		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	transport,
 	utils::LazyWriteHalf,
@@ -90,7 +90,7 @@ pub struct Settings {
 impl Settings {
 	async fn priv_connect<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 	) -> Result<BufBytesStream, OutboundError> {
 		debug!(
@@ -111,8 +111,9 @@ impl Settings {
 
 		trace!("Trojan request header length: {} bytes", req_buf.len());
 
-		let write_half = LazyWriteHalf::new(stream.w, req_buf);
-		Ok(BufBytesStream::from_raw(stream.r, Box::new(write_half)))
+		let (rh, wh) = stream.split();
+		let wh = LazyWriteHalf::new(wh, req_buf);
+		Ok(BufBytesStream::from_raw(rh, Box::new(wh)))
 	}
 }
 
@@ -126,7 +127,7 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
@@ -167,7 +168,7 @@ mod udp_impl {
 				Error as OutboundError,
 			},
 			socks_addr::ReadError,
-			BoxRead, BytesStream, ProxyContext,
+			AsyncReadWrite, BoxRead, ProxyContext,
 		},
 		utils::LazyWriteHalf,
 	};
@@ -302,12 +303,12 @@ mod udp_impl {
 			context: &dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let stream = context.dial_tcp(&self.settings.addr).await?;
-			self.connect_stream(stream.into(), context).await
+			self.connect_stream(Box::new(stream), context).await
 		}
 
 		async fn connect_stream<'a>(
 			&'a self,
-			stream: BytesStream,
+			stream: Box<dyn AsyncReadWrite>,
 			_context: &'a dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let stream = self
@@ -324,9 +325,10 @@ mod udp_impl {
 			self.settings.addr.write_to(&mut req_buf);
 			req_buf.put_slice(CRLF);
 
-			let write_half = LazyWriteHalf::new(stream.w, req_buf);
+			let (rh, wh) = stream.split();
+			let write_half = LazyWriteHalf::new(wh, req_buf);
 
-			let read_half = UdpReadHalf::new(stream.r);
+			let read_half = UdpReadHalf::new(rh);
 			let write_half = UdpWriteHalf::new(write_half);
 
 			return Ok(SocketOrTunnelStream::Socket(DatagramStream {

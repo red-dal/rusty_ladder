@@ -30,7 +30,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BufBytesStream, BytesStream, GetProtocolName, ProxyContext,
+		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	proxy::socks5::utils::AUTH_FAILED,
 	transport,
@@ -101,7 +101,7 @@ impl Settings {
 
 	async fn priv_connect<'a>(
 		&'a self,
-		mut stream: BytesStream,
+		mut stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 	) -> Result<BufBytesStream, OutboundError> {
 		debug!(
@@ -182,7 +182,7 @@ impl Settings {
 		if rep_code != ReplyCode::Succeeded {
 			return Err(Error::FailedReply(rep_code).into());
 		}
-		Ok(BufBytesStream::from_bytes_stream(stream))
+		Ok(BufBytesStream::from(stream))
 	}
 }
 
@@ -196,7 +196,7 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {

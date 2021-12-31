@@ -17,9 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use crate::prelude::BoxStdErr;
-#[allow(unused_imports)]
-use crate::protocol::BytesStream;
+use crate::{prelude::BoxStdErr, protocol::AsyncReadWrite};
 use std::io;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -49,16 +47,16 @@ impl Default for Settings {
 }
 
 impl Settings {
-	pub async fn accept<IO>(&self, stream: IO) -> io::Result<BytesStream>
+	pub async fn accept<IO>(&self, stream: IO) -> io::Result<Box<dyn AsyncReadWrite>>
 	where
-		IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync + Into<BytesStream>,
+		IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync + Into<Box<dyn AsyncReadWrite>>,
 	{
 		Ok(match self {
 			Settings::None => stream.into(),
 			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-			Settings::Tls(s) => s.accept(stream).await?.into(),
+			Settings::Tls(s) => Box::new(s.accept(stream).await?),
 			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-			Settings::Ws(s) => s.accept(stream).await?.into(),
+			Settings::Ws(s) => Box::new(s.accept(stream).await?),
 			#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
 			Settings::H2(s) => s.accept(stream).await?,
 		})

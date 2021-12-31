@@ -18,7 +18,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::tls;
-use crate::{prelude::*, protocol::BytesStream};
+use crate::{
+	prelude::*,
+	protocol::{AsyncReadWrite, CompositeBytesStream},
+};
 use bytes::{Buf, Bytes};
 use futures::{ready, Future};
 use h2::{client, server, RecvStream, SendStream};
@@ -52,27 +55,23 @@ pub struct Outbound {
 
 impl Outbound {
 	#[inline]
-	pub async fn connect<RW>(&self, stream: RW, addr: &SocksAddr) -> io::Result<BytesStream>
+	pub async fn connect<RW>(
+		&self,
+		stream: RW,
+		addr: &SocksAddr,
+	) -> io::Result<Box<dyn AsyncReadWrite>>
 	where
 		RW: 'static + AsyncRead + AsyncWrite + Send + Unpin,
 	{
 		info!("Establishing H2 connection to '{}'", addr);
-		let stream = if let Some(tls) = &self.tls {
+		let (r, w) = if let Some(tls) = &self.tls {
 			let stream = tls.connect(stream, addr).await?;
-			let (r, w) = self.priv_connect(stream, addr).await?;
-			BytesStream {
-				r: Box::new(r),
-				w: Box::new(w),
-			}
+			self.priv_connect(stream, addr).await?
 		} else {
-			let (r, w) = self.priv_connect(stream, addr).await?;
-			BytesStream {
-				r: Box::new(r),
-				w: Box::new(w),
-			}
+			self.priv_connect(stream, addr).await?
 		};
 
-		Ok(stream)
+		Ok(Box::new(CompositeBytesStream { r, w }))
 	}
 
 	async fn priv_connect<RW>(
@@ -166,7 +165,7 @@ pub struct Inbound {
 
 impl Inbound {
 	#[inline]
-	pub async fn accept<RW>(&self, stream: RW) -> io::Result<BytesStream>
+	pub async fn accept<RW>(&self, stream: RW) -> io::Result<Box<dyn AsyncReadWrite>>
 	where
 		RW: 'static + AsyncRead + AsyncWrite + Unpin + Send,
 	{
@@ -177,7 +176,7 @@ impl Inbound {
 		}
 	}
 
-	async fn priv_accept<RW>(&self, stream: RW) -> io::Result<BytesStream>
+	async fn priv_accept<RW>(&self, stream: RW) -> io::Result<Box<dyn AsyncReadWrite>>
 	where
 		RW: 'static + AsyncRead + AsyncWrite + Unpin + Send,
 	{
@@ -265,10 +264,7 @@ impl Inbound {
 			is_closed,
 		};
 
-		Ok(BytesStream {
-			r: Box::new(r),
-			w: Box::new(w),
-		})
+		Ok(Box::new(CompositeBytesStream { r, w }))
 	}
 }
 

@@ -23,12 +23,12 @@ mod udp;
 
 use super::utils::{Error, SecurityType};
 use super::{Command, HeaderMode, Request};
-use crate::protocol::BufBytesStream;
+use crate::protocol::{AsyncReadWrite, BufBytesStream};
 use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BytesStream, GetProtocolName, ProxyContext,
+		GetProtocolName, ProxyContext,
 	},
 	transport,
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -125,7 +125,7 @@ impl Settings {
 
 	async fn priv_connect<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 	) -> Result<BufBytesStream, OutboundError> {
 		info!(
@@ -152,6 +152,7 @@ impl Settings {
 
 		let mode = self.header_mode;
 
+		let (rh, wh) = stream.split();
 		let algo = match self.sec {
 			SecurityType::Aes128Cfb => {
 				return Err(Error::StreamEncryptionNotSupported.into());
@@ -160,11 +161,11 @@ impl Settings {
 				req.sec = SecurityType::None;
 				req.opt.clear_chunk_stream();
 				req.opt.clear_chunk_masking();
-				let (r, w) = tcp::new_outbound_zero(stream.r, stream.w, req, &self.id, time, mode);
+				let (r, w) = tcp::new_outbound_zero(rh, wh, req, &self.id, time, mode);
 				return Ok(BufBytesStream::from_raw(Box::new(r), Box::new(w)));
 			}
 			SecurityType::None => {
-				let stream = tcp::new_outbound_plain(stream.r, stream.w, req, &self.id, time, mode);
+				let stream = tcp::new_outbound_plain(rh, wh, req, &self.id, time, mode);
 				return Ok(stream.into());
 			}
 			SecurityType::Aes128Gcm => Algorithm::Aes128Gcm,
@@ -184,9 +185,12 @@ impl Settings {
 		req.opt.set_global_padding();
 
 		let (read_half, write_half) =
-			tcp::new_outbound_aead(stream.r, stream.w, req, &self.id, time, algo, mode)?;
+			tcp::new_outbound_aead(rh, wh, req, &self.id, time, algo, mode)?;
 
-		Ok(BufBytesStream::from_raw(Box::new(read_half), Box::new(write_half)))
+		Ok(BufBytesStream::from_raw(
+			Box::new(read_half),
+			Box::new(write_half),
+		))
 	}
 }
 
@@ -201,7 +205,7 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: BytesStream,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
@@ -242,7 +246,7 @@ mod udp_impl {
 				udp::{ConnectTunnelOverTcp, GetConnector, SocketOrTunnelStream},
 				Error as OutboundError,
 			},
-			BytesStream, ProxyContext,
+			AsyncReadWrite, ProxyContext,
 		},
 		utils::{crypto::aead::Algorithm, timestamp_now},
 	};
@@ -268,13 +272,13 @@ mod udp_impl {
 			context: &dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let stream = context.dial_tcp(&self.settings.addr).await?;
-			self.connect_stream(dst, stream.into(), context).await
+			self.connect_stream(dst, Box::new(stream), context).await
 		}
 
 		async fn connect_stream<'a>(
 			&'a self,
 			dst: &'a SocksAddr,
-			stream: BytesStream,
+			stream: Box<dyn AsyncReadWrite>,
 			_context: &'a dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let time = timestamp_now();
@@ -301,7 +305,7 @@ mod udp_impl {
 				SecurityType::Aes128Cfb => return Err(Error::StreamEncryptionNotSupported.into()),
 				SecurityType::Zero => return Err(Error::ZeroSecInUdp.into()),
 				SecurityType::None => {
-					let (read_half, write_half) = (stream.r, stream.w);
+					let (read_half, write_half) = stream.split();
 
 					let stream = tcp::new_outbound_plain(
 						read_half,
