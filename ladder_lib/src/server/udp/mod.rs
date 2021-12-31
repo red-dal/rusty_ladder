@@ -23,7 +23,7 @@ use super::Error;
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::udp::{PacketStream, Session},
+		inbound::udp::{DatagramStream, Session},
 		outbound::{
 			udp::{Connector, GetConnector, SocketOrTunnelStream},
 			Error as OutboundError,
@@ -49,10 +49,10 @@ pub type DataSender = mpsc::Sender<(Session, Bytes)>;
 const TIMEOUT_GUARD_INTERVAL: Duration = Duration::from_millis(1000);
 const TASK_TIMEOUT: Duration = Duration::from_millis(200);
 const UDP_BUFFER_SIZE: usize = 8 * 1024;
-const UDP_PACKET_BUFFER_SIZE: usize = 64;
+const UDP_DATAGRAM_BUFFER_SIZE: usize = 64;
 
 pub async fn dispatch(
-	stream: PacketStream,
+	stream: DatagramStream,
 	inbound: &super::Inbound,
 	inbound_ind: usize,
 	inbound_bind_addr: SocketAddr,
@@ -61,12 +61,12 @@ pub async fn dispatch(
 	session_timeout: Duration,
 ) -> Result<(), Error> {
 	trace!(
-		"Dispatching UDP packet for inbound[{}] on {}",
+		"Dispatching UDP datagram for inbound[{}] on {}",
 		inbound_ind,
 		inbound_bind_addr
 	);
 	let (mut read_half, mut write_half) = (stream.read_half, stream.write_half);
-	let (inbound_sender, mut inbound_receiver) = mpsc::channel(UDP_PACKET_BUFFER_SIZE);
+	let (inbound_sender, mut inbound_receiver) = mpsc::channel(UDP_DATAGRAM_BUFFER_SIZE);
 
 	let (dispatcher, guard_task) = Dispatcher::new(
 		inbound.tag.clone(),
@@ -84,7 +84,7 @@ pub async fn dispatch(
 			let in_res = read_half.recv_inbound(&mut data).await?;
 			data.truncate(in_res.len);
 			if data.is_empty() {
-				trace!("Done receiving UDP packet");
+				trace!("Done receiving UDP datagram");
 				break;
 			}
 
@@ -92,7 +92,7 @@ pub async fn dispatch(
 			let dst = in_res.dst;
 
 			trace!(
-				"UDP packet sent ({} bytes) from {} (client) to {} (server)",
+				"UDP datagram sent ({} bytes) from {} (client) to {} (server)",
 				data.len(),
 				src,
 				dst
@@ -108,7 +108,7 @@ pub async fn dispatch(
 				.await
 			{
 				error!(
-					"Error occurred when sending UDP packet from '{}' to '{}': {}",
+					"Error occurred when sending UDP datagram from '{}' to '{}': {}",
 					src, dst, e
 				);
 				// TODO: Maybe more error handling, like retry
@@ -122,7 +122,7 @@ pub async fn dispatch(
 	let recv_task = async move {
 		while let Some((sess, data)) = inbound_receiver.next().await {
 			trace!(
-				"UDP packet received ({} bytes) from {} (server) to {} (client)",
+				"UDP datagram received ({} bytes) from {} (server) to {} (client)",
 				data.len(),
 				sess.dst,
 				sess.src
@@ -192,7 +192,7 @@ impl Dispatcher {
 		server: &super::Server,
 	) -> Result<(), Error> {
 		trace!(
-			"Dispatcher sending packet for session ({} -> {})",
+			"Dispatcher sending datagram for session ({} -> {})",
 			sess.src,
 			sess.dst
 		);

@@ -161,7 +161,7 @@ mod udp_impl {
 			self,
 			outbound::{
 				udp::{
-					socket::{PacketStream, RecvPacket, SendPacket},
+					socket::{DatagramStream, RecvDatagram, SendDatagram},
 					ConnectSocketOverTcp, GetConnector, SocketOrTunnelStream,
 				},
 				Error as OutboundError,
@@ -193,9 +193,9 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl RecvPacket for UdpReadHalf {
+	impl RecvDatagram for UdpReadHalf {
 		async fn recv_src(&mut self, buf: &mut [u8]) -> std::io::Result<(usize, SocksAddr)> {
-			// Each UDP packet has the following format:
+			// Each UDP datagram has the following format:
 			//
 			// +------+----------+----------+--------+---------+----------+
 			// | ATYP | DST.ADDR | DST.PORT | Length |  CRLF   | Payload  |
@@ -261,7 +261,7 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl<W: AsyncWrite + Unpin + Send + Sync> SendPacket for UdpWriteHalf<W> {
+	impl<W: AsyncWrite + Unpin + Send + Sync> SendDatagram for UdpWriteHalf<W> {
 		async fn send_dst(&mut self, dst: &SocksAddr, payload: &[u8]) -> std::io::Result<usize> {
 			let payload_len = u16::try_from(payload.len()).unwrap_or_else(|_| {
 				info!(
@@ -329,7 +329,7 @@ mod udp_impl {
 			let read_half = UdpReadHalf::new(stream.r);
 			let write_half = UdpWriteHalf::new(write_half);
 
-			return Ok(SocketOrTunnelStream::Socket(PacketStream {
+			return Ok(SocketOrTunnelStream::Socket(DatagramStream {
 				read_half: Box::new(read_half),
 				write_half: Box::new(write_half),
 			}));

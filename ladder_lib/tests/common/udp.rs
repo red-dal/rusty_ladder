@@ -7,7 +7,7 @@ use tokio::net::UdpSocket;
 
 type BoxStdErr = Box<dyn std::error::Error + Send + Sync>;
 
-const UDP_PACKET_NUM_EACH_TUNNEL: usize = 16;
+const UDP_DATAGRAM_NUM_EACH_TUNNEL: usize = 16;
 const UDP_TUNNEL_NUM: usize = 2;
 const UDP_RETRY_COUNT: usize = 3;
 const UDP_TIMEOUT: Duration = Duration::from_millis(500);
@@ -107,7 +107,7 @@ async fn serve_udp_echo(addr: SocketAddr) -> io::Result<()> {
 		let sock = UdpSocket::bind(addr).await?;
 		let mut buf = vec![0_u8; 4096];
 		let (len, src) = sock.recv_from(&mut buf).await?;
-		debug!("Echo server receive packet from {}", src);
+		debug!("Echo server receive datagram from {}", src);
 		if len == 0 {
 			break;
 		}
@@ -133,13 +133,13 @@ async fn test_udp_echo_single(
 	server_addr: SocketAddr,
 	wait_dur: Duration,
 ) -> Result<(), BoxStdErr> {
-	// Sleep to avoid packet loss
+	// Sleep to avoid datagram loss
 	tokio::time::sleep(wait_dur).await;
 
 	let bind_addr = sock.local_addr()?;
 	debug!("Testing UdpSocket on {}", bind_addr);
 
-	let msgs: Vec<String> = (0..UDP_PACKET_NUM_EACH_TUNNEL)
+	let msgs: Vec<String> = (0..UDP_DATAGRAM_NUM_EACH_TUNNEL)
 		.map(|ind| {
 			format!(
 				"This is message {} from {} to {}",
@@ -150,7 +150,7 @@ async fn test_udp_echo_single(
 
 	for msg in &msgs {
 		let mut buf = vec![0_u8; 256];
-		// Retry several times until a packet is received
+		// Retry several times until a datagram is received
 		let (len, dst) = {
 			let mut loop_result = None;
 			for _ in 0..UDP_RETRY_COUNT {
@@ -172,7 +172,7 @@ async fn test_udp_echo_single(
 			if let Some(loop_result) = loop_result {
 				loop_result
 			} else {
-				return Err(format!("UdpSocket on {} received no packet", bind_addr).into());
+				return Err(format!("UdpSocket on {} received no datagram", bind_addr).into());
 			}
 		};
 		let recv_msg = std::str::from_utf8(&buf[..len])?;

@@ -79,7 +79,7 @@ mod udp_impl {
 	use crate::{
 		prelude::*,
 		protocol::inbound::udp::{
-			Acceptor, PacketInfo, PacketStream, RecvPacket, SendPacket, Session,
+			Acceptor, DatagramInfo, DatagramStream, RecvDatagram, SendDatagram, Session,
 		},
 	};
 	use std::io;
@@ -87,11 +87,11 @@ mod udp_impl {
 
 	#[async_trait]
 	impl Acceptor for Settings {
-		async fn accept_udp(&self, sock: UdpSocket) -> Result<PacketStream, BoxStdErr> {
+		async fn accept_udp(&self, sock: UdpSocket) -> Result<DatagramStream, BoxStdErr> {
 			if self.network.use_udp() {
 				let sock = Arc::new(sock);
 
-				let stream = PacketStream {
+				let stream = DatagramStream {
 					read_half: Box::new(ReadHalfWrapper(sock.clone(), self.dst.clone())),
 					write_half: Box::new(sock),
 				};
@@ -107,10 +107,10 @@ mod udp_impl {
 	pub struct ReadHalfWrapper(pub Arc<UdpSocket>, pub SocksAddr);
 
 	#[async_trait]
-	impl RecvPacket for ReadHalfWrapper {
-		async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<PacketInfo> {
+	impl RecvDatagram for ReadHalfWrapper {
+		async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<DatagramInfo> {
 			let (len, src) = self.0.recv_from(buf).await?;
-			Ok(PacketInfo {
+			Ok(DatagramInfo {
 				src: Some(src),
 				len,
 				dst: self.1.clone(),
@@ -119,10 +119,10 @@ mod udp_impl {
 	}
 
 	#[async_trait]
-	impl SendPacket for Arc<UdpSocket> {
+	impl SendDatagram for Arc<UdpSocket> {
 		async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize> {
 			trace!(
-				"Sending UDP packet for session ({} -> {})",
+				"Sending UDP datagram for session ({} -> {})",
 				sess.src,
 				sess.dst
 			);

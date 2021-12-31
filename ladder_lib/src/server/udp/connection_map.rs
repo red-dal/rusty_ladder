@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	select_timeout, ArcMutex, DataReceiver, DataSender, Error, TASK_TIMEOUT,
-	TIMEOUT_GUARD_INTERVAL, UDP_BUFFER_SIZE, UDP_PACKET_BUFFER_SIZE,
+	TIMEOUT_GUARD_INTERVAL, UDP_BUFFER_SIZE, UDP_DATAGRAM_BUFFER_SIZE,
 };
 use crate::{
 	prelude::*,
@@ -181,7 +181,7 @@ impl ConnectionsMap {
 		}
 
 		// Anything sent from this sender will be written into outbound stream.
-		let (outbound_sender, outbound_receiver) = mpsc::channel(UDP_PACKET_BUFFER_SIZE);
+		let (outbound_sender, outbound_receiver) = mpsc::channel(UDP_DATAGRAM_BUFFER_SIZE);
 
 		let read_counter = Counter::new(0);
 		let write_counter = Counter::new(0);
@@ -206,20 +206,20 @@ impl ConnectionsMap {
 					"Creating UDP socket connection for (src: {}, outbound_ind: {})",
 					sess.src, outbound_ind
 				);
-				self.relay_socket_packets(stream, args).await;
+				self.relay_socket_datagrams(stream, args).await;
 			}
 			SocketOrTunnelStream::Tunnel(stream) => {
 				debug!(
 					"Creating UDP tunnel connection for (src: {}, dst: {})",
 					sess.src, sess.dst
 				);
-				self.relay_tunnel_packets(stream, args).await;
+				self.relay_tunnel_datagrams(stream, args).await;
 			}
 		};
 		Ok(outbound_sender)
 	}
 
-	async fn relay_socket_packets(&self, stream: socket::PacketStream, args: SpawnTaskArgs<'_>) {
+	async fn relay_socket_datagrams(&self, stream: socket::DatagramStream, args: SpawnTaskArgs<'_>) {
 		let last_active_time = ArcInstant::new(Instant::now());
 		let (read_half, write_half) = (stream.read_half, stream.write_half);
 
@@ -291,7 +291,7 @@ impl ConnectionsMap {
 		);
 	}
 
-	async fn relay_tunnel_packets(&self, stream: tunnel::PacketStream, args: SpawnTaskArgs<'_>) {
+	async fn relay_tunnel_datagrams(&self, stream: tunnel::DatagramStream, args: SpawnTaskArgs<'_>) {
 		let last_active_time = ArcInstant::new(Instant::now());
 		let (read_half, write_half) = (stream.read_half, stream.write_half);
 
@@ -528,7 +528,7 @@ impl TunnelsMap {
 
 async fn copy_from_socket_to_sender(
 	src: SocketAddr,
-	mut read_half: Box<dyn socket::RecvPacket>,
+	mut read_half: Box<dyn socket::RecvDatagram>,
 	mut inbound_sender: DataSender,
 	last_active_time: ArcInstant,
 	counter: Counter,
@@ -537,14 +537,14 @@ async fn copy_from_socket_to_sender(
 		let mut buf = BytesMut::new();
 		buf.resize(UDP_BUFFER_SIZE, 0);
 
-		// Read packet from outbound
+		// Read datagram from outbound
 		let (len, dst) = read_half.recv_src(&mut buf).await?;
 		if len == 0 {
 			break;
 		}
 		last_active_time.set(Instant::now());
 
-		// Send packet to inbound
+		// Send datagram to inbound
 		// Error means
 		buf.truncate(len);
 		if let Err(e) = inbound_sender
@@ -561,7 +561,7 @@ async fn copy_from_socket_to_sender(
 }
 
 async fn copy_from_receiver_to_socket(
-	mut write_half: Box<dyn socket::SendPacket>,
+	mut write_half: Box<dyn socket::SendDatagram>,
 	mut receiver: DataReceiver,
 	last_active_time: ArcInstant,
 	counter: Counter,
@@ -576,7 +576,7 @@ async fn copy_from_receiver_to_socket(
 
 async fn tunnel_to_sender(
 	sess: &Session,
-	mut read_half: Box<dyn tunnel::RecvPacket>,
+	mut read_half: Box<dyn tunnel::RecvDatagram>,
 	mut inbound_sender: DataSender,
 	last_active_time: ArcInstant,
 	counter: Counter,
@@ -585,14 +585,14 @@ async fn tunnel_to_sender(
 		let mut buf = BytesMut::new();
 		buf.resize(UDP_BUFFER_SIZE, 0);
 
-		// Read packet from outbound
+		// Read datagram from outbound
 		let len = read_half.recv(&mut buf).await?;
 		if len == 0 {
 			break;
 		}
 		last_active_time.set(Instant::now());
 
-		// Send packet to inbound
+		// Send datagram to inbound
 		buf.truncate(len);
 		if let Err(e) = inbound_sender.send((sess.clone(), buf.freeze())).await {
 			return Err(io::Error::new(io::ErrorKind::Other, e));
@@ -603,7 +603,7 @@ async fn tunnel_to_sender(
 }
 
 async fn receiver_to_tunnel(
-	mut write_half: Box<dyn tunnel::SendPacket>,
+	mut write_half: Box<dyn tunnel::SendDatagram>,
 	mut receiver: DataReceiver,
 	last_active_time: ArcInstant,
 	counter: &Counter,

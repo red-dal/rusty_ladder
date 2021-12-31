@@ -42,7 +42,7 @@ of the payload.
 For better obfuscation, both client and server should send it
 with next payload, which is usually the handshake of the proxied traffic.
 
-So the first packet should look like
+So the first datagram should look like
 ```not_rust
 +-------------------+------------------+---------------+
 |      salt         |  target address  |     next      |

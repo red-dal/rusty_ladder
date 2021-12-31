@@ -24,7 +24,7 @@ use tokio::net::UdpSocket;
 
 #[async_trait]
 pub trait Acceptor: GetProtocolName {
-	async fn accept_udp(&self, sock: UdpSocket) -> Result<PacketStream, BoxStdErr>;
+	async fn accept_udp(&self, sock: UdpSocket) -> Result<DatagramStream, BoxStdErr>;
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
@@ -35,50 +35,50 @@ pub struct Session {
 	pub dst: SocksAddr,
 }
 
-pub struct PacketInfo {
+pub struct DatagramInfo {
 	pub len: usize,
 	pub src: Option<SocketAddr>,
 	pub dst: SocksAddr,
 }
 
 #[async_trait]
-pub trait RecvPacket: Unpin + Send + Sync {
-	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<PacketInfo>;
+pub trait RecvDatagram: Unpin + Send + Sync {
+	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<DatagramInfo>;
 }
 
 #[async_trait]
-pub trait SendPacket: Unpin + Send + Sync {
+pub trait SendDatagram: Unpin + Send + Sync {
 	async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize>;
 }
 
 #[async_trait]
-impl<T: RecvPacket + ?Sized> RecvPacket for Box<T> {
-	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<PacketInfo> {
+impl<T: RecvDatagram + ?Sized> RecvDatagram for Box<T> {
+	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<DatagramInfo> {
 		self.as_mut().recv_inbound(buf).await
 	}
 }
 
 #[async_trait]
-impl<T: SendPacket + ?Sized> SendPacket for Box<T> {
+impl<T: SendDatagram + ?Sized> SendDatagram for Box<T> {
 	async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize> {
 		self.as_mut().send_inbound(sess, buf).await
 	}
 }
 
-pub struct PacketStream {
-	pub read_half: Box<dyn RecvPacket>,
-	pub write_half: Box<dyn SendPacket>,
+pub struct DatagramStream {
+	pub read_half: Box<dyn RecvDatagram>,
+	pub write_half: Box<dyn SendDatagram>,
 }
 
 #[async_trait]
-impl RecvPacket for PacketStream {
-	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<PacketInfo> {
+impl RecvDatagram for DatagramStream {
+	async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<DatagramInfo> {
 		self.read_half.recv_inbound(buf).await
 	}
 }
 
 #[async_trait]
-impl SendPacket for PacketStream {
+impl SendDatagram for DatagramStream {
 	async fn send_inbound(&mut self, sess: &Session, buf: &[u8]) -> io::Result<usize> {
 		self.write_half.send_inbound(sess, buf).await
 	}

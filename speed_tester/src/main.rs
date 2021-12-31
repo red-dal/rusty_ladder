@@ -42,10 +42,10 @@ use server::Counter;
 use std::{borrow::Cow, convert::TryInto, fmt::Display, net::SocketAddr, time::Duration};
 use tokio::runtime::Runtime;
 
-/// Number of packets to be sent for each test.
+/// Number of datagrams to be sent for each test.
 ///
-/// Each packet is 8KB.
-const TEST_TOTAL_PACKETS: usize = 32 * 1024; // 4GB in total
+/// Each datagram is 8KB.
+const TEST_TOTAL_DATAGRAMS: usize = 32 * 1024; // 4GB in total
 
 /// A list of (postfix, connection count).
 const TEST_COUNTS: &[(&str, usize)] = &[("1", 1), ("4", 4), ("32", 32), ("128", 128)];
@@ -82,12 +82,12 @@ fn test(
 	let mut all_res = Vec::new();
 
 	for (test_name, client_server_addr) in test_ports {
-		// 8KB for each packets.
+		// 8KB for each datagrams.
 		let mut res = Vec::new();
 		println!("Testing {}", client_server_addr);
 
 		for &(postfix, conn_count) in TEST_COUNTS {
-			let echo_count = TEST_TOTAL_PACKETS / conn_count;
+			let echo_count = TEST_TOTAL_DATAGRAMS / conn_count;
 			let args = server::TestArgs {
 				conn_count,
 				echo_count,

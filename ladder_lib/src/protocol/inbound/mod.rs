@@ -50,7 +50,7 @@ pub trait TcpAcceptor: GetProtocolName {
 pub enum AcceptResult<'a> {
 	Tcp(Box<dyn FinishHandshake + 'a>, SocksAddr),
 	#[cfg(feature = "use-udp")]
-	Udp(udp::PacketStream),
+	Udp(udp::DatagramStream),
 }
 
 #[async_trait]

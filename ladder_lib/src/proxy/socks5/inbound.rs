@@ -326,7 +326,7 @@ mod udp {
 				)
 				.await);
 			}
-			// UDP packet will be sent from this address.
+			// UDP datagram will be sent from this address.
 			let target_addr = {
 				let src_ip = if let SocksDestination::Ip(ip) = &request.addr.dest {
 					*ip
@@ -385,7 +385,7 @@ mod udp {
 			))
 		}
 
-		fn build(self, mut stream: impl 'static + AsyncReadWrite) -> udp::PacketStream {
+		fn build(self, mut stream: impl 'static + AsyncReadWrite) -> udp::DatagramStream {
 			use tokio::io::AsyncReadExt;
 			let is_shutdown = Arc::new(AtomicBool::new(false));
 
@@ -449,7 +449,7 @@ mod udp {
 		fn handle_datagram(
 			buf: &mut [u8],
 			src_addr: SocketAddr,
-		) -> Result<udp::PacketInfo, BoxStdErr> {
+		) -> Result<udp::DatagramInfo, BoxStdErr> {
 			use std::convert::TryFrom;
 
 			// UDP datagram format:
@@ -495,7 +495,7 @@ mod udp {
 				data_len, src_addr, dst
 			);
 
-			let info = udp::PacketInfo {
+			let info = udp::DatagramInfo {
 				len: data_len,
 				src: Some(src_addr),
 				dst,
@@ -506,8 +506,8 @@ mod udp {
 	}
 
 	#[async_trait]
-	impl udp::RecvPacket for SocketWrapper {
-		async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<udp::PacketInfo> {
+	impl udp::RecvDatagram for SocketWrapper {
+		async fn recv_inbound(&mut self, buf: &mut [u8]) -> io::Result<udp::DatagramInfo> {
 			if buf.len() < MIN_DATAGRAM_BUF_SIZE {
 				return Err(io::Error::new(
 					io::ErrorKind::InvalidInput,
@@ -550,7 +550,7 @@ mod udp {
 	}
 
 	#[async_trait]
-	impl udp::SendPacket for SocketWrapper {
+	impl udp::SendDatagram for SocketWrapper {
 		async fn send_inbound(&mut self, sess: &udp::Session, data: &[u8]) -> io::Result<usize> {
 			use bytes::BufMut;
 			if self.is_shutdown.load(Ordering::Relaxed) {
@@ -589,7 +589,7 @@ mod udp {
 		}
 	}
 
-	impl From<SocketWrapper> for udp::PacketStream {
+	impl From<SocketWrapper> for udp::DatagramStream {
 		fn from(socket: SocketWrapper) -> Self {
 			let r = Box::new(socket.clone());
 			let w = Box::new(socket);

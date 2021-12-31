@@ -50,7 +50,7 @@ use super::{key_to_session_key, utils::salt_len, Error};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::udp::socket::{RecvPacket, SendPacket},
+		outbound::udp::socket::{RecvDatagram, SendDatagram},
 		socks_addr::ReadError,
 	},
 	utils::crypto::aead::{
@@ -65,13 +65,13 @@ const MAX_DATAGRAM_SIZE: usize = 8 * 1024;
 pub(super) const EMPTY_AAD: &[u8] = &[];
 
 pub struct WriteHalf {
-	inner: Box<dyn SendPacket>,
+	inner: Box<dyn SendDatagram>,
 	write_helper: WriteHelper,
 }
 
 impl WriteHalf {
 	pub fn new(
-		inner: Box<dyn SendPacket>,
+		inner: Box<dyn SendDatagram>,
 		algo: Algorithm,
 		remote_addr: SocksAddr,
 		password: Bytes,
@@ -85,26 +85,26 @@ impl WriteHalf {
 }
 
 pub struct ReadHalf {
-	inner: Box<dyn RecvPacket>,
+	inner: Box<dyn RecvDatagram>,
 	read_helper: ReadHelper,
 }
 
 impl ReadHalf {
-	pub fn new(inner: Box<dyn RecvPacket>, algo: Algorithm, password: Bytes) -> Self {
+	pub fn new(inner: Box<dyn RecvDatagram>, algo: Algorithm, password: Bytes) -> Self {
 		let read_helper = ReadHelper::new(algo, password);
 		Self { inner, read_helper }
 	}
 }
 
 #[async_trait]
-impl RecvPacket for ReadHalf {
+impl RecvDatagram for ReadHalf {
 	async fn recv_src(&mut self, buf: &mut [u8]) -> std::io::Result<(usize, SocksAddr)> {
 		return self.read_helper.recv_src(self.inner.as_mut(), buf).await;
 	}
 }
 
 #[async_trait]
-impl SendPacket for WriteHalf {
+impl SendDatagram for WriteHalf {
 	#[inline]
 	async fn send_dst(&mut self, dst: &SocksAddr, payload: &[u8]) -> std::io::Result<usize> {
 		return self
@@ -142,7 +142,7 @@ impl WriteHelper {
 		payload: &[u8],
 	) -> std::io::Result<usize>
 	where
-		W: SendPacket + ?Sized,
+		W: SendDatagram + ?Sized,
 	{
 		let buffer = &mut self.buffer;
 
@@ -185,7 +185,7 @@ impl ReadHelper {
 		dest: &mut [u8],
 	) -> std::io::Result<(usize, SocksAddr)>
 	where
-		R: RecvPacket + ?Sized,
+		R: RecvDatagram + ?Sized,
 	{
 		let salt_len = salt_len(self.algo);
 		debug_assert!(dest.len() > salt_len + TAG_LEN);
@@ -263,7 +263,7 @@ impl PlainWriteHelper {
 		payload: &[u8],
 	) -> std::io::Result<usize>
 	where
-		W: SendPacket + ?Sized,
+		W: SendDatagram + ?Sized,
 	{
 		self.buffer.clear();
 		encode_payload(&mut self.buffer, dst, payload);
@@ -280,7 +280,7 @@ impl PlainReadHelper {
 		buf: &mut [u8],
 	) -> std::io::Result<(usize, SocksAddr)>
 	where
-		R: RecvPacket + ?Sized,
+		R: RecvDatagram + ?Sized,
 	{
 		debug_assert!(buf.len() > 16);
 		let (len, _src_addr) = reader.recv_src(buf).await?;
@@ -300,12 +300,12 @@ impl PlainReadHelper {
 }
 
 pub struct PlainReadHalf {
-	inner: Box<dyn RecvPacket>,
+	inner: Box<dyn RecvDatagram>,
 	helper: PlainReadHelper,
 }
 
 impl PlainReadHalf {
-	pub fn new(inner: Box<dyn RecvPacket>) -> Self {
+	pub fn new(inner: Box<dyn RecvDatagram>) -> Self {
 		Self {
 			inner,
 			helper: PlainReadHelper {},
@@ -314,12 +314,12 @@ impl PlainReadHalf {
 }
 
 pub struct PlainWriteHalf {
-	inner: Box<dyn SendPacket>,
+	inner: Box<dyn SendDatagram>,
 	helper: PlainWriteHelper,
 }
 
 impl PlainWriteHalf {
-	pub fn new(inner: Box<dyn SendPacket>, remote_addr: SocksAddr) -> Self {
+	pub fn new(inner: Box<dyn SendDatagram>, remote_addr: SocksAddr) -> Self {
 		Self {
 			inner,
 			helper: PlainWriteHelper::new(remote_addr),
@@ -328,7 +328,7 @@ impl PlainWriteHalf {
 }
 
 #[async_trait]
-impl SendPacket for PlainWriteHalf {
+impl SendDatagram for PlainWriteHalf {
 	#[inline]
 	async fn send_dst(&mut self, dst: &SocksAddr, payload: &[u8]) -> std::io::Result<usize> {
 		self.helper
@@ -342,7 +342,7 @@ impl SendPacket for PlainWriteHalf {
 }
 
 #[async_trait]
-impl RecvPacket for PlainReadHalf {
+impl RecvDatagram for PlainReadHalf {
 	#[inline]
 	async fn recv_src(&mut self, buf: &mut [u8]) -> std::io::Result<(usize, SocksAddr)> {
 		return self.helper.recv_src(self.inner.as_mut(), buf).await;

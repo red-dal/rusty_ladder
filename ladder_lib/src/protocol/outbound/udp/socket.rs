@@ -23,23 +23,23 @@ use crate::prelude::*;
 use std::io;
 
 #[async_trait]
-pub trait RecvPacket: Unpin + Send + Sync {
+pub trait RecvDatagram: Unpin + Send + Sync {
 	async fn recv_src(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocksAddr)>;
 }
 
 #[async_trait]
-pub trait SendPacket: Unpin + Send + Sync {
+pub trait SendDatagram: Unpin + Send + Sync {
 	async fn send_dst(&mut self, dst: &SocksAddr, buf: &[u8]) -> io::Result<usize>;
 	async fn shutdown(&mut self) -> io::Result<()>;
 }
 
-pub struct PacketStream {
-	pub read_half: Box<dyn RecvPacket>,
-	pub write_half: Box<dyn SendPacket>,
+pub struct DatagramStream {
+	pub read_half: Box<dyn RecvDatagram>,
+	pub write_half: Box<dyn SendDatagram>,
 }
 
 #[async_trait]
-impl RecvPacket for PacketStream {
+impl RecvDatagram for DatagramStream {
 	#[inline]
 	async fn recv_src(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocksAddr)> {
 		return self.read_half.recv_src(buf).await;
@@ -47,7 +47,7 @@ impl RecvPacket for PacketStream {
 }
 
 #[async_trait]
-impl SendPacket for PacketStream {
+impl SendDatagram for DatagramStream {
 	#[inline]
 	async fn send_dst(&mut self, dst: &SocksAddr, buf: &[u8]) -> io::Result<usize> {
 		return self.write_half.send_dst(dst, buf).await;
@@ -72,11 +72,11 @@ impl UdpSocketWrapper {
 }
 
 #[async_trait]
-impl RecvPacket for UdpSocketWrapper {
+impl RecvDatagram for UdpSocketWrapper {
 	async fn recv_src(&mut self, buf: &mut [u8]) -> io::Result<(usize, SocksAddr)> {
 		let (len, remote) = self.0.recv_from(buf).await?;
 		trace!(
-			"UdpSocket on {} received packet from remote server {}",
+			"UdpSocket on {} received datagram from remote server {}",
 			self.0.local_addr()?,
 			remote
 		);
@@ -85,10 +85,10 @@ impl RecvPacket for UdpSocketWrapper {
 }
 
 #[async_trait]
-impl SendPacket for UdpSocketWrapper {
+impl SendDatagram for UdpSocketWrapper {
 	async fn send_dst(&mut self, dst: &SocksAddr, buf: &[u8]) -> io::Result<usize> {
 		trace!(
-			"UdpSocket on {} sending packet to remote server {}",
+			"UdpSocket on {} sending datagram to remote server {}",
 			self.0.local_addr()?,
 			dst
 		);

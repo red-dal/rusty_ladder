@@ -176,7 +176,7 @@ mod udp_impl {
 	use crate::protocol::{
 		self,
 		outbound::udp::{
-			socket::{PacketStream, UdpSocketWrapper},
+			socket::{DatagramStream, UdpSocketWrapper},
 			ConnectSocket, GetConnector, SocketOrTunnelStream,
 		},
 	};
@@ -204,7 +204,7 @@ mod udp_impl {
 			let read_half = UdpSocketWrapper::bind(SocketAddr::new([0, 0, 0, 0].into(), 0)).await?;
 			let write_half = read_half.clone();
 			self.connect_socket_stream(
-				PacketStream {
+				DatagramStream {
 					read_half: Box::new(read_half),
 					write_half: Box::new(write_half),
 				},
@@ -215,7 +215,7 @@ mod udp_impl {
 
 		async fn connect_socket_stream<'a>(
 			&'a self,
-			stream: PacketStream,
+			stream: DatagramStream,
 			_context: &'a dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let (read_half, write_half) = (stream.read_half, stream.write_half);
@@ -229,7 +229,7 @@ mod udp_impl {
 					self.settings.addr.clone(),
 					inner.password.clone(),
 				);
-				Ok(SocketOrTunnelStream::Socket(PacketStream {
+				Ok(SocketOrTunnelStream::Socket(DatagramStream {
 					read_half: Box::new(read_half),
 					write_half: Box::new(write_half),
 				}))
@@ -237,7 +237,7 @@ mod udp_impl {
 				// Without encryption
 				let read_half = udp::PlainReadHalf::new(read_half);
 				let write_half = udp::PlainWriteHalf::new(write_half, self.settings.addr.clone());
-				Ok(SocketOrTunnelStream::Socket(PacketStream {
+				Ok(SocketOrTunnelStream::Socket(DatagramStream {
 					read_half: Box::new(read_half),
 					write_half: Box::new(write_half),
 				}))

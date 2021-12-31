@@ -39,7 +39,7 @@ pub trait ConnectSocket: Send + Sync {
 
 	async fn connect_socket_stream<'a>(
 		&'a self,
-		stream: socket::PacketStream,
+		stream: socket::DatagramStream,
 		context: &'a dyn ProxyContext,
 	) -> Result<SocketOrTunnelStream, Error>;
 }
@@ -66,7 +66,7 @@ pub trait ConnectTunnel: Send + Sync {
 	async fn connect_tunnel_stream<'a>(
 		&'a self,
 		dst: &'a SocksAddr,
-		stream: tunnel::PacketStream,
+		stream: tunnel::DatagramStream,
 		context: &'a dyn ProxyContext,
 	) -> Result<SocketOrTunnelStream, Error>;
 }
@@ -95,6 +95,6 @@ pub enum Connector<'a> {
 }
 
 pub enum SocketOrTunnelStream {
-	Socket(socket::PacketStream),
-	Tunnel(tunnel::PacketStream),
+	Socket(socket::DatagramStream),
+	Tunnel(tunnel::DatagramStream),
 }

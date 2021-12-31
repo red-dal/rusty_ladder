@@ -78,7 +78,7 @@ mod udp_impl {
 			let read_half =
 				socket::UdpSocketWrapper::bind(SocketAddr::new([0, 0, 0, 0].into(), 0)).await?;
 			let write_half = read_half.clone();
-			Ok(SocketOrTunnelStream::Socket(socket::PacketStream {
+			Ok(SocketOrTunnelStream::Socket(socket::DatagramStream {
 				read_half: Box::new(read_half),
 				write_half: Box::new(write_half),
 			}))
@@ -86,7 +86,7 @@ mod udp_impl {
 
 		async fn connect_socket_stream<'a>(
 			&'a self,
-			_stream: socket::PacketStream,
+			_stream: socket::DatagramStream,
 			_context: &'a dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
 			Err(OutboundError::CannotConnectOverStream)
