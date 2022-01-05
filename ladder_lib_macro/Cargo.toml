@@ -1,0 +1,11 @@
+[package]
+name = "ladder_lib_macro"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1", features = ["visit"] }
+quote = "1"

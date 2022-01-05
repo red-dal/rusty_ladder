@@ -40,7 +40,7 @@ pub trait ProxyContext: Send + Sync {
 	///
 	/// - [`GetConnectorError::NotSupported`] if connector with `tag` is found but does
 	///   not support TCP.
-	fn get_tcp_connector(&self, tag: &str) -> Result<Arc<dyn TcpConnector>, GetConnectorError>;
+	fn get_tcp_connector(&self, tag: &str) -> Result<&dyn TcpConnector, GetConnectorError>;
 
 	/// Returns a [`Arc<dyn TcpStreamConnector>`].
 	///
@@ -55,7 +55,7 @@ pub trait ProxyContext: Send + Sync {
 	fn get_tcp_stream_connector(
 		&self,
 		tag: &str,
-	) -> Result<Arc<dyn TcpStreamConnector>, GetConnectorError>;
+	) -> Result<&dyn TcpStreamConnector, GetConnectorError>;
 }
 
 #[derive(Debug, Error)]

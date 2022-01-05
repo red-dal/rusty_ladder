@@ -17,185 +17,119 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-#[allow(clippy::wildcard_imports)]
-use crate::proxy::*;
-use crate::{
-	prelude::*,
-	protocol::{
-		self,
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BufBytesStream,
-	},
-};
+use crate::{prelude::*, protocol::outbound::Error as OutboundError};
 
-macro_rules! make_outbound {
-	{
-		$(#[$attrs:meta])*
-		$($header:ident)* ($($enum_name:ident)?) {
-			Freedom($($tunnel_item:tt)+) $(=> $tunnel_body:block)?,
-			Socks5($($socks5_item:tt)+) $(=> $socks5_body:block)?,
-			Http($($http_item:tt)+) $(=> $http_body:block)?,
-			Shadowsocks($($ss_item:tt)+) $(=> $ss_body:block)?,
-			Trojan($($trojan_item:tt)+) $(=> $trojan_body:block)?,
-			Vmess($($vmess_item:tt)+) $(=> $vmess_body:block)?,
-			Chain($($chain_item:tt)+) $(=> $chain_body:block)?,
-		}
-	} => {
-		$(#[$attrs])*
-		$($header)* {
-			$($enum_name::)? Freedom($($tunnel_item)+) $(=> $tunnel_body)?,
-			#[cfg(feature = "socks5-outbound")]
-			$($enum_name::)? Socks5($($socks5_item)+) $(=> $socks5_body)?,
-			#[cfg(feature = "http-outbound")]
-			$($enum_name::)? Http($($http_item)+) $(=> $http_body)?,
-			#[cfg(any(
-				feature = "shadowsocks-outbound-openssl",
-				feature = "shadowsocks-outbound-ring"
-			))]
-			$($enum_name::)? Shadowsocks($($ss_item)+) $(=> $ss_body)?,
-			#[cfg(feature = "trojan-outbound")]
-			$($enum_name::)? Trojan($($trojan_item)+) $(=> $trojan_body)?,
-			#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
-			$($enum_name::)? Vmess($($vmess_item)+) $(=> $vmess_body)?,
-			#[cfg(feature = "chain-outbound")]
-			$($enum_name::)? Chain($($chain_item)+) $(=> $chain_body)?,
-		}
+#[ladder_lib_macro::impl_variants(Details)]
+mod details {
+	use super::OutboundError;
+	use crate::{
+		protocol::{
+			outbound::{TcpConnector, TcpStreamConnector},
+			BufBytesStream, GetProtocolName, ProxyContext, SocksAddr,
+		},
+		proxy,
 	};
-}
+	use async_trait::async_trait;
+	use std::sync::Arc;
 
-make_outbound! {
-	pub enum Details () {
-		Freedom(Arc<freedom::Settings>),
-		Socks5(Arc<socks5::outbound::Settings>),
-		Http(Arc<http::outbound::Settings>),
-		Shadowsocks(Arc<shadowsocks::outbound::Settings>),
-		Trojan(Arc<trojan::Settings>),
-		Vmess(Arc<vmess::outbound::Settings>),
-		Chain(Arc<chain::Settings>),
-	}
-}
-
-macro_rules! match_outbound {
-	{$obj:ident, $enum_name:ident,
-		Freedom($freedom_item:ident) => $freedom_body:expr,
-		Socks5($socks5_item:ident) => $socks5_body:expr,
-		Http($http_item:ident) => $http_body:expr,
-		Shadowsocks($ss_item:ident) => $ss_body:expr,
-		Trojan($trojan_item:ident) => $trojan_body:expr,
-		Vmess($vmess_item:ident) => $vmess_body:expr,
-		Chain($chain_item:ident) => $chain_body:expr,
-	} => {
-		make_outbound! {
-			match $obj ($enum_name) {
-				Freedom($freedom_item) => {$freedom_body},
-				Socks5($socks5_item) => {$socks5_body},
-				Http($http_item) => {$http_body},
-				Shadowsocks($ss_item) => {$ss_body},
-				Trojan($trojan_item) => {$trojan_body},
-				Vmess($vmess_item) => {$vmess_body},
-				Chain($chain_item) => {$chain_body},
-			}
-		}
-	};
-}
-
-macro_rules! dispatch_outbound {
-	($obj:ident, $enum_name:ident, $with:ident, $body:block) => {
-		match_outbound! { $obj, $enum_name,
-			Freedom($with) => $body,
-			Socks5($with) => $body,
-			Http($with) => $body,
-			Shadowsocks($with) => $body,
-			Trojan($with) => $body,
-			Vmess($with) => $body,
-			Chain($with) => $body,
-		}
-	};
-}
-
-impl Details {
-	#[must_use]
-	pub fn get_tcp_connector(&self) -> Arc<dyn TcpConnector> {
-		dispatch_outbound!(self, Self, s, { s.clone() })
+	pub enum Details {
+		Freedom(Arc<proxy::freedom::Settings>),
+		#[cfg(feature = "socks5-outbound")]
+		Socks5(Arc<proxy::socks5::outbound::Settings>),
+		#[cfg(feature = "http-outbound")]
+		Http(Arc<proxy::http::outbound::Settings>),
+		#[cfg(any(
+			feature = "shadowsocks-outbound-openssl",
+			feature = "shadowsocks-outbound-ring"
+		))]
+		Shadowsocks(Arc<proxy::shadowsocks::outbound::Settings>),
+		#[cfg(feature = "trojan-outbound")]
+		Trojan(Arc<proxy::trojan::Settings>),
+		#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
+		Vmess(Arc<proxy::vmess::outbound::Settings>),
+		#[cfg(feature = "chain-outbound")]
+		Chain(Arc<proxy::chain::Settings>),
 	}
 
-	#[allow(clippy::match_same_arms)]
-	#[must_use]
-	pub fn get_tcp_stream_connector(&self) -> Option<Arc<dyn TcpStreamConnector>> {
-		match_outbound! {self, Self,
-			Freedom(_s) => None,
-			Socks5(s) => Some(s.clone()),
-			Http(s) => Some(s.clone()),
-			Shadowsocks(s) => Some(s.clone()),
-			Trojan(s) => Some(s.clone()),
-			Vmess(s) => Some(s.clone()),
-			Chain(_s) => None,
+	impl GetProtocolName for Details {
+		#[implement]
+		fn protocol_name(&self) -> &'static str {}
+	}
+
+	#[async_trait]
+	impl TcpConnector for Details {
+		#[implement]
+		async fn connect(
+			&self,
+			dst: &SocksAddr,
+			context: &dyn ProxyContext,
+		) -> Result<BufBytesStream, OutboundError> {
 		}
 	}
-}
 
-impl protocol::GetProtocolName for Details {
-	#[inline]
-	fn protocol_name(&self) -> &'static str {
-		return dispatch_outbound!(self, Self, s, { s.protocol_name() });
+	#[cfg(feature = "use-udp")]
+	use crate::protocol::outbound::udp;
+
+	#[cfg(feature = "use-udp")]
+	impl udp::GetConnector for Details {
+		#[implement]
+		fn get_udp_connector(&self) -> Option<udp::Connector<'_>> {}
+	}
+
+	impl Details {
+		#[must_use]
+		#[implement(only_as_ref)]
+		pub fn get_tcp_connector(&self) -> &dyn TcpConnector {}
+
+		#[must_use]
+		#[implement]
+		pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {}
 	}
 }
 
-#[async_trait]
-impl TcpConnector for Details {
-	#[inline]
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn protocol::ProxyContext,
-	) -> Result<BufBytesStream, OutboundError> {
-		return dispatch_outbound!(self, Self, s, { s.connect(dst, context).await });
-	}
-}
+pub use details::Details;
 
-#[cfg(feature = "use-udp")]
-impl protocol::outbound::udp::GetConnector for Details {
-	fn get_udp_connector(&self) -> Option<protocol::outbound::udp::Connector<'_>> {
-		#[cfg(feature = "use-udp")]
-		return dispatch_outbound!(self, Self, s, { s.get_udp_connector() });
-		#[cfg(not(feature = "use-udp"))]
-		None
-	}
-}
+#[ladder_lib_macro::impl_variants(DetailsBuilder)]
+mod details_builder {
+	use super::Details;
+	use crate::{prelude::BoxStdErr, proxy};
 
-make_outbound! {
 	#[derive(Debug)]
 	#[cfg_attr(
 		feature = "use_serde",
 		derive(serde::Deserialize),
 		serde(tag = "protocol", rename_all = "lowercase")
 	)]
-	pub enum DetailsBuilder () {
-		Freedom(freedom::Settings),
-		Socks5(socks5::outbound::SettingsBuilder),
-		Http(http::outbound::SettingsBuilder),
-		Shadowsocks(shadowsocks::outbound::SettingsBuilder),
-		Trojan(trojan::SettingsBuilder),
-		Vmess(vmess::outbound::SettingsBuilder),
-		Chain(chain::Settings),
+	pub enum DetailsBuilder {
+		Freedom(proxy::freedom::Settings),
+		#[cfg(feature = "socks5-outbound")]
+		Socks5(proxy::socks5::outbound::SettingsBuilder),
+		#[cfg(feature = "http-outbound")]
+		Http(proxy::http::outbound::SettingsBuilder),
+		#[cfg(any(
+			feature = "shadowsocks-outbound-openssl",
+			feature = "shadowsocks-outbound-ring"
+		))]
+		Shadowsocks(proxy::shadowsocks::outbound::SettingsBuilder),
+		#[cfg(feature = "trojan-outbound")]
+		Trojan(proxy::trojan::SettingsBuilder),
+		#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
+		Vmess(proxy::vmess::outbound::SettingsBuilder),
+		#[cfg(feature = "chain-outbound")]
+		Chain(proxy::chain::Settings),
 	}
-}
 
-impl DetailsBuilder {
-	#[inline]
-	#[allow(clippy::missing_errors_doc)]
-	pub fn build(self) -> Result<Details, BoxStdErr> {
-		Ok(match_outbound! { self, Self,
-			Freedom(b) => Details::Freedom(Arc::new(b)),
-			Socks5(b) => Details::Socks5(Arc::new(b.build()?)),
-			Http(b) => Details::Http(Arc::new(b.build()?)),
-			Shadowsocks(b) => Details::Shadowsocks(Arc::new(b.build()?)),
-			Trojan(b) => Details::Trojan(Arc::new(b.build()?)),
-			Vmess(b) => Details::Vmess(Arc::new(b.build()?)),
-			Chain(b) => Details::Chain(Arc::new(b)),
-		})
+	impl DetailsBuilder {
+		/// Creates a [`Details`].
+		///
+		/// # Errors
+		///
+		/// Returns an error if the inner type failed to build.
+		#[implement(map_arc_into)]
+		pub fn build(self) -> Result<Details, BoxStdErr> {}
 	}
 }
+pub use details_builder::DetailsBuilder;
 
 pub struct Outbound {
 	pub tag: Tag,

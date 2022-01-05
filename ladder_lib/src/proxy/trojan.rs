@@ -88,6 +88,12 @@ pub struct Settings {
 }
 
 impl Settings {
+	#[must_use]
+	#[inline]
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+		Some(self)
+	}
+
 	async fn priv_connect<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,

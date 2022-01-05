@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::tls;
 use crate::{
 	prelude::*,
-	protocol::{AsyncReadWrite, CompositeBytesStream},
+	protocol::{AsyncReadWrite, CompositeBytesStream, ProxyContext},
 };
 use bytes::{Buf, Bytes};
 use futures::{ready, Future};
@@ -55,7 +55,18 @@ pub struct Outbound {
 
 impl Outbound {
 	#[inline]
-	pub async fn connect<RW>(
+	pub async fn connect(
+		&self,
+		addr: &SocksAddr,
+		context: &dyn ProxyContext,
+	) -> io::Result<Box<dyn AsyncReadWrite>> {
+		self.connect_stream(context.dial_tcp(addr).await?, addr)
+			.await
+			.map(Into::into)
+	}
+
+	#[inline]
+	pub async fn connect_stream<RW>(
 		&self,
 		stream: RW,
 		addr: &SocksAddr,
@@ -65,7 +76,7 @@ impl Outbound {
 	{
 		info!("Establishing H2 connection to '{}'", addr);
 		let (r, w) = if let Some(tls) = &self.tls {
-			let stream = tls.connect(stream, addr).await?;
+			let stream = tls.connect_stream(stream, addr).await?;
 			self.priv_connect(stream, addr).await?
 		} else {
 			self.priv_connect(stream, addr).await?

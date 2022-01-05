@@ -220,14 +220,14 @@ impl ProxyContext for DummyTcpContext {
 		}
 	}
 
-	fn get_tcp_connector(&self, _tag: &str) -> Result<Arc<dyn TcpConnector>, GetConnectorError> {
+	fn get_tcp_connector(&self, _tag: &str) -> Result<&dyn TcpConnector, GetConnectorError> {
 		unreachable!()
 	}
 
 	fn get_tcp_stream_connector(
 		&self,
 		_tag: &str,
-	) -> Result<Arc<dyn TcpStreamConnector>, GetConnectorError> {
+	) -> Result<&dyn TcpStreamConnector, GetConnectorError> {
 		unreachable!()
 	}
 }

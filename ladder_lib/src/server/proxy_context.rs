@@ -59,7 +59,7 @@ impl ProxyContext for Server {
 		dial_res
 	}
 
-	fn get_tcp_connector(&self, tag: &str) -> Result<Arc<dyn TcpConnector>, GetConnectorError> {
+	fn get_tcp_connector(&self, tag: &str) -> Result<&dyn TcpConnector, GetConnectorError> {
 		let outbound = self
 			.get_outbound(tag)
 			.ok_or_else(|| GetConnectorError::UnknownTag(Tag::from(tag)))?;
@@ -69,7 +69,7 @@ impl ProxyContext for Server {
 	fn get_tcp_stream_connector(
 		&self,
 		tag: &str,
-	) -> Result<Arc<dyn TcpStreamConnector>, GetConnectorError> {
+	) -> Result<&dyn TcpStreamConnector, GetConnectorError> {
 		let outbound = self
 			.get_outbound(tag)
 			.ok_or_else(|| GetConnectorError::UnknownTag(Tag::from(tag)))?;

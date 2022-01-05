@@ -113,6 +113,12 @@ pub struct Settings {
 
 impl Settings {
 	#[must_use]
+	#[inline]
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+		Some(self)
+	}
+
+	#[must_use]
 	pub fn new(addr: SocksAddr, id: Uuid, transport: transport::outbound::Settings) -> Self {
 		Self {
 			addr,

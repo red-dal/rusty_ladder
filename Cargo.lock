@@ -972,6 +972,7 @@ dependencies = [
  "httparse",
  "hyper",
  "idna",
+ "ladder_lib_macro",
  "lazy_static",
  "log",
  "md-5",
@@ -1002,6 +1003,14 @@ dependencies = [
  "warp",
  "webpki 0.21.4",
  "webpki-roots",
+]
+
+[[package]]
+name = "ladder_lib_macro"
+version = "0.0.1"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]

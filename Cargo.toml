@@ -3,5 +3,5 @@ lto = true
 panic = "abort"
 
 [workspace]
-members = ["rusty_ladder", "ladder_lib", "speed_tester"]
+members = ["rusty_ladder", "ladder_lib", "speed_tester", "ladder_lib_macro"]
 default-members = ["rusty_ladder"]

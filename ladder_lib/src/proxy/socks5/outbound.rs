@@ -79,6 +79,12 @@ pub struct Settings {
 }
 
 impl Settings {
+	#[must_use]
+	#[inline]
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+		Some(self)
+	}
+
 	#[inline]
 	#[must_use]
 	pub fn new(

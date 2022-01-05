@@ -70,6 +70,12 @@ pub struct Settings {
 }
 
 impl Settings {
+	#[must_use]
+	#[inline]
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+		Some(self)
+	}
+
 	/// Connect to `stream` after it's connected on a transport layer.
 	async fn priv_connect<'a>(
 		&'a self,

@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::{http_utils, tls};
 use crate::{
 	prelude::*,
-	protocol::AsyncReadWrite,
+	protocol::{AsyncReadWrite, ProxyContext},
 	utils::websocket::{self, Stream as WsStream},
 };
 use std::{collections::HashMap, io};
@@ -36,6 +36,10 @@ pub enum BuildError {
 	#[error("non-empty path '{0}' does not start with '/'")]
 	PathNotStartsWithSlash(String),
 }
+
+// -------------------------------------------
+//                ClientStream
+// -------------------------------------------
 
 // Use box because SecureClientStream is too big
 pub enum ClientStream<IO: AsyncRead + AsyncWrite + Unpin> {
@@ -106,6 +110,22 @@ where
 		}
 	}
 }
+
+impl<IO> From<ClientStream<IO>> for Box<dyn AsyncReadWrite>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+	fn from(stream: ClientStream<IO>) -> Self {
+		match stream {
+			ClientStream::Raw(stream) => stream,
+			ClientStream::Tls(stream) => stream,
+		}
+	}
+}
+
+// -------------------------------------------
+//                ServerStream
+// -------------------------------------------
 
 pub enum ServerStream<IO: AsyncRead + AsyncWrite + Unpin> {
 	Raw(Box<PlainStream<IO>>),
@@ -182,6 +202,22 @@ where
 	}
 }
 
+impl<IO> From<ServerStream<IO>> for Box<dyn AsyncReadWrite>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin,
+{
+	fn from(stream: ServerStream<IO>) -> Self {
+		match stream {
+			ServerStream::Raw(stream) => stream,
+			ServerStream::Tls(stream) => stream,
+		}
+	}
+}
+
+// -------------------------------------------
+//                Outbound
+// -------------------------------------------
+
 /// Settings for websocket connection.
 pub struct Outbound {
 	headers: HashMap<String, String>,
@@ -191,13 +227,28 @@ pub struct Outbound {
 }
 
 impl Outbound {
-	pub async fn connect<IO>(&self, stream: IO, addr: &SocksAddr) -> io::Result<ClientStream<IO>>
+	#[inline]
+	pub async fn connect(
+		&self,
+		addr: &SocksAddr,
+		context: &dyn ProxyContext,
+	) -> io::Result<Box<dyn AsyncReadWrite>> {
+		self.connect_stream(context.dial_tcp(addr).await?, addr)
+			.await
+			.map(Into::into)
+	}
+
+	pub async fn connect_stream<IO>(
+		&self,
+		stream: IO,
+		addr: &SocksAddr,
+	) -> io::Result<ClientStream<IO>>
 	where
 		IO: 'static + AsyncRead + AsyncWrite + Unpin,
 	{
 		debug!("Initiating Websocket transport request to '{}'.", addr);
 		if let Some(tls) = &self.tls {
-			let stream = tls.connect(stream, addr).await?;
+			let stream = tls.connect_stream(stream, addr).await?;
 			Ok(ClientStream::Tls(Box::new(
 				self.connect_ws_only(stream, addr).await?,
 			)))
@@ -278,6 +329,10 @@ impl OutboundBuilder {
 		})
 	}
 }
+
+// -------------------------------------------
+//                Inbound
+// -------------------------------------------
 
 /// Settings for websocket connection.
 pub struct Inbound {

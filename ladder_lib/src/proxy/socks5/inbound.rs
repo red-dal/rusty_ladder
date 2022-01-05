@@ -282,8 +282,8 @@ async fn reply_error<W: AsyncWrite + Unpin>(
 #[cfg(feature = "use-udp")]
 mod udp {
 	use super::{
-		reply_error, transport, AcceptError, AcceptResult, Error, Reply, ReplyCode, Request,
-		Settings, StreamInfo,
+		reply_error, AcceptError, AcceptResult, Error, Reply, ReplyCode, Request, Settings,
+		StreamInfo,
 	};
 	use crate::{
 		prelude::BoxStdErr,
@@ -314,7 +314,7 @@ mod udp {
 			info: StreamInfo,
 		) -> Result<AcceptResult<'_>, AcceptError> {
 			#[allow(irrefutable_let_patterns)]
-			if let transport::inbound::Settings::None = &self.transport {
+			if self.transport.is_none() {
 				// Do nothing
 			} else {
 				return Err(reply_error(

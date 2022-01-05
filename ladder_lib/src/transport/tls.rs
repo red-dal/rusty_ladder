@@ -19,12 +19,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
 	prelude::*,
+	protocol::{AsyncReadWrite, ProxyContext},
 	utils::tls::{Acceptor, Connector},
 };
 use smol_str::SmolStr;
 use std::io;
 
-pub use crate::utils::tls::{ClientStream, ServerStream, ConfigError};
+pub use crate::utils::tls::{ClientStream, ConfigError, ServerStream};
 
 pub struct Outbound {
 	pub connector: Connector,
@@ -32,7 +33,20 @@ pub struct Outbound {
 
 impl Outbound {
 	#[inline]
-	pub async fn connect<IO>(&self, stream: IO, addr: &SocksAddr) -> io::Result<ClientStream<IO>>
+	pub async fn connect(
+		&self,
+		addr: &SocksAddr,
+		context: &dyn ProxyContext,
+	) -> io::Result<Box<dyn AsyncReadWrite>> {
+		self.connect_stream(context.dial_tcp(addr).await?, addr).await.map(Into::into)
+	}
+	
+	#[inline]
+	pub async fn connect_stream<IO>(
+		&self,
+		stream: IO,
+		addr: &SocksAddr,
+	) -> io::Result<ClientStream<IO>>
 	where
 		IO: AsyncRead + AsyncWrite + Unpin,
 	{
@@ -57,7 +71,7 @@ impl OutboundBuilder {
 	/// Create a new [`Outbound`]
 	///
 	/// # Errors
-	/// 
+	///
 	/// Returns a [`ConfigError`] if there are errors in the configuration.
 	pub fn build(self) -> Result<Outbound, ConfigError> {
 		debug!(
@@ -83,8 +97,7 @@ impl Inbound {
 	}
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 #[cfg_attr(
 	feature = "use_serde",
 	derive(serde::Deserialize),

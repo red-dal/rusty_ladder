@@ -19,104 +19,105 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{prelude::BoxStdErr, protocol::AsyncReadWrite};
 use std::io;
-use tokio::io::{AsyncRead, AsyncWrite};
 
-#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-use super::ws;
+#[ladder_lib_macro::impl_variants(Settings)]
+mod settings {
+	use crate::{protocol::AsyncReadWrite, transport};
+	use std::io;
+	use tokio::io::{AsyncRead, AsyncWrite};
 
-#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-use super::tls;
+	pub enum Settings {
+		None(transport::inbound::Empty),
+		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
+		Tls(transport::tls::Inbound),
+		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+		Ws(transport::ws::Inbound),
+		#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
+		H2(transport::h2::Inbound),
+	}
 
-#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-use super::h2;
+	impl Settings {
+		#[implement(map_into_map_err_into)]
+		pub async fn accept<IO>(&self, stream: IO) -> io::Result<Box<dyn AsyncReadWrite>>
+		where
+			IO: 'static
+				+ AsyncRead
+				+ AsyncWrite
+				+ Unpin
+				+ Send
+				+ Sync
+				+ Into<Box<dyn AsyncReadWrite>>,
+		{
+		}
+	}
+}
+pub use settings::Settings;
 
-pub enum Settings {
-	None,
-	#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-	Tls(tls::Inbound),
-	#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-	Ws(ws::Inbound),
-	#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-	H2(h2::Inbound),
+impl Settings {
+	#[inline]
+	pub fn is_none(&self) -> bool {
+		matches!(self, Self::None(_))
+	}
 }
 
 impl Default for Settings {
 	fn default() -> Self {
-		Self::None
+		Self::None(Empty)
 	}
 }
 
-impl Settings {
-	pub async fn accept<IO>(&self, stream: IO) -> io::Result<Box<dyn AsyncReadWrite>>
-	where
-		IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync + Into<Box<dyn AsyncReadWrite>>,
-	{
-		Ok(match self {
-			Settings::None => stream.into(),
-			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-			Settings::Tls(s) => Box::new(s.accept(stream).await?),
-			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-			Settings::Ws(s) => Box::new(s.accept(stream).await?),
-			#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-			Settings::H2(s) => s.accept(stream).await?,
-		})
+#[ladder_lib_macro::impl_variants(SettingsBuilder)]
+mod settings_builder {
+	use super::Settings;
+	use crate::{prelude::BoxStdErr, transport};
+
+	#[derive(Debug, Clone)]
+	#[cfg_attr(
+		feature = "use_serde",
+		derive(serde::Deserialize),
+		serde(rename_all = "lowercase", tag = "type")
+	)]
+	pub enum SettingsBuilder {
+		None(transport::inbound::Empty),
+		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
+		Tls(transport::tls::InboundBuilder),
+		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+		Ws(transport::ws::InboundBuilder),
+		#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
+		H2(transport::h2::InboundBuilder),
+	}
+
+	impl SettingsBuilder {
+		#[implement(map_into_map_err_into)]
+		pub fn build(self) -> Result<Settings, BoxStdErr> {}
 	}
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(
-	feature = "use_serde",
-	derive(serde::Deserialize),
-	serde(rename_all = "lowercase", tag = "type")
-)]
-pub enum SettingsBuilder {
-	None,
-	#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-	Tls(tls::InboundBuilder),
-	#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-	Ws(ws::InboundBuilder),
-	#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-	H2(h2::InboundBuilder),
-}
-
-impl SettingsBuilder {
-	#[allow(clippy::unnecessary_wraps)]
-	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		Ok(match self {
-			SettingsBuilder::None => Settings::None,
-			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-			SettingsBuilder::Tls(s) => Settings::Tls(s.build()?),
-			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-			SettingsBuilder::Ws(s) => Settings::Ws(s.build()?),
-			#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-			SettingsBuilder::H2(s) => Settings::H2(s.build()?),
-		})
-	}
-}
+pub use settings_builder::SettingsBuilder;
 
 impl Default for SettingsBuilder {
 	fn default() -> Self {
-		SettingsBuilder::None
+		SettingsBuilder::None(Empty)
 	}
 }
 
-#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-impl From<tls::InboundBuilder> for SettingsBuilder {
-	fn from(s: tls::InboundBuilder) -> Self {
-		SettingsBuilder::Tls(s)
-	}
-}
+#[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
+#[derive(Debug, Clone, Copy)]
+pub struct Empty;
 
-#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-impl From<ws::InboundBuilder> for SettingsBuilder {
-	fn from(s: ws::InboundBuilder) -> Self {
-		SettingsBuilder::Ws(s)
+#[allow(clippy::trivially_copy_pass_by_ref)]
+#[allow(clippy::unnecessary_wraps)]
+impl Empty {
+	#[inline]
+	pub async fn accept<IO>(&self, stream: IO) -> io::Result<Box<dyn AsyncReadWrite>>
+	where
+		IO: 'static + Into<Box<dyn AsyncReadWrite>>,
+	{
+		Ok(stream.into())
 	}
-}
 
-#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-impl From<h2::InboundBuilder> for SettingsBuilder {
-	fn from(s: h2::InboundBuilder) -> Self {
-		SettingsBuilder::H2(s)
+	#[inline]
+	fn build(self) -> Result<Self, BoxStdErr> {
+		Ok(self)
 	}
 }

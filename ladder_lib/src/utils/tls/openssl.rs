@@ -149,3 +149,12 @@ impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite 
 		(Box::new(r), Box::new(w))
 	}
 }
+
+impl<IO> From<SslStream<IO>> for Box<dyn AsyncReadWrite>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync,
+{
+	fn from(stream: SslStream<IO>) -> Self {
+		Box::new(stream)
+	}
+}

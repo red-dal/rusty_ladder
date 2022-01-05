@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector},
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
 		BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
@@ -29,6 +29,24 @@ use async_trait::async_trait;
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct Settings {}
+
+impl Settings {
+	/// This is a wrapper method for `Ok(Self)`.
+	///
+	/// # Errors
+	///
+	/// No error will be returned.
+	pub fn build<E>(self) -> Result<Self, E> {
+		Ok(self)
+	}
+
+	#[must_use]
+	#[inline]
+	#[allow(clippy::unused_self)]
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+		None
+	}
+}
 
 impl GetProtocolName for Settings {
 	fn protocol_name(&self) -> &'static str {

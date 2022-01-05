@@ -17,88 +17,53 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-#[allow(clippy::wildcard_imports)]
-use crate::proxy::*;
-use crate::{
-	prelude::*,
-	protocol::{
-		inbound::{AcceptError, AcceptResult, StreamInfo, TcpAcceptor},
-		AsyncReadWrite, GetProtocolName, Network,
-	},
-	utils::OneOrMany,
-};
-use async_trait::async_trait;
+use crate::{prelude::*, protocol::GetProtocolName, utils::OneOrMany};
 
-macro_rules! make_inbound {
-	{
-		$(#[$attrs:meta])*
-		$($header:ident)* ($($enum_name:ident)?) {
-			Tunnel($($tunnel_item:tt)+) $(=> $tunnel_body:block)?,
-			Socks5($($socks5_item:tt)+) $(=> $socks5_body:block)?,
-			Http($($http_item:tt)+) $(=> $http_body:block)?,
-			Shadowsocks($($ss_item:tt)+) $(=> $ss_body:block)?,
-			Vmess($($vmess_item:tt)+) $(=> $vmess_body:block)?,
-		}
-	} => {
-		$(#[$attrs])*
-		$($header)* {
-			$($enum_name::)? Tunnel($($tunnel_item)+) $(=> $tunnel_body)?,
-			#[cfg(feature = "socks5-inbound")]
-			$($enum_name::)? Socks5($($socks5_item)+) $(=> $socks5_body)?,
-			#[cfg(feature = "http-inbound")]
-			$($enum_name::)? Http($($http_item)+) $(=> $http_body)?,
-			#[cfg(any(
-				feature = "shadowsocks-inbound-openssl",
-				feature = "shadowsocks-inbound-ring"
-			))]
-			$($enum_name::)? Shadowsocks($($ss_item)+) $(=> $ss_body)?,
-			#[cfg(any(feature = "vmess-inbound-openssl", feature = "vmess-inbound-ring"))]
-			$($enum_name::)? Vmess($($vmess_item)+) $(=> $vmess_body)?,
-		}
+#[ladder_lib_macro::impl_variants(Details)]
+mod details {
+	use crate::{
+		protocol::{
+			inbound::{AcceptError, AcceptResult, StreamInfo, TcpAcceptor},
+			AsyncReadWrite, GetProtocolName, Network,
+		},
+		proxy,
 	};
-}
+	use async_trait::async_trait;
 
-macro_rules! match_inbound {
-	{$item:ident, $enum_name:ident,
-		Tunnel($tunnel_item:ident) => $tunnel_body:block,
-		Socks5($socks5_item:ident) => $socks5_body:block,
-		Http($http_item:ident) => $http_body:block,
-		Shadowsocks($ss_item:ident) => $ss_body:block,
-		Vmess($vmess_item:ident) => $vmess_body:block,
-	} => {
-		make_inbound! {
-			match $item ($enum_name) {
-				Tunnel($tunnel_item) => $tunnel_body,
-				Socks5($socks5_item) => $socks5_body,
-				Http($http_item) => $http_body,
-				Shadowsocks($ss_item) => $ss_body,
-				Vmess($vmess_item) => $vmess_body,
-			}
+	pub enum Details {
+		Tunnel(proxy::tunnel::Settings),
+		#[cfg(feature = "socks5-inbound")]
+		Socks5(proxy::socks5::inbound::Settings),
+		#[cfg(feature = "http-inbound")]
+		Http(proxy::http::inbound::Settings),
+		#[cfg(any(
+			feature = "shadowsocks-inbound-openssl",
+			feature = "shadowsocks-inbound-ring"
+		))]
+		Shadowsocks(proxy::shadowsocks::inbound::Settings),
+		#[cfg(any(feature = "vmess-inbound-openssl", feature = "vmess-inbound-ring"))]
+		Vmess(proxy::vmess::inbound::Settings),
+	}
+
+	impl GetProtocolName for Details {
+		#[implement]
+		fn protocol_name(&self) -> &'static str {}
+		#[implement]
+		fn network(&self) -> Network {}
+	}
+
+	#[async_trait]
+	impl TcpAcceptor for Details {
+		#[implement]
+		async fn accept_tcp<'a>(
+			&'a self,
+			stream: Box<dyn AsyncReadWrite>,
+			info: Option<StreamInfo>,
+		) -> Result<AcceptResult<'a>, AcceptError> {
 		}
-	};
-}
-
-macro_rules! dispatch_inbound {
-	($item:ident, $enum_name:ident, $with:ident, $body:block) => {
-		match_inbound! {$item, $enum_name,
-			Tunnel($with) => $body,
-			Socks5($with) => $body,
-			Http($with) => $body,
-			Shadowsocks($with) => $body,
-			Vmess($with) => $body,
-		}
-	};
-}
-
-make_inbound! {
-	pub enum Details () {
-		Tunnel(tunnel::Settings),
-		Socks5(socks5::inbound::Settings),
-		Http(http::inbound::Settings),
-		Shadowsocks(shadowsocks::inbound::Settings),
-		Vmess(vmess::inbound::Settings),
 	}
 }
+use details::Details;
 
 #[cfg(feature = "use-udp")]
 impl Details {
@@ -121,56 +86,43 @@ impl Details {
 	}
 }
 
-impl GetProtocolName for Details {
-	fn protocol_name(&self) -> &'static str {
-		dispatch_inbound!(self, Self, s, { s.protocol_name() })
-	}
+#[ladder_lib_macro::impl_variants(DetailsBuilder)]
+mod details_builder {
+	use super::Details;
+	use crate::{prelude::BoxStdErr, proxy};
 
-	fn network(&self) -> Network {
-		dispatch_inbound!(self, Self, s, { s.network() })
-	}
-}
-
-#[async_trait]
-impl TcpAcceptor for Details {
-	async fn accept_tcp<'a>(
-		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
-		info: Option<StreamInfo>,
-	) -> Result<AcceptResult<'a>, AcceptError> {
-		dispatch_inbound!(self, Self, s, { s.accept_tcp(stream, info).await })
-	}
-}
-
-make_inbound! {
 	#[derive(Debug)]
 	#[cfg_attr(
 		feature = "use_serde",
 		derive(serde::Deserialize),
 		serde(rename_all = "lowercase", tag = "protocol")
 	)]
-	pub enum DetailsBuilder () {
-		Tunnel(tunnel::Settings),
-		Socks5(socks5::inbound::SettingsBuilder),
-		Http(http::inbound::SettingsBuilder),
-		Shadowsocks(shadowsocks::inbound::SettingsBuilder),
-		Vmess(vmess::inbound::SettingsBuilder),
+	pub enum DetailsBuilder {
+		Tunnel(proxy::tunnel::Settings),
+		#[cfg(feature = "socks5-inbound")]
+		Socks5(proxy::socks5::inbound::SettingsBuilder),
+		#[cfg(feature = "http-inbound")]
+		Http(proxy::http::inbound::SettingsBuilder),
+		#[cfg(any(
+			feature = "shadowsocks-inbound-openssl",
+			feature = "shadowsocks-inbound-ring"
+		))]
+		Shadowsocks(proxy::shadowsocks::inbound::SettingsBuilder),
+		#[cfg(any(feature = "vmess-inbound-openssl", feature = "vmess-inbound-ring"))]
+		Vmess(proxy::vmess::inbound::SettingsBuilder),
 	}
-}
 
-impl DetailsBuilder {
-	#[inline]
-	#[allow(clippy::missing_errors_doc)]
-	pub fn build(self) -> Result<Details, BoxStdErr> {
-		Ok(match_inbound! {self, Self,
-			Tunnel(s) => { Details::Tunnel(s) },
-			Socks5(s) => { Details::Socks5(s.build()?) },
-			Http(s) => { Details::Http(s.build()?) },
-			Shadowsocks(s) => { Details::Shadowsocks(s.build()?) },
-			Vmess(s) => { Details::Vmess(s.build()?) },
-		})
+	impl DetailsBuilder {
+		/// Create a new [`Details`].
+		/// 
+		/// # Errors
+		/// 
+		/// Returns an error if the inner type failed to build.
+		#[implement(map_into)]
+		pub fn build(self) -> Result<Details, BoxStdErr> {}
 	}
 }
+pub use details_builder::DetailsBuilder;
 
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]

@@ -124,3 +124,21 @@ impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite 
 		(Box::new(r), Box::new(w))
 	}
 }
+
+impl<IO> From<ServerStream<IO>> for Box<dyn AsyncReadWrite>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync,
+{
+	fn from(stream: ServerStream<IO>) -> Self {
+		Box::new(stream)
+	}
+}
+
+impl<IO> From<ClientStream<IO>> for Box<dyn AsyncReadWrite>
+where
+	IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync,
+{
+	fn from(stream: ClientStream<IO>) -> Self {
+		Box::new(stream)
+	}
+}

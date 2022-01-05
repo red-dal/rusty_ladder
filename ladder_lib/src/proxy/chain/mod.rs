@@ -29,12 +29,28 @@ use crate::{
 
 const PROTOCOL_NAME: &str = "chain";
 
-type ArcStreamConnector = Arc<dyn TcpStreamConnector>;
-
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct Settings {
 	pub chain: Vec<Tag>,
+}
+
+impl Settings {
+	/// This is a wrapper method for `Ok(Self)`.
+	///
+	/// # Errors
+	///
+	/// No error will be returned.
+	pub fn build<E>(self) -> Result<Self, E> {
+		Ok(self)
+	}
+
+	#[must_use]
+	#[inline]
+	#[allow(clippy::unused_self)]
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+		None
+	}
 }
 
 impl GetProtocolName for Settings {
@@ -59,8 +75,8 @@ impl TcpConnector for Settings {
 			context.get_tcp_connector(tag).map_err(Error::from)?
 		};
 
-		let nodes: Vec<ArcStreamConnector> = {
-			let mut nodes: Vec<ArcStreamConnector> = Vec::new();
+		let nodes: Vec<&dyn TcpStreamConnector> = {
+			let mut nodes: Vec<&dyn TcpStreamConnector> = Vec::new();
 			for tag in tag_iter {
 				let connector = context.get_tcp_stream_connector(tag).map_err(Error::from)?;
 				nodes.push(connector);

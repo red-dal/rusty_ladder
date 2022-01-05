@@ -24,17 +24,6 @@ use std::{
 };
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, ReadBuf};
 
-pub trait AsyncReadWrite: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin {
-	fn split(self: Box<Self>) -> (BoxRead, BoxWrite);
-}
-
-impl AsyncReadWrite for tokio::net::TcpStream {
-	fn split(self: Box<Self>) -> (BoxRead, BoxWrite) {
-		let (r, w) = self.into_split();
-		(Box::new(r), Box::new(w))
-	}
-}
-
 pub type BoxRead = Box<dyn AsyncRead + Send + Sync + Unpin>;
 pub type BoxBufRead = Box<dyn AsyncBufRead + Send + Sync + Unpin>;
 pub type BoxWrite = Box<dyn AsyncWrite + Send + Sync + Unpin>;
@@ -88,6 +77,34 @@ macro_rules! impl_inner_buf_read {
 			Pin::new(&mut self.get_mut().r).consume(amt)
 		}
 	};
+}
+// --------------------------------------------
+//                AsyncReadWrite
+// --------------------------------------------
+
+pub trait AsyncReadWrite: 'static + AsyncRead + AsyncWrite + Send + Sync + Unpin {
+	fn split(self: Box<Self>) -> (BoxRead, BoxWrite);
+}
+
+impl AsyncReadWrite for tokio::net::TcpStream {
+	fn split(self: Box<Self>) -> (BoxRead, BoxWrite) {
+		let (r, w) = self.into_split();
+		(Box::new(r), Box::new(w))
+	}
+}
+
+#[cfg(unix)]
+impl AsyncReadWrite for tokio::net::UnixStream {
+	fn split(self: Box<Self>) -> (BoxRead, BoxWrite) {
+		let (rh, wh) = self.into_split();
+		(Box::new(rh), Box::new(wh))
+	}
+}
+
+impl From<tokio::net::TcpStream> for Box<dyn AsyncReadWrite> {
+    fn from(stream: tokio::net::TcpStream) -> Self {
+        Box::new(stream)
+    }
 }
 
 // --------------------------------------------

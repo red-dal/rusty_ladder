@@ -22,129 +22,126 @@ use crate::protocol::ProxyContext;
 use crate::{prelude::*, protocol::AsyncReadWrite};
 use std::io;
 
-#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-use super::ws;
+#[ladder_lib_macro::impl_variants(Settings)]
+mod settings {
+	use super::Empty;
+	use crate::protocol::{AsyncReadWrite, ProxyContext, SocksAddr};
+	use std::io;
+	use tokio::io::{AsyncRead, AsyncWrite};
 
-#[cfg(feature = "browser-transport")]
-use super::browser;
+	pub enum Settings {
+		None(Empty),
+		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
+		Tls(super::super::tls::Outbound),
+		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+		Ws(super::super::ws::Outbound),
+		#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
+		H2(super::super::h2::Outbound),
+		#[cfg(feature = "browser-transport")]
+		Browser(super::super::browser::Settings),
+	}
 
-#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-use super::tls;
+	impl Settings {
+		#[implement(map_into)]
+		pub async fn connect_stream<'a, IO>(
+			&'a self,
+			stream: IO,
+			#[allow(unused_variables)] addr: &'a SocksAddr,
+		) -> io::Result<Box<dyn AsyncReadWrite>>
+		where
+			IO: 'static
+				+ AsyncRead
+				+ AsyncWrite
+				+ Unpin
+				+ Send
+				+ Sync
+				+ Into<Box<dyn AsyncReadWrite>>,
+		{
+		}
 
-#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-use super::h2;
-
-pub enum Settings {
-	None,
-	#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-	Tls(tls::Outbound),
-	#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-	Ws(ws::Outbound),
-	#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-	H2(h2::Outbound),
-	#[cfg(feature = "browser-transport")]
-	Browser(browser::Settings),
+		#[implement(map_into)]
+		pub async fn connect(
+			&self,
+			addr: &SocksAddr,
+			context: &dyn ProxyContext,
+		) -> io::Result<Box<dyn AsyncReadWrite>> {
+		}
+	}
 }
+
+pub use settings::Settings;
 
 impl Default for Settings {
 	fn default() -> Self {
-		Self::None
+		Self::None(Empty)
 	}
 }
 
-impl Settings {
-	pub async fn connect_stream<'a, IO>(
-		&'a self,
-		stream: IO,
-		#[allow(unused_variables)] addr: &'a SocksAddr,
-	) -> io::Result<Box<dyn AsyncReadWrite>>
-	where
-		IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync + Into<Box<dyn AsyncReadWrite>>,
-	{
-		Ok(match self {
-			Settings::None => stream.into(),
-			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-			Settings::Tls(s) => Box::new(s.connect(stream, addr).await?),
-			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-			Settings::Ws(s) => Box::new(s.connect(stream, addr).await?),
-			#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-			Settings::H2(s) => s.connect(stream, addr).await?,
-			#[cfg(feature = "browser-transport")]
-			Settings::Browser(_) => {
-				return Err(io::Error::new(
-					io::ErrorKind::Other,
-					"Cannot use browser transport layer in chain proxy.",
-				));
-			}
-		})
+#[ladder_lib_macro::impl_variants(SettingsBuilder)]
+mod settings_builder {
+	use super::{Empty, Settings};
+	use crate::prelude::BoxStdErr;
+
+	#[derive(Clone, Debug)]
+	#[cfg_attr(
+		feature = "use_serde",
+		derive(serde::Deserialize),
+		serde(rename_all = "lowercase", tag = "type")
+	)]
+	pub enum SettingsBuilder {
+		None(Empty),
+		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
+		Tls(super::super::tls::OutboundBuilder),
+		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+		Ws(super::super::ws::OutboundBuilder),
+		#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
+		H2(super::super::h2::OutboundBuilder),
+		#[cfg(feature = "browser-transport")]
+		Browser(super::super::browser::SettingsBuilder),
 	}
 
+	impl SettingsBuilder {
+		#[implement(map_into_map_err_into)]
+		pub fn build(self) -> Result<Settings, BoxStdErr> {}
+	}
+}
+
+pub use settings_builder::SettingsBuilder;
+
+impl Default for SettingsBuilder {
+	fn default() -> Self {
+		SettingsBuilder::None(Empty)
+	}
+}
+
+#[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
+#[derive(Debug, Clone, Copy)]
+pub struct Empty;
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+#[allow(clippy::unnecessary_wraps)]
+impl Empty {
+	#[inline]
 	pub async fn connect(
 		&self,
 		addr: &SocksAddr,
 		context: &dyn ProxyContext,
 	) -> io::Result<Box<dyn AsyncReadWrite>> {
-		debug!("Establishing transport connection to {}", addr);
-		Ok(match self {
-			Settings::None => Box::new(context.dial_tcp(addr).await?),
-			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-			Settings::Tls(s) => {
-				let stream = context.dial_tcp(addr).await?;
-				Box::new(s.connect(stream, addr).await?)
-			}
-			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-			Settings::Ws(s) => {
-				let stream = context.dial_tcp(addr).await?;
-				Box::new(s.connect(stream, addr).await?)
-			}
-			#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-			Settings::H2(s) => {
-				let stream = context.dial_tcp(addr).await?;
-				s.connect(stream, addr).await?
-			}
-			#[cfg(feature = "browser-transport")]
-			Settings::Browser(s) => s.connect(addr).await?.into(),
-		})
+		self.connect_stream(context.dial_tcp(addr).await?, addr)
+			.await
+			.map(Into::into)
 	}
-}
 
-#[derive(Clone, Debug)]
-#[cfg_attr(
-	feature = "use_serde",
-	derive(serde::Deserialize),
-	serde(rename_all = "lowercase", tag = "type")
-)]
-pub enum SettingsBuilder {
-	None,
-	#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-	Tls(tls::OutboundBuilder),
-	#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-	Ws(ws::OutboundBuilder),
-	#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-	H2(h2::OutboundBuilder),
-	#[cfg(feature = "browser-transport")]
-	Browser(browser::SettingsBuilder),
-}
-
-impl SettingsBuilder {
-	#[allow(clippy::unnecessary_wraps)]
-	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		Ok(match self {
-			SettingsBuilder::None => Settings::None,
-			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-			SettingsBuilder::Tls(b) => Settings::Tls(b.build()?),
-			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-			SettingsBuilder::Ws(b) => Settings::Ws(b.build()?),
-			#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-			SettingsBuilder::H2(b) => Settings::H2(b.build()?),
-			#[cfg(feature = "browser-transport")]
-			SettingsBuilder::Browser(b) => Settings::Browser(b.build()),
-		})
+	#[inline]
+	pub async fn connect_stream<IO>(&self, stream: IO, _addr: &SocksAddr) -> io::Result<IO>
+	where
+		IO: AsyncRead + AsyncWrite + Unpin,
+	{
+		Ok(stream)
 	}
-}
 
-impl Default for SettingsBuilder {
-	fn default() -> Self {
-		SettingsBuilder::None
+	#[inline]
+	fn build(self) -> Result<Self, BoxStdErr> {
+		Ok(self)
 	}
 }

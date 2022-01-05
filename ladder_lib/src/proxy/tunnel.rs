@@ -39,7 +39,17 @@ pub struct Settings {
 	network: Network,
 }
 
-impl Settings {}
+impl Settings {
+	/// This is a helper method and will always return `Ok(Self)`.
+	/// 
+	/// # Errors
+	/// 
+	/// This method will never return any error.
+	#[inline]
+	pub fn build<E>(self) -> Result<Self, E> {
+		Ok(self)
+	}
+}
 
 impl GetProtocolName for Settings {
 	#[inline]
