@@ -31,7 +31,7 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
+		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, SessionInfo, TcpAcceptor},
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	transport,
@@ -243,7 +243,7 @@ impl TcpAcceptor for Settings {
 	async fn accept_tcp<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
-		_info: Option<StreamInfo>,
+		_info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		debug!("Accepting VMess handshake");
 		let mut stream = self.transport.accept(stream).await?;

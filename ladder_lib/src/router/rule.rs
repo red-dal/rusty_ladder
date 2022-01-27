@@ -31,11 +31,15 @@ const GEOSITE_PREFIX: &str = "geosite";
 const GEOIP_PREFIX: &str = "geoip";
 
 use super::Cidr;
-use crate::protocol::{socks_addr::DomainName, SocksDestination};
+use crate::protocol::{socks_addr::DomainName, SocksAddr, SocksDestination};
 use smol_str::SmolStr;
-use std::{collections::HashSet, net::IpAddr, str::FromStr};
 #[cfg(feature = "use-protobuf")]
 use std::borrow::Cow;
+use std::{
+	collections::HashSet,
+	net::{IpAddr, SocketAddr},
+	str::FromStr,
+};
 
 #[cfg(feature = "use-protobuf")]
 use super::protos::rules as proto;
@@ -63,9 +67,22 @@ pub struct Rule {
 }
 
 impl Rule {
+	#[must_use]
+	pub fn check_matched(&self, inbound_ind: usize, src: &SocketAddr, dst: &SocksAddr) -> bool {
+		if !self.contains_inbound(inbound_ind) {
+			return false;
+		}
+		let is_src_matched =
+			self.src_hosts.contains(&src.ip()) && self.contains_src_port(src.port());
+		if !is_src_matched {
+			return false;
+		}
+		self.contains_dst_port(dst.port) && self.dst_hosts.contains(&dst.dest)
+	}
+
 	#[inline]
 	#[must_use]
-	pub fn contains_inbound(&self, inbound_ind: usize) -> bool {
+	fn contains_inbound(&self, inbound_ind: usize) -> bool {
 		if self.inbound_inds.is_empty() {
 			return true;
 		}
@@ -75,7 +92,7 @@ impl Rule {
 	/// Returns true if a source port is allowed
 	#[inline]
 	#[must_use]
-	pub fn contains_src_port(&self, port: u16) -> bool {
+	fn contains_src_port(&self, port: u16) -> bool {
 		if self.src_ports.is_empty() {
 			return true;
 		}
@@ -84,7 +101,7 @@ impl Rule {
 
 	/// Returns true if a destination port is allowed
 	#[must_use]
-	pub fn contains_dst_port(&self, port: u16) -> bool {
+	fn contains_dst_port(&self, port: u16) -> bool {
 		if self.dst_ports.is_empty() {
 			return true;
 		}
@@ -214,9 +231,7 @@ impl Plain {
 
 			src_hosts
 		};
-
 		let dst_hosts = DestinationContainer::new(self.dst)?;
-
 		let dst_ports = self.dst_ports;
 		let rule = Rule {
 			inbound_inds,

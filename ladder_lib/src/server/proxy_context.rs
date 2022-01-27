@@ -43,10 +43,10 @@ impl ProxyContext for Server {
 		trace!("Dialing TCP connection to '{}'", addr);
 		let dial_res = match &addr.dest {
 			SocksDestination::Name(name) => {
-				connect_tcp_timeout((name.as_str(), addr.port), self.dial_tcp_timeout).await
+				connect_tcp_timeout((name.as_str(), addr.port), self.global.dial_tcp_timeout).await
 			}
 			SocksDestination::Ip(ip) => {
-				connect_tcp_timeout((*ip, addr.port), self.dial_tcp_timeout).await
+				connect_tcp_timeout((*ip, addr.port), self.global.dial_tcp_timeout).await
 			}
 		};
 

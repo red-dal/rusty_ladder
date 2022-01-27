@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, HandshakeError, TcpAcceptor},
+		inbound::{AcceptError, AcceptResult, HandshakeError, SessionInfo, TcpAcceptor},
 		outbound::{TcpConnector, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetConnectorError, ProxyContext,
 	},
@@ -149,26 +149,39 @@ async fn handle_server<I>(
 where
 	I: 'static + TcpAcceptor + Send + Sync,
 {
+	let addr = std::net::Ipv4Addr::LOCALHOST;
 	let (stream, _) = listener.accept().await?;
-	let accept_result = inbound.accept_tcp(Box::new(stream), None).await;
+	let accept_result = inbound
+		.accept_tcp(
+			Box::new(stream),
+			SessionInfo {
+				addr: crate::network::Addrs {
+					peer: SocketAddr::new(addr.into(), 11111),
+					local: SocketAddr::new(addr.into(), 22222),
+				},
+			},
+		)
+		.await;
 	let accept_result = match accept_result {
 		Ok(h) => h,
-		Err(err) => return match err {
-			AcceptError::Io(err) => {
-				error!("{}", err);
-				Err(err.into())
+		Err(err) => {
+			return match err {
+				AcceptError::Io(err) => {
+					error!("{}", err);
+					Err(err.into())
+				}
+				AcceptError::ProtocolSilentDrop((_, err)) => {
+					error!("{}", err);
+					Err(err)
+				}
+				AcceptError::TcpNotAcceptable => Err(HandshakeError::TcpNotAcceptable.into()),
+				AcceptError::UdpNotAcceptable => Err(HandshakeError::UdpNotAcceptable.into()),
+				AcceptError::Protocol(err) => {
+					error!("{}", err);
+					Err(err.into())
+				}
 			}
-			AcceptError::ProtocolSilentDrop((_, err)) => {
-				error!("{}", err);
-				Err(err)
-			}
-			AcceptError::TcpNotAcceptable => Err(HandshakeError::TcpNotAcceptable.into()),
-			AcceptError::UdpNotAcceptable => Err(HandshakeError::UdpNotAcceptable.into()),
-			AcceptError::Protocol(err) => {
-				error!("{}", err);
-				Err(err.into())
-			},
-		},
+		}
 	};
 
 	match accept_result {

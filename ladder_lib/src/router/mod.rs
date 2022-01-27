@@ -51,16 +51,10 @@ impl Router {
 	) -> Option<usize> {
 		for rule in &self.rules {
 			// check if traffic is from specific tag
-			if rule.contains_inbound(inbound_ind)
-				&& rule.src_hosts.contains(&src.ip())
-				&& rule.contains_src_port(src.port())
-				&& rule.contains_dst_port(dst.port)
-				&& rule.dst_hosts.contains(&dst.dest)
-			{
+			if rule.check_matched(inbound_ind, src, dst) {
 				return rule.outbound_ind;
 			}
 		}
-
 		Some(0)
 	}
 }
@@ -74,9 +68,9 @@ pub struct Builder {
 
 impl Builder {
 	/// Creates a new [`Router`].
-	/// 
+	///
 	/// # Errors
-	/// 
+	///
 	/// Returns [`Error`] if there are one or multiple rules contains error.
 	pub fn build(
 		self,

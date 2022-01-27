@@ -1,2 +1,7 @@
 [files]
-extend-exclude = ["*.dat", "Cargo.lock", "*.csr"]
+extend-exclude = [
+    "*.dat",
+    "Cargo.lock",
+    "*.csr",
+    "ladder_lib/src/router/protos/*",
+]

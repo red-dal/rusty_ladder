@@ -53,7 +53,7 @@ const UDP_DATAGRAM_BUFFER_SIZE: usize = 64;
 
 pub async fn dispatch(
 	stream: DatagramStream,
-	inbound: &super::Inbound,
+	inbound_tag: Tag,
 	inbound_ind: usize,
 	inbound_bind_addr: SocketAddr,
 	server: &super::Server,
@@ -68,12 +68,8 @@ pub async fn dispatch(
 	let (mut read_half, mut write_half) = (stream.read_half, stream.write_half);
 	let (inbound_sender, mut inbound_receiver) = mpsc::channel(UDP_DATAGRAM_BUFFER_SIZE);
 
-	let (dispatcher, guard_task) = Dispatcher::new(
-		inbound.tag.clone(),
-		inbound_sender,
-		monitor,
-		session_timeout,
-	);
+	let (dispatcher, guard_task) =
+		Dispatcher::new(inbound_tag, inbound_sender, monitor, session_timeout);
 
 	// Read data from inbound, and send to outbound
 	let send_task = async move {

@@ -34,6 +34,7 @@ pub mod protocol;
 pub mod proxy;
 pub mod router;
 pub mod server;
+pub mod network;
 
 #[cfg(test)]
 mod test_utils;

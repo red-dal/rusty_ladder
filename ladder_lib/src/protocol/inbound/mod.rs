@@ -21,7 +21,7 @@ use super::{
 	common::{AsyncReadWrite, GetProtocolName},
 	BufBytesStream,
 };
-use crate::{prelude::*, protocol::outbound};
+use crate::{network, prelude::*, protocol::outbound};
 use async_trait::async_trait;
 use std::{
 	fmt::{self, Formatter},
@@ -32,9 +32,8 @@ use std::{
 pub mod udp;
 
 #[derive(Debug)]
-pub struct StreamInfo {
-	pub peer_addr: SocketAddr,
-	pub local_addr: SocketAddr,
+pub struct SessionInfo {
+	pub addr: network::Addrs,
 }
 
 // TODO: More description
@@ -43,7 +42,7 @@ pub trait TcpAcceptor: GetProtocolName {
 	async fn accept_tcp<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
-		info: Option<StreamInfo>,
+		info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError>;
 }
 

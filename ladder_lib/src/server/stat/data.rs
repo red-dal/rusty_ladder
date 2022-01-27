@@ -37,7 +37,7 @@ pub struct SessionBasicInfo {
 	pub inbound_tag: Tag,
 	pub start_time: SystemTime,
 	pub from: SocketAddr,
-	pub net: Network
+	pub net: Network,
 }
 
 #[derive(Debug, Clone)]

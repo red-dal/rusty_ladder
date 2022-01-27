@@ -17,8 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use futures::Future;
-
 use super::{
 	data::{Connection, CounterValue, SessionState},
 	Id, Network, SessionBasicInfo, Snapshot, Tag,
@@ -31,6 +29,7 @@ use crate::{
 	},
 	utils::relay::Counter,
 };
+use futures::Future;
 use parking_lot::Mutex;
 use std::{
 	borrow::Cow,
@@ -244,8 +243,8 @@ impl Internal {
 
 #[derive(Clone)]
 pub struct SessionHandle {
-	pub monitor: Monitor,
-	pub conn_id: Id,
+	monitor: Monitor,
+	conn_id: Id,
 }
 
 impl SessionHandle {
@@ -262,6 +261,12 @@ impl SessionHandle {
 
 	pub fn set_dead(&self, end_time: SystemTime) {
 		self.monitor.0.lock().set_dead(self.conn_id, end_time);
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn monitor(&self) -> &Monitor {
+		&self.monitor
 	}
 }
 

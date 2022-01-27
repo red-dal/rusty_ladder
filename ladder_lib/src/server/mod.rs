@@ -22,6 +22,7 @@ mod builder;
 #[cfg(feature = "local-dns")]
 pub mod dns;
 mod error;
+mod global;
 pub mod inbound;
 pub mod outbound;
 mod proxy_context;
@@ -31,8 +32,9 @@ pub mod stat;
 mod udp;
 
 pub use api::Api;
-pub use builder::{BuildError, Builder};
-pub use error::Error;
+pub use builder::Builder;
+pub use error::{Building as BuildError, Server as Error};
+pub use global::Global;
 pub use inbound::Inbound;
 pub use outbound::Outbound;
 
@@ -41,25 +43,19 @@ use crate::{
 	router::{PlainRule, Router, RuleError},
 	Monitor,
 };
-use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 #[derive(Default)]
 pub struct Server {
-	pub inbounds: Vec<Inbound>,
+	pub inbounds: Vec<Arc<Inbound>>,
 	pub outbounds: Vec<Outbound>,
 	pub router: Router,
 	pub api: Api,
-	inbound_tags: HashMap<Tag, usize>,
-	outbound_tags: HashMap<Tag, usize>,
 	#[cfg(feature = "local-dns")]
 	pub dns: Option<dns::Config>,
-	// Timeouts
-	/// TCP connection will be dropped if it cannot be established within this amount of time.
-	dial_tcp_timeout: Duration, 
-	outbound_handshake_timeout: Duration,
-	relay_timeout_secs: usize,
-	#[cfg(feature = "use-udp")]
-	udp_session_timeout: Duration,
+	pub global: Global,
+	inbound_tags: HashMap<Tag, usize>,
+	outbound_tags: HashMap<Tag, usize>,
 }
 
 impl Server {
@@ -69,7 +65,7 @@ impl Server {
 	///
 	/// Will return `Err` if there are any duplicate tag in `inbounds` or `outbounds`.
 	pub fn new(
-		inbounds: Vec<Inbound>,
+		inbounds: Vec<Arc<Inbound>>,
 		outbounds: Vec<Outbound>,
 	) -> Result<Self, Cow<'static, str>> {
 		fn process(
@@ -133,7 +129,9 @@ impl Server {
 
 	#[must_use]
 	pub fn get_inbound(&self, tag: &str) -> Option<&Inbound> {
-		self.inbound_tags.get(tag).map(|ind| &self.inbounds[*ind])
+		self.inbound_tags
+			.get(tag)
+			.map(|ind| self.inbounds[*ind].as_ref())
 	}
 
 	#[must_use]

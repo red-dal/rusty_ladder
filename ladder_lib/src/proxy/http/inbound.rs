@@ -25,7 +25,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{
-			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
+			AcceptError, AcceptResult, FinishHandshake, HandshakeError, SessionInfo, TcpAcceptor,
 		},
 		outbound::Error as OutboundError,
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
@@ -100,7 +100,7 @@ impl TcpAcceptor for Settings {
 	async fn accept_tcp<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
-		_info: Option<StreamInfo>,
+		_info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		let mut stream = self.transport.accept(stream).await?;
 		let (mut req, leftover) = match read_request(&mut stream).await {

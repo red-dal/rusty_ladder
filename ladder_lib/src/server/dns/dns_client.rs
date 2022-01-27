@@ -230,7 +230,7 @@ async fn create_transport_stream_timedout(
 		debug!("Connecting to DNS server '{}'", addr);
 	}
 
-	let timeout_duration = ctx.outbound_handshake_timeout;
+	let timeout_duration = ctx.global.outbound_handshake_timeout;
 	let task = async move {
 		// Raw TCP or outbound stream
 		let stream = if let Some(outbound) = outbound {

@@ -17,99 +17,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{inbound, outbound, Api, Server};
+use super::{inbound, outbound, Api, BuildError, Server};
 use crate::{prelude::*, router};
-use std::{collections::HashMap, time::Duration};
+use inbound::Inbound;
+use outbound::Outbound;
+use std::collections::HashMap;
 
 #[cfg(feature = "local-dns")]
 use super::dns;
-
-#[derive(Debug, thiserror::Error)]
-pub enum BuildError {
-	#[error("tag '{tag}' on inbound '{ind}' already exists")]
-	InboundTagAlreadyExists { ind: usize, tag: Tag },
-	#[error("tag '{tag}' on outbound '{ind}' already exists")]
-	OutboundTagAlreadyExists { ind: usize, tag: Tag },
-	#[error("error on inbound '{ind}' ({err})")]
-	Inbound { ind: usize, err: BoxStdErr },
-	#[error("error on outbound '{ind}' ({err})")]
-	Outbound { ind: usize, err: BoxStdErr },
-	#[error("router error ({0})")]
-	Router(#[from] router::Error),
-	#[error("api error ({0})")]
-	Api(BoxStdErr),
-	#[error("value of '{0}' cannot be zero")]
-	ValueIsZero(Cow<'static, str>),
-}
-
-const fn default_dial_tcp_timeout_ms() -> u64 {
-	10_000
-}
-
-const fn default_outbound_handshake_timeout_ms() -> u64 {
-	20_000
-}
-
-const fn default_relay_timeout_secs() -> usize {
-	300
-}
-
-#[cfg(feature = "use-udp")]
-const fn default_udp_session_timeout_ms() -> u64 {
-	20_000
-}
-
-#[derive(Debug)]
-#[cfg_attr(
-	feature = "use_serde",
-	derive(serde::Deserialize),
-	serde(deny_unknown_fields)
-)]
-pub struct Global {
-	/// TCP connection will be dropped if it cannot be established within
-	/// this amount of time.
-	///
-	/// Default: 10000
-	#[cfg_attr(feature = "use_serde", serde(default = "default_dial_tcp_timeout_ms"))]
-	pub dial_tcp_timeout_ms: u64,
-	/// Outbound handshake will be dropped if it cannot be completed within
-	/// this amount of time.
-	///
-	/// Default: 20000
-	#[cfg_attr(
-		feature = "use_serde",
-		serde(default = "default_outbound_handshake_timeout_ms")
-	)]
-	pub outbound_handshake_timeout_ms: u64,
-	/// Session will be dropped if there are no bytes transferred within
-	/// this amount of time.
-	///
-	/// Defaults: 300
-	#[cfg_attr(feature = "use_serde", serde(default = "default_relay_timeout_secs"))]
-	pub relay_timeout_secs: usize,
-	/// Udp socket/tunnel session will be dropped if there is no read or write for more than
-	/// this amount of time.
-	///
-	/// Defaults: 20000
-	#[cfg(feature = "use-udp")]
-	#[cfg_attr(
-		feature = "use_serde",
-		serde(default = "default_udp_session_timeout_ms")
-	)]
-	pub udp_session_timeout_ms: u64,
-}
-
-impl Default for Global {
-	fn default() -> Self {
-		Self {
-			dial_tcp_timeout_ms: default_dial_tcp_timeout_ms(),
-			outbound_handshake_timeout_ms: default_outbound_handshake_timeout_ms(),
-			relay_timeout_secs: default_relay_timeout_secs(),
-			#[cfg(feature = "use-udp")]
-			udp_session_timeout_ms: default_udp_session_timeout_ms(),
-		}
-	}
-}
 
 #[derive(Debug, Default)]
 #[cfg_attr(
@@ -128,7 +43,7 @@ pub struct Builder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub dns: Option<dns::Config>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub global: Global,
+	pub global: super::global::Builder,
 }
 
 impl Builder {
@@ -175,39 +90,36 @@ impl Builder {
 			self.router.build(find_inbound, find_outbound)?
 		};
 
-		let mut inbounds = Vec::with_capacity(self.inbounds.len());
-		for (ind, builder) in self.inbounds.into_iter().enumerate() {
-			inbounds.push(
-				builder
+		let inbounds: Result<Vec<Arc<Inbound>>, BuildError> = self
+			.inbounds
+			.into_iter()
+			.enumerate()
+			.map(|(ind, inbound_builder)| {
+				inbound_builder
 					.build()
-					.map_err(|err| BuildError::Inbound { ind, err })?,
-			);
-		}
+					.map(Arc::new)
+					.map_err(|err| BuildError::Inbound { ind, err })
+			})
+			.collect();
+		let inbounds = inbounds?;
 
-		let mut outbounds = Vec::with_capacity(self.outbounds.len());
-		for (ind, builder) in self.outbounds.into_iter().enumerate() {
-			outbounds.push(
-				builder
+		let outbounds: Result<Vec<Outbound>, BuildError> = self
+			.outbounds
+			.into_iter()
+			.enumerate()
+			.map(|(ind, outbound_builder)| {
+				outbound_builder
 					.build()
-					.map_err(|err| BuildError::Outbound { ind, err })?,
-			);
-		}
+					.map_err(|err| BuildError::Outbound { ind, err })
+			})
+			.collect();
+		let outbounds = outbounds?;
 
 		if let Api::WebApi { secret, addr: _ } = &self.api {
 			if secret.is_empty() {
 				return Err(BuildError::Api("web API secret cannot be empty".into()));
 			}
 		}
-
-		check_zero(self.global.dial_tcp_timeout_ms, "dial_tcp_timeout_ms")?;
-		check_zero(
-			self.global.outbound_handshake_timeout_ms,
-			"outbound_handshake_timeout_ms",
-		)?;
-		check_zero_usize(self.global.relay_timeout_secs, "relay_timeout_secs")?;
-
-		#[cfg(feature = "use-udp")]
-		check_zero(self.global.udp_session_timeout_ms, "udp_session_timeout_ms")?;
 
 		Ok(Server {
 			inbounds,
@@ -218,29 +130,7 @@ impl Builder {
 			dns: self.dns,
 			inbound_tags,
 			outbound_tags,
-			dial_tcp_timeout: Duration::from_millis(self.global.dial_tcp_timeout_ms),
-			outbound_handshake_timeout: Duration::from_millis(
-				self.global.outbound_handshake_timeout_ms,
-			),
-			relay_timeout_secs: self.global.relay_timeout_secs,
-			#[cfg(feature = "use-udp")]
-			udp_session_timeout: Duration::from_millis(self.global.udp_session_timeout_ms),
+			global: self.global.build()?,
 		})
-	}
-}
-
-/// Returns Err([`BuildError::ValueIsZero`]) if `val` is zero.
-#[inline]
-fn check_zero_usize(val: usize, val_name: &'static str) -> Result<usize, BuildError> {
-	check_zero(val as u64, val_name).map(|_| val)
-}
-
-/// Returns Err([`BuildError::ValueIsZero`]) if `val` is zero.
-#[inline]
-fn check_zero(val: u64, val_name: &'static str) -> Result<u64, BuildError> {
-	if val > 0 {
-		Ok(val)
-	} else {
-		Err(BuildError::ValueIsZero(Cow::Borrowed(val_name)))
 	}
 }

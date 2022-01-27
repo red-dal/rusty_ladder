@@ -17,13 +17,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use crate::{prelude::*, protocol::GetProtocolName, utils::OneOrMany};
+use super::{
+	stat::{Id, RegisterArgs, SessionHandle},
+	Error,
+};
+use crate::{
+	network,
+	prelude::*,
+	protocol::{AsyncReadWrite, GetProtocolName},
+	utils::OneOrMany,
+	Monitor,
+};
+use std::{future::Future, time::SystemTime};
 
 #[ladder_lib_macro::impl_variants(Details)]
 mod details {
 	use crate::{
 		protocol::{
-			inbound::{AcceptError, AcceptResult, StreamInfo, TcpAcceptor},
+			inbound::{AcceptError, AcceptResult, SessionInfo, TcpAcceptor},
 			AsyncReadWrite, GetProtocolName, Network,
 		},
 		proxy,
@@ -58,7 +69,7 @@ mod details {
 		async fn accept_tcp<'a>(
 			&'a self,
 			stream: Box<dyn AsyncReadWrite>,
-			info: Option<StreamInfo>,
+			info: SessionInfo,
 		) -> Result<AcceptResult<'a>, AcceptError> {
 		}
 	}
@@ -114,9 +125,9 @@ mod details_builder {
 
 	impl DetailsBuilder {
 		/// Create a new [`Details`].
-		/// 
+		///
 		/// # Errors
-		/// 
+		///
 		/// Returns an error if the inner type failed to build.
 		#[implement(map_into)]
 		pub fn build(self) -> Result<Details, BoxStdErr> {}
@@ -141,8 +152,8 @@ impl Default for ErrorHandlingPolicy {
 
 pub struct Inbound {
 	pub tag: Tag,
-	pub addr: OneOrMany<SocketAddr>,
 	pub settings: Details,
+	pub network: network::Config,
 	pub err_policy: ErrorHandlingPolicy,
 }
 
@@ -152,6 +163,141 @@ impl Inbound {
 	pub fn protocol_name(&self) -> &'static str {
 		self.settings.protocol_name()
 	}
+
+	/// Accept and handle byte stream request forever.
+	///
+	/// # Errors
+	///
+	/// Returns an [`Error`] if there are any invalid configurations or IO errors.
+	///
+	/// Errors occurred in `callback` will not return an [`Error`].
+	pub async fn serve(
+		self: &Arc<Self>,
+		inbound_ind: usize,
+		monitor: Option<Monitor>,
+		callback: impl 'static + Callback,
+	) -> Result<(), Error> {
+		let callback = Arc::new(callback);
+		let mut acceptor = self.network.bind().await?;
+		loop {
+			let callback = callback.clone();
+			let ar = acceptor.accept().await?;
+			let monitor = monitor.clone();
+			// randomly generated connection ID
+			let conn_id = rand::thread_rng().next_u64();
+			let inbound = self.clone();
+			tokio::spawn(async move {
+				let stream = ar.stream;
+				let from = ar.addr.get_peer();
+				let stat_handle = monitor.as_ref().map(|m| {
+					m.register_tcp_session(RegisterArgs {
+						conn_id,
+						inbound_ind,
+						inbound_tag: inbound.tag.clone(),
+						start_time: SystemTime::now(),
+						from,
+					})
+				});
+				if let Err(e) = callback
+					.run(stat_handle.clone(), stream, ar.addr, conn_id)
+					.await
+				{
+					error!(
+						"Error occurred when serving {} inbound '{}': {} ",
+						inbound.protocol_name(),
+						inbound.tag,
+						e
+					);
+				}
+				// kill connection in the monitor
+				let end_time = SystemTime::now();
+				if let Some(stat_handle) = stat_handle {
+					stat_handle.set_dead(end_time);
+				}
+			});
+		}
+	}
+}
+
+pub trait Callback: Send + Sync {
+	type Fut: Future<Output = Result<(), Error>> + Send;
+
+	fn run(
+		&self,
+		sh: Option<SessionHandle>,
+		stream: Box<dyn AsyncReadWrite>,
+		addr: network::Addrs,
+		conn_id: Id,
+	) -> Self::Fut;
+}
+
+#[cfg(feature = "use-udp")]
+mod udp_impl {
+	use super::Inbound;
+	use crate::{network, protocol::inbound::udp::DatagramStream, server::Error};
+	use futures::Future;
+	use std::net::SocketAddr;
+
+	pub trait UdpCallback: Send + Sync {
+		type Fut: Future<Output = Result<(), Error>> + Send;
+
+		fn run(&self, local_addr: &SocketAddr, ds: DatagramStream) -> Self::Fut;
+	}
+
+	impl Inbound {
+		/// Accept and handle datagram forever.
+		///
+		/// # Errors
+		///
+		/// Returns an [`Error`] if there are any invalid configurations or IO errors.
+		///
+		/// Errors occurred in `callback` will not return an [`Error`].
+		pub async fn serve_datagram<C>(&self, callback: C) -> Result<(), Error>
+		where
+			C: UdpCallback,
+		{
+			if let Some(acceptor) = self.settings.get_udp_acceptor() {
+				#[allow(irrefutable_let_patterns)]
+				let bind_addrs = if let network::Config::Net(conf) = &self.network {
+					&conf.addr
+				} else {
+					let msg = format!(
+						"Inbound {} '{}' wants UDP, but network is not raw",
+						self.protocol_name(),
+						self.tag
+					);
+					return Err(Error::Other(msg.into()));
+				};
+				let mut tasks = Vec::new();
+				for local_addr in bind_addrs.as_slice() {
+					let socket = tokio::net::UdpSocket::bind(local_addr)
+						.await
+						.map_err(|e| Error::Other(e.into()))?;
+					let ds = acceptor.accept_udp(socket).await.map_err(Error::Other)?;
+					let task = callback.run(local_addr, ds);
+					tasks.push(task);
+				}
+				futures::future::try_join_all(tasks).await?;
+			}
+			Ok(())
+		}
+	}
+}
+#[cfg(feature = "use-udp")]
+pub use udp_impl::UdpCallback;
+
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
+#[cfg_attr(feature = "use_serde", serde(rename_all = "lowercase"))]
+pub enum NetworkType {
+	Net,
+}
+
+impl Default for NetworkType {
+	#[inline]
+	fn default() -> Self {
+		NetworkType::Net
+	}
 }
 
 #[derive(Debug)]
@@ -159,11 +305,13 @@ impl Inbound {
 pub struct Builder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub tag: Tag,
-	pub addr: OneOrMany<SocketAddr>,
+	pub addr: OneOrMany<smol_str::SmolStr>,
 	#[cfg_attr(feature = "use_serde", serde(flatten))]
 	pub settings: DetailsBuilder,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub err_policy: ErrorHandlingPolicy,
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub network_type: NetworkType,
 }
 
 impl Builder {
@@ -174,10 +322,23 @@ impl Builder {
 	/// Returns an error if `self.settings` failed to build.
 	#[inline]
 	pub fn build(self) -> Result<Inbound, BoxStdErr> {
+		let network = match self.network_type {
+			NetworkType::Net => {
+				let addr: Result<Vec<SocketAddr>, String> = self
+					.addr
+					.into_iter()
+					.map(|s| {
+						SocketAddr::from_str(s.as_str())
+							.map_err(|e| format!("invalid address '{}' ({})", s, e))
+					})
+					.collect();
+				network::Config::Net(network::NetConfig { addr: addr? })
+			}
+		};
 		Ok(Inbound {
 			tag: self.tag,
-			addr: self.addr,
 			settings: self.settings.build()?,
+			network,
 			err_policy: self.err_policy,
 		})
 	}

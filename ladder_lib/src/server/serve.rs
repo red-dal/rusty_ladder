@@ -20,31 +20,29 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #[cfg(feature = "use-udp")]
 use super::udp;
 use super::{
-	inbound::ErrorHandlingPolicy,
-	stat::{Monitor, RegisterArgs, SessionHandle},
+	inbound::{Callback, ErrorHandlingPolicy},
+	stat::{Id, Monitor, SessionHandle},
 	Error, Inbound, Outbound, Server,
 };
 use crate::{
+	network,
 	prelude::*,
 	protocol::{
 		inbound::{
-			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
+			AcceptError, AcceptResult, FinishHandshake, HandshakeError, SessionInfo, TcpAcceptor,
 		},
 		outbound::{Error as OutboundError, TcpConnector},
-		BufBytesStream, GetProtocolName,
+		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	utils::{
 		relay::{Counter, Relay},
 		BytesCount,
 	},
 };
-use rand::{thread_rng, RngCore};
+use futures::{future::BoxFuture, FutureExt, TryFutureExt};
 use std::future::Future;
-use std::time::{Instant, SystemTime};
-use tokio::{
-	net::{TcpListener, TcpStream},
-	time::timeout,
-};
+use std::time::Instant;
+use tokio::time::timeout;
 
 impl Server {
 	pub(super) async fn priv_serve(
@@ -58,8 +56,6 @@ impl Server {
 		// Serving Web API
 		#[cfg(feature = "use-webapi")]
 		if let super::Api::WebApi { addr, secret } = &self.api {
-			use futures::FutureExt;
-
 			#[allow(clippy::option_if_let_else)]
 			let mon_ref = if let Some(m) = &mut monitor {
 				m
@@ -83,51 +79,67 @@ impl Server {
 
 		// Serve each inbound
 		for (inbound_ind, inbound) in self.inbounds.iter().enumerate() {
-			let server = self.clone();
 			let monitor = monitor.clone();
 			// Serving TCP
 			let tcp_task = {
-				let monitor = monitor.clone();
-				async move {
-					if let Err(err) = server
-						.handle_inbound_tcp(inbound_ind, monitor.clone())
-						.await
-					{
-						error!(
-							"Error happened on inbound '{}' on {}: {}",
-							inbound.tag, inbound.addr, err
-						);
-						return Err(err);
-					};
-					Ok(())
-				}
+				let callback = ServerCallback {
+					inbound: inbound.clone(),
+					server: self.clone(),
+					inbound_ind,
+					#[cfg(feature = "use-udp")]
+					udp_session_timeout: self.global.udp_session_timeout,
+				};
+				inbound
+					.serve(inbound_ind, monitor.clone(), callback)
+					.map_err(|e| Box::new(e) as BoxStdErr)
 			};
 			tasks.push(Box::pin(tcp_task));
 
 			// Serving UDP
 			#[cfg(feature = "use-udp")]
-			if let Some(acceptor) = inbound.settings.get_udp_acceptor() {
-				let session_timeout = self.udp_session_timeout;
-				for &bind_addr in inbound.addr.as_slice() {
-					warn!("Serving UDP on {} for inbound '{}'", bind_addr, inbound.tag);
-					let ctx = self.clone();
-					let sock = tokio::net::UdpSocket::bind(&bind_addr).await?;
-					let monitor = monitor.clone();
-					tasks.push(Box::pin(async move {
-						let stream = acceptor.accept_udp(sock).await?;
-						udp::dispatch(
-							stream,
-							inbound,
-							inbound_ind,
-							bind_addr,
-							ctx.as_ref(),
-							monitor,
-							session_timeout,
-						)
-						.await?;
-						Ok(())
-					}));
+			{
+				use crate::protocol::inbound::udp::DatagramStream;
+				struct Callback {
+					inbound_ind: usize,
+					inbound_tag: Tag,
+					monitor: Option<Monitor>,
+					server: Arc<Server>,
+					udp_session_timeout: std::time::Duration,
 				}
+
+				impl super::inbound::UdpCallback for Callback {
+					type Fut = BoxFuture<'static, Result<(), Error>>;
+
+					fn run(&self, local_addr: &SocketAddr, stream: DatagramStream) -> Self::Fut {
+						let server = self.server.clone();
+						let inbound_tag = self.inbound_tag.clone();
+						let inbound_ind = self.inbound_ind;
+						let local_addr = *local_addr;
+						let monitor = self.monitor.clone();
+						let udp_session_timeout = self.udp_session_timeout;
+						async move {
+							udp::dispatch(
+								stream,
+								inbound_tag,
+								inbound_ind,
+								local_addr,
+								&server,
+								monitor,
+								udp_session_timeout,
+							)
+							.await
+						}
+						.boxed()
+					}
+				}
+				let task = inbound.serve_datagram(Callback {
+					monitor,
+					inbound_ind,
+					inbound_tag: inbound.tag.clone(),
+					server: self.clone(),
+					udp_session_timeout: self.global.udp_session_timeout,
+				});
+				tasks.push(task.map_err(|e| Box::new(e) as BoxStdErr).boxed());
 			}
 		}
 		// Serving DNS
@@ -142,100 +154,114 @@ impl Server {
 		futures::future::try_join_all(tasks).await?;
 		Ok(())
 	}
+}
 
-	async fn handle_inbound_tcp(
-		self: Arc<Self>,
-		inbound_ind: usize,
-		monitor: Option<Monitor>,
-	) -> Result<(), BoxStdErr> {
-		let inbound = &self.inbounds[inbound_ind];
-		info!(
-			"Serving TCP on {} for inbound '{}'",
-			inbound.addr, inbound.tag
+struct ServerCallback {
+	server: Arc<Server>,
+	inbound: Arc<Inbound>,
+	inbound_ind: usize,
+	#[cfg(feature = "use-udp")]
+	udp_session_timeout: std::time::Duration,
+}
+
+impl ServerCallback {
+	fn priv_run(
+		&self,
+		sh: Option<SessionHandle>,
+		stream: Box<dyn AsyncReadWrite>,
+		addr: &network::Addrs,
+		conn_id: Id,
+	) -> impl Future<Output = Result<(), Error>> {
+		let conn_id_str = format_conn_id(conn_id, &self.inbound.tag);
+		// ------ handshake ------
+		let src = addr.get_peer();
+		warn!(
+			"{} Making {} handshake with incoming connection from {}.",
+			conn_id_str,
+			self.inbound.protocol_name(),
+			src,
 		);
 
-		let addrs = inbound.addr.as_slice();
-		let mut tasks = Vec::with_capacity(addrs.len());
-		for addr in addrs {
-			let listener = TcpListener::bind(addr).await?;
-			let server = self.clone();
-			let monitor = monitor.clone();
-			tasks.push(async move {
-				server
-					.handle_inbound_listener(inbound_ind, &listener, monitor)
-					.await
-			});
-		}
-		futures::future::try_join_all(tasks).await.map(|_err| ())
-	}
-
-	async fn handle_inbound_listener(
-		self: Arc<Self>,
-		inbound_ind: usize,
-		listener: &TcpListener,
-		monitor: Option<Monitor>,
-	) -> Result<(), BoxStdErr> {
-		loop {
-			let (tcp_stream, src_addr) = listener.accept().await?;
-			let monitor = monitor.clone();
-			// randomly generated connection ID
-			let conn_id = thread_rng().next_u64();
-			let server = self.clone();
-			#[cfg(feature = "use-udp")]
-			let udp_session_timeout = self.udp_session_timeout;
-			tokio::spawn(async move {
-				let stat_handle = monitor.as_ref().map(|m| {
-					m.register_tcp_session(RegisterArgs {
-						conn_id,
-						inbound_ind,
-						inbound_tag: server.inbounds[inbound_ind].tag.clone(),
-						start_time: SystemTime::now(),
-						from: src_addr,
-					})
-				});
-
-				{
-					let inbound = &server.inbounds[inbound_ind];
-					let session = InboundConnection {
-						server: &server,
-						inbound_ind,
-						inbound: &server.inbounds[inbound_ind],
-						conn_id_str: format_conn_id(conn_id, &inbound.tag),
-						stat_handle: stat_handle.clone(),
-						src: &src_addr,
-						#[cfg(feature = "use-udp")]
-						udp_session_timeout,
-					};
-					if let Err(e) = session.handle(tcp_stream).await {
-						error!("Error occurred when serving inbound: {} ", e);
+		let info = SessionInfo { addr: addr.clone() };
+		let inbound_ind = self.inbound_ind;
+		let inbound = self.inbound.clone();
+		let server = self.server.clone();
+		#[cfg(feature = "use-udp")]
+		let udp_session_timeout = self.udp_session_timeout;
+		async move {
+			let accept_res = match inbound.settings.accept_tcp(stream, info).await {
+				Ok(res) => res,
+				Err(e) => {
+					match e {
+						AcceptError::Io(e) => return Err(HandshakeError::Io(e).into()),
+						AcceptError::ProtocolSilentDrop((stream, e)) => {
+							match inbound.err_policy {
+								ErrorHandlingPolicy::Drop => {
+									// do nothing
+								}
+								ErrorHandlingPolicy::UnlimitedTimeout => {
+									// keep reading until the client drops
+									silent_drop(stream);
+								}
+							};
+							return Err(HandshakeError::Protocol(e).into());
+						}
+						AcceptError::TcpNotAcceptable => {
+							return Err(HandshakeError::TcpNotAcceptable.into())
+						}
+						AcceptError::UdpNotAcceptable => {
+							return Err(HandshakeError::UdpNotAcceptable.into())
+						}
+						AcceptError::Protocol(e) => return Err(HandshakeError::Protocol(e).into()),
 					}
 				}
+			};
 
-				// kill connection in the monitor
-				let end_time = SystemTime::now();
-				if let Some(stat_handle) = stat_handle {
-					stat_handle.set_dead(end_time);
+			match accept_res {
+				AcceptResult::Tcp(handshake_handler, dst) => {
+					StreamSession {
+						server: &server,
+						inbound: &inbound,
+						inbound_ind,
+						conn_id_str,
+						stat_handle: sh,
+						src: &src,
+						handshake_handler,
+						dst: &dst,
+					}
+					.run()
+					.await
 				}
-			});
+				#[cfg(feature = "use-udp")]
+				AcceptResult::Udp(inbound_stream) => {
+					let monitor = sh.as_ref().map(|h| h.monitor().clone());
+					udp::dispatch(
+						inbound_stream,
+						inbound.tag.clone(),
+						inbound_ind,
+						src,
+						&server,
+						monitor,
+						udp_session_timeout,
+					)
+					.await
+				}
+			}
 		}
 	}
+}
 
-	async fn try_new_outbound_tcp<'a>(
+impl Callback for ServerCallback {
+	type Fut = BoxFuture<'static, Result<(), Error>>;
+
+	fn run(
 		&self,
-		outbound: &Outbound,
-		outbound_ind: usize,
-		dst_addr: &SocksAddr,
-		stat_handle: &Option<SessionHandle>,
-	) -> Result<BufBytesStream, OutboundError> {
-		if let Some(stat_handle) = stat_handle {
-			stat_handle.set_connecting(outbound_ind, outbound.tag.clone(), dst_addr.clone());
-		}
-		timeout(
-			self.outbound_handshake_timeout,
-			outbound.settings.connect(dst_addr, self),
-		)
-		.await
-		.map_err(|_| OutboundError::new_timeout())?
+		sh: Option<SessionHandle>,
+		stream: Box<dyn AsyncReadWrite>,
+		addr: network::Addrs,
+		conn_id: Id,
+	) -> Self::Fut {
+		self.priv_run(sh, stream, &addr, conn_id).boxed()
 	}
 }
 
@@ -261,91 +287,21 @@ where
 	});
 }
 
-pub struct InboundConnection<'a> {
+pub struct StreamSession<'a> {
 	server: &'a Server,
 	inbound: &'a Inbound,
 	inbound_ind: usize,
 	conn_id_str: String,
 	stat_handle: Option<SessionHandle>,
 	src: &'a SocketAddr,
-	#[cfg(feature = "use-udp")]
-	udp_session_timeout: std::time::Duration,
+	handshake_handler: Box<dyn FinishHandshake + 'a>,
+	dst: &'a SocksAddr,
 }
 
-impl<'a> InboundConnection<'a> {
-	async fn handle(mut self, tcp_stream: TcpStream) -> Result<(), Error> {
-		let inbound = self.inbound;
-
-		// ------ handshake ------
-		warn!(
-			"{} Making {} handshake with incoming connection from {}.",
-			self.conn_id_str,
-			inbound.protocol_name(),
-			self.src,
-		);
-		let info = StreamInfo {
-			peer_addr: tcp_stream.peer_addr()?,
-			local_addr: tcp_stream.local_addr()?,
-		};
-		let accept_res = match inbound
-			.settings
-			.accept_tcp(Box::new(tcp_stream), Some(info))
-			.await
-		{
-			Ok(res) => res,
-			Err(e) => {
-				match e {
-					AcceptError::Io(e) => return Err(HandshakeError::Io(e).into()),
-					AcceptError::ProtocolSilentDrop((stream, e)) => {
-						match inbound.err_policy {
-							ErrorHandlingPolicy::Drop => {
-								// do nothing
-							}
-							ErrorHandlingPolicy::UnlimitedTimeout => {
-								// keep reading until the client drops
-								silent_drop(stream);
-							}
-						};
-						return Err(HandshakeError::Protocol(e).into());
-					}
-					AcceptError::TcpNotAcceptable => {
-						return Err(HandshakeError::TcpNotAcceptable.into())
-					}
-					AcceptError::UdpNotAcceptable => {
-						return Err(HandshakeError::UdpNotAcceptable.into())
-					}
-					AcceptError::Protocol(e) => return Err(HandshakeError::Protocol(e).into()),
-				}
-			}
-		};
-
-		match accept_res {
-			AcceptResult::Tcp(handshake_handler, dst) => {
-				return self.handle_tcp_accept(handshake_handler, &dst).await;
-			}
-			#[cfg(feature = "use-udp")]
-			AcceptResult::Udp(inbound_stream) => {
-				let session_timeout = self.udp_session_timeout;
-				let monitor = self.stat_handle.as_ref().map(|h| h.monitor.clone());
-				udp::dispatch(
-					inbound_stream,
-					inbound,
-					self.inbound_ind,
-					*self.src,
-					self.server,
-					monitor,
-					session_timeout,
-				)
-				.await
-			}
-		}
-	}
-
-	async fn handle_tcp_accept(
-		&mut self,
-		handshake_handler: Box<dyn FinishHandshake + 'a>,
-		dst: &SocksAddr,
-	) -> Result<(), Error> {
+impl<'a> StreamSession<'a> {
+	async fn run(self) -> Result<(), Error> {
+		let dst = self.dst;
+		let handshake_handler = self.handshake_handler;
 		debug!("{} Making outbound to '{}'.", self.conn_id_str, dst);
 		let (outbound, outbound_ind) = if let Some(ind) =
 			self.server
@@ -365,10 +321,17 @@ impl<'a> InboundConnection<'a> {
 			self.conn_id_str, route_str
 		);
 
-		let out_stream = self
-			.server
-			.try_new_outbound_tcp(outbound, outbound_ind, dst, &self.stat_handle)
-			.await;
+		let out_stream = {
+			if let Some(sh) = &self.stat_handle {
+				sh.set_connecting(outbound_ind, outbound.tag.clone(), self.dst.clone());
+			}
+			timeout(
+				self.server.global.outbound_handshake_timeout,
+				outbound.settings.connect(self.dst, self.server),
+			)
+			.await
+			.map_err(|_| OutboundError::new_timeout())?
+		};
 		let out_stream = match out_stream {
 			Ok(out_stream) => out_stream,
 			Err(err) => {
@@ -389,7 +352,7 @@ impl<'a> InboundConnection<'a> {
 			stat_handle: &self.stat_handle,
 			in_ps: in_stream,
 			out_ps: out_stream,
-			relay_timeout_secs: self.server.relay_timeout_secs,
+			relay_timeout_secs: self.server.global.relay_timeout_secs,
 		}
 		.run()
 		.await;

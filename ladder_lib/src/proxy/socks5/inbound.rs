@@ -25,7 +25,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{
-			AcceptError, AcceptResult, FinishHandshake, HandshakeError, StreamInfo, TcpAcceptor,
+			AcceptError, AcceptResult, FinishHandshake, HandshakeError, SessionInfo, TcpAcceptor,
 		},
 		outbound::Error as OutboundError,
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
@@ -149,7 +149,7 @@ impl TcpAcceptor for Settings {
 	async fn accept_tcp<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
-		info: Option<StreamInfo>,
+		info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		info!("Performing SOCKS5 handshake with client ({:?}).", info);
 		let stream = self.transport.accept(stream).await?;
@@ -234,8 +234,7 @@ impl TcpAcceptor for Settings {
 			CommandCode::Udp => {
 				#[cfg(feature = "use-udp")]
 				{
-					let info = info.expect("SteamInfo cannot be None for SOCKS5 UDP");
-					return self.handle_udp(stream, request, &mut buf, info).await;
+					return self.handle_udp(stream, request, &mut buf, &info.addr.local).await;
 				}
 				#[cfg(not(feature = "use-udp"))]
 				{
@@ -283,7 +282,6 @@ async fn reply_error<W: AsyncWrite + Unpin>(
 mod udp {
 	use super::{
 		reply_error, AcceptError, AcceptResult, Error, Reply, ReplyCode, Request, Settings,
-		StreamInfo,
 	};
 	use crate::{
 		prelude::BoxStdErr,
@@ -311,7 +309,7 @@ mod udp {
 			mut stream: BufBytesStream,
 			request: Request,
 			buf: &mut Vec<u8>,
-			info: StreamInfo,
+			local_addr: &SocketAddr,
 		) -> Result<AcceptResult<'_>, AcceptError> {
 			#[allow(irrefutable_let_patterns)]
 			if self.transport.is_none() {
@@ -346,8 +344,7 @@ mod udp {
 				"SOCKS5 client ask for UDP proxying. Datagrams will be sent to {}.",
 				target_addr
 			);
-			let (sock_builder, udp_relay_addr) =
-				SocketWrapperBuilder::new(info.local_addr.ip()).await?;
+			let (sock_builder, udp_relay_addr) = SocketWrapperBuilder::new(local_addr.ip()).await?;
 			// Reply immediately.
 			// TODO: Maybe add FinishHandshake for UDP later?
 			Reply {

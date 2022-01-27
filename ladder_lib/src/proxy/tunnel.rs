@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, StreamInfo, TcpAcceptor},
+		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, SessionInfo, TcpAcceptor},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, Network,
 	},
 };
@@ -41,9 +41,9 @@ pub struct Settings {
 
 impl Settings {
 	/// This is a helper method and will always return `Ok(Self)`.
-	/// 
+	///
 	/// # Errors
-	/// 
+	///
 	/// This method will never return any error.
 	#[inline]
 	pub fn build<E>(self) -> Result<Self, E> {
@@ -68,7 +68,7 @@ impl TcpAcceptor for Settings {
 	async fn accept_tcp<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
-		_info: Option<StreamInfo>,
+		_info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		if self.network.use_tcp() {
 			Ok(AcceptResult::Tcp(

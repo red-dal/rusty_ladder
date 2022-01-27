@@ -18,14 +18,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use crate::{
-	prelude::BoxStdErr,
-	protocol::{inbound, outbound},
+	prelude::{BoxStdErr, Tag},
+	protocol::{inbound, outbound}, router,
 };
 use std::io;
 use thiserror::Error as ThisError;
+use std::borrow::Cow;
 
 #[derive(Debug, ThisError)]
-pub enum Error {
+pub enum Server {
 	#[error("proxy outbound error ({0})")]
 	Outbound(#[from] outbound::Error),
 	#[error("proxy inbound error ({0})")]
@@ -34,4 +35,22 @@ pub enum Error {
 	Io(#[from] io::Error),
 	#[error("proxy error ({0})")]
 	Other(BoxStdErr),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Building {
+	#[error("tag '{tag}' on inbound '{ind}' already exists")]
+	InboundTagAlreadyExists { ind: usize, tag: Tag },
+	#[error("tag '{tag}' on outbound '{ind}' already exists")]
+	OutboundTagAlreadyExists { ind: usize, tag: Tag },
+	#[error("error on inbound '{ind}' ({err})")]
+	Inbound { ind: usize, err: BoxStdErr },
+	#[error("error on outbound '{ind}' ({err})")]
+	Outbound { ind: usize, err: BoxStdErr },
+	#[error("router error ({0})")]
+	Router(#[from] router::Error),
+	#[error("api error ({0})")]
+	Api(BoxStdErr),
+	#[error("value of '{0}' cannot be zero")]
+	ValueIsZero(Cow<'static, str>),
 }
