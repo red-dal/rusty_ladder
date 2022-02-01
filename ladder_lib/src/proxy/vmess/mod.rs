@@ -50,7 +50,7 @@ pub use utils::{Iv, Key, SecurityType};
 use request::{Command, Request};
 use response::Response;
 
-const PROTOCOL_NAME: &str = "vmess";
+pub const PROTOCOL_NAME: &str = "vmess";
 /// Max length of each payload.
 const MAX_PAYLOAD_LENGTH: usize = 16384; // 2 ^ 14
 

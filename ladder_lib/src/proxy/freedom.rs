@@ -26,6 +26,8 @@ use crate::{
 };
 use async_trait::async_trait;
 
+pub const PROTOCOL_NAME: &str = "freedom";
+
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct Settings {}
@@ -46,11 +48,31 @@ impl Settings {
 	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
 		None
 	}
+
+	/// Parse a URL with the following format:
+	/// ```plain
+	/// freedom://
+	/// ```
+	///
+	/// # Errors
+	/// Return an error if `url` does not match the above format.
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(url: &url::Url) -> Result<Settings, BoxStdErr> {
+		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
+		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
+		if url.host().is_some() {
+			return Err("URL must have an empty host".into());
+		}
+		if !url.path().is_empty() && url.path() != "/" {
+			return Err("URL must have an empty path".into());
+		}
+		Ok(Self {})
+	}
 }
 
 impl GetProtocolName for Settings {
 	fn protocol_name(&self) -> &'static str {
-		"freedom"
+		PROTOCOL_NAME
 	}
 }
 

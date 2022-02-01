@@ -25,13 +25,14 @@ use crate::{
 	},
 };
 
-const PROTOCOL_NAME: &str = "tunnel";
+pub const PROTOCOL_NAME: &str = "tunnel";
 
 fn default_network_tcp() -> Network {
 	Network::Tcp
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct Settings {
 	dst: SocksAddr,
@@ -48,6 +49,27 @@ impl Settings {
 	#[inline]
 	pub fn build<E>(self) -> Result<Self, E> {
 		Ok(self)
+	}
+
+	/// Parse a URL with the following format:
+	/// ```plain
+	/// tunnel://bind_addr:bind_port/dst
+	/// ```
+	/// where `dst` is percent-encoded string
+	/// that can be parsed into [`SocksAddr`].
+	///
+	/// # Errors
+	/// Return an error if `url` does not match the above format.
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
+		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
+		let dst_str = percent_encoding::percent_decode_str(url.path()).decode_utf8()?;
+		// Skip the first character '/'
+		let dst = SocksAddr::from_str(&dst_str[1..])?;
+		Ok(Self {
+			dst,
+			network: Network::Tcp,
+		})
 	}
 }
 
@@ -135,6 +157,40 @@ mod udp_impl {
 				sess.dst
 			);
 			self.send_to(buf, sess.src).await
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "parse-url")]
+	#[test]
+	fn test_parse_url() {
+		use super::{Network, Settings};
+		use std::str::FromStr;
+		use url::Url;
+
+		let data = [
+			(
+				"tunnel://127.0.0.1:22222/192.168.168.168%3A16816",
+				Settings {
+					dst: "192.168.168.168:16816".parse().unwrap(),
+					network: Network::Tcp,
+				},
+			),
+			(
+				"tunnel://127.0.0.1:22222/%5B%3A%3A1%5D%3A11111",
+				Settings {
+					dst: "[::1]:11111".parse().unwrap(),
+					network: Network::Tcp,
+				},
+			),
+		];
+
+		for (url, expected) in data {
+			let url = Url::from_str(url).unwrap();
+			let output = Settings::parse_url(&url).unwrap();
+			assert_eq!(expected, output);
 		}
 	}
 }

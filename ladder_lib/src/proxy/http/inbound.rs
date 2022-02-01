@@ -17,9 +17,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::utils::{
-	encode_auth, get_version, insert_headers, put_http_headers, put_request_head, read_http,
-	ReadError,
+use super::{
+	utils::{
+		encode_auth, get_version, insert_headers, put_http_headers, put_request_head, read_http,
+		ReadError,
+	},
+	PROTOCOL_NAME,
 };
 use crate::{
 	prelude::*,
@@ -38,6 +41,7 @@ use std::{
 	io,
 };
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(
 	feature = "use_serde",
@@ -66,6 +70,27 @@ impl SettingsBuilder {
 			.map(|(name, pass)| (name.as_str(), pass.as_str()));
 		Ok(Settings::new(users, transport))
 	}
+
+	/// Parse a URL with the following format:
+	/// ```plain
+	/// http://[user:pass@]bind_addr:bind_port/
+	/// ```
+	/// `user` and `pass` is the percent encoding username and password 
+	/// for proxy authentication.
+	///
+	/// # Errors
+	/// Return an error if `url` does not match the above format.
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
+		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
+		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
+		let users = crate::utils::url::get_user_pass(url)?.into_iter().collect();
+		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
+		Ok(SettingsBuilder {
+			users,
+			transport: transport::inbound::SettingsBuilder::default(),
+		})
+	}
 }
 
 pub struct Settings {
@@ -90,7 +115,7 @@ impl Settings {
 impl GetProtocolName for Settings {
 	#[inline]
 	fn protocol_name(&self) -> &'static str {
-		super::PROTOCOL_NAME
+		PROTOCOL_NAME
 	}
 }
 
@@ -404,4 +429,41 @@ fn parse_request(buf: &[u8]) -> Result<(http::Request<()>, usize), ReadError> {
 
 	trace!("HTTP request read: {:?}", req);
 	Ok((req, len))
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "parse-url")]
+	#[test]
+	fn test_parse_url() {
+		use super::SettingsBuilder;
+		use std::{collections::HashMap, str::FromStr};
+		use url::Url;
+
+		let data = [
+			(
+				"http://127.0.0.1:22222",
+				SettingsBuilder {
+					users: HashMap::new(),
+					transport: Default::default(),
+				},
+			),
+			(
+				"http://user:pass@127.0.0.1",
+				SettingsBuilder {
+					users: [("user", "pass")]
+						.iter()
+						.map(|(user, pass)| (user.to_string(), pass.to_string()))
+						.collect(),
+					transport: Default::default(),
+				},
+			),
+		];
+
+		for (url, expected) in data {
+			let url = Url::from_str(url).unwrap();
+			let output = SettingsBuilder::parse_url(&url).unwrap();
+			assert_eq!(expected, output);
+		}
+	}
 }

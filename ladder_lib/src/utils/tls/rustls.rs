@@ -42,7 +42,10 @@ impl Acceptor {
 			let key =
 				rustls::internal::pemfile::pkcs8_private_keys(&mut io::BufReader::new(key_file))
 					.map_err(|_| SslError::CannotParsePrivateKeyFile)?;
-			let key = key.into_iter().next().ok_or(ConfigError::EmptyKeyFile)?;
+			let key = key
+				.into_iter()
+				.next()
+				.ok_or_else(|| ConfigError::Other("empty key file".into()))?;
 			config.set_single_cert(cert, key).map_err(SslError::Other)?;
 			// config
 			// 	.set_single_cert_with_ocsp_and_sct(cert, key, vec![], vec![])
@@ -71,20 +74,20 @@ pub struct Connector {
 impl Connector {
 	pub fn new<'a>(
 		alpns: impl IntoIterator<Item = &'a [u8]>,
-		ca_file: &str,
+		ca_file: Option<&str>,
 	) -> Result<Self, ConfigError> {
 		let mut config = rustls::ClientConfig::new();
-		if ca_file.is_empty() {
-			config
-				.root_store
-				.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
-		} else {
+		if let Some(ca_file) = ca_file {
 			let ca_file = std::fs::File::open(ca_file)
 				.map_err(|e| SslError::CannotReadFile(e, ca_file.to_string()))?;
 			let (_added, _unsuitable) = config
 				.root_store
 				.add_pem_file(&mut std::io::BufReader::new(ca_file))
 				.map_err(|_| SslError::CannotParseCertificateFile)?;
+		} else {
+			config
+				.root_store
+				.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
 		}
 		let alpns = alpns.into_iter().map(<[u8]>::to_vec).collect::<Vec<_>>();
 		config.alpn_protocols = alpns;
@@ -111,14 +114,18 @@ impl Connector {
 	}
 }
 
-impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite for ClientStream<IO> {
+impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite
+	for ClientStream<IO>
+{
 	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
 		let (r, w) = tokio::io::split(*self);
 		(Box::new(r), Box::new(w))
 	}
 }
 
-impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite for ServerStream<IO> {
+impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite
+	for ServerStream<IO>
+{
 	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
 		let (r, w) = tokio::io::split(*self);
 		(Box::new(r), Box::new(w))

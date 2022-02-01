@@ -42,6 +42,12 @@ impl<T> OneOrMany<T> {
 			OneOrMany::Many(v) => v.as_slice(),
 		}
 	}
+
+	#[inline]
+	#[must_use]
+	pub fn new_one(val: T) -> Self {
+		Self::One([val])
+	}
 }
 
 impl<T> Deref for OneOrMany<T> {

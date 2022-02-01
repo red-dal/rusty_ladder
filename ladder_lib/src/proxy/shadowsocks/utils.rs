@@ -77,7 +77,7 @@ pub fn password_to_key(key_len: usize, password: &str) -> Bytes {
 	result.into()
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub enum Method {
 	#[cfg_attr(feature = "use_serde", serde(rename = "none"))]
@@ -88,6 +88,20 @@ pub enum Method {
 	Aes256Gcm,
 	#[cfg_attr(feature = "use_serde", serde(rename = "chacha20-poly1305"))]
 	Chacha20Poly1305,
+}
+
+impl Method {
+	#[inline]
+	#[must_use]
+	pub fn new_from_str(s: &str) -> Option<Self> {
+		Some(match s {
+			"none" => Method::None,
+			"aes-128-gcm" => Method::Aes128Gcm,
+			"aes-256-gcm" => Method::Aes256Gcm,
+			"chacha20-poly1305" => Method::Chacha20Poly1305,
+			_ => return None,
+		})
+	}
 }
 
 pub fn method_to_algo(method: Method) -> Option<Algorithm> {
@@ -129,4 +143,25 @@ pub fn key_to_session_key(key: &[u8], salt: &[u8], algo: Algorithm) -> Key {
 #[inline]
 pub fn salt_len(algo: Algorithm) -> usize {
 	algo.key_size().get().into()
+}
+
+#[cfg(feature = "parse-url")]
+pub(super) fn get_method_password(url: &url::Url) -> Result<(Method, String), BoxStdErr> {
+	// Format:
+	// ss://userinfo@host:port
+	//
+	// where userinfo is base64(method ":" password)
+	// Currently plugin is not supported so path must be empty.
+	//
+	// Read more at https://shadowsocks.org/en/wiki/SIP002-URI-Scheme.html
+
+	if url.password().is_some() {
+		return Err("Shadowsocks URL should not have a password".into());
+	}
+	let userinfo = url.username();
+	let userinfo_str = String::from_utf8(base64::decode(userinfo)?)?;
+	let (method_str, password) = userinfo_str.split_once(':').ok_or("invalid userinfo")?;
+	let method =
+		Method::new_from_str(method_str).ok_or_else(|| format!("unknown method '{}'", method_str))?;
+	Ok((method, password.into()))
 }

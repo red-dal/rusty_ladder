@@ -292,7 +292,7 @@ impl Outbound {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct OutboundBuilder {
 	/// HTTP headers.
@@ -359,6 +359,7 @@ impl Inbound {
 	}
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug, Clone)]
 #[cfg_attr(
 	feature = "use_serde",

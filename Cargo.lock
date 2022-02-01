@@ -979,6 +979,7 @@ dependencies = [
  "num_enum",
  "openssl",
  "parking_lot",
+ "percent-encoding",
  "protobuf",
  "protobuf-codegen-pure",
  "rand",
@@ -999,6 +1000,7 @@ dependencies = [
  "toml",
  "trust-dns-client",
  "trust-dns-server",
+ "url",
  "uuid",
  "warp",
  "webpki 0.21.4",
@@ -1663,6 +1665,7 @@ dependencies = [
  "tokio",
  "toml",
  "tui",
+ "url",
 ]
 
 [[package]]

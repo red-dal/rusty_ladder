@@ -57,6 +57,9 @@ use crate::{
 use async_trait::async_trait;
 use sha2::{Digest, Sha224};
 
+pub const PROTOCOL_NAME: &str = "trojan";
+
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct SettingsBuilder {
@@ -78,6 +81,47 @@ impl SettingsBuilder {
 			addr: self.addr,
 			transport: self.transport.build()?,
 		})
+	}
+
+	/// Parse a URL with the following format:
+	/// ```plain
+	/// trojan://pass@host[:port]
+	/// ```
+	/// where `pass` is the password used in trojan,
+	/// `host` and `port` is the domain/IP and port for proxy server.
+	///
+	/// If port is not specified, 443 will be used instead.
+	///
+	/// # Errors
+	/// Return an error if `url` does not match the above format.
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(#[allow(unused_variables)] url: &url::Url) -> Result<Self, BoxStdErr> {
+		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
+		{
+			const DEFAULT_PORT: u16 = 443;
+			crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
+			crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
+
+			let password = url.username();
+			if password.is_empty() {
+				return Err("Trojan password cannot be empty".into());
+			}
+			let addr = crate::utils::url::get_socks_addr(url, Some(DEFAULT_PORT))?;
+			let transport = crate::transport::tls::OutboundBuilder {
+				alpns: Vec::new(),
+				ca_file: None,
+			};
+
+			Ok(SettingsBuilder {
+				password: password.to_owned(),
+				addr,
+				transport: transport.into(),
+			})
+		}
+		#[cfg(not(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls")))]
+		{
+			Err("TLS transport must be enabled for Trojan".into())
+		}
 	}
 }
 
@@ -125,7 +169,7 @@ impl Settings {
 
 impl GetProtocolName for Settings {
 	fn protocol_name(&self) -> &'static str {
-		"trojan"
+		PROTOCOL_NAME
 	}
 }
 
@@ -359,4 +403,30 @@ fn password_to_hex(password: &[u8], buf: &mut impl BufMut) {
 	let hash = hasher.finalize();
 	let hex = format!("{:056x}", hash);
 	buf.put_slice(hex.as_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "parse-url")]
+	#[test]
+	fn test_parse_url() {
+		use super::SettingsBuilder;
+		use std::str::FromStr;
+		use url::Url;
+
+		let data = [(
+			"trojan://password@127.0.0.1:22222",
+			SettingsBuilder {
+				addr: "127.0.0.1:22222".parse().unwrap(),
+				transport: crate::transport::tls::OutboundBuilder::default().into(),
+				password: "password".into(),
+			},
+		)];
+
+		for (url, expected) in data {
+			let url = Url::from_str(url).unwrap();
+			let output = SettingsBuilder::parse_url(&url).unwrap();
+			assert_eq!(expected, output);
+		}
+	}
 }

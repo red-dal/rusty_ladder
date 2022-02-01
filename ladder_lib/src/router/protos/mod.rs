@@ -17,6 +17,4 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-#![allow(clippy::all)]
-#![allow(clippy::default_trait_access)]
 pub mod rules;

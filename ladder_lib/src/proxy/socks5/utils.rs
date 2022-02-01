@@ -93,7 +93,7 @@ impl ReplyCode {
 
 	#[inline]
 	#[must_use]
-	pub const fn val(self) -> u8{
+	pub const fn val(self) -> u8 {
 		self as u8
 	}
 }

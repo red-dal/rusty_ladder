@@ -27,6 +27,7 @@ use std::{
 	borrow::Cow,
 	fs::File,
 	io::{self, Read},
+	str::FromStr,
 	sync::Arc,
 };
 use structopt::StructOpt;
@@ -58,6 +59,16 @@ pub struct AppOptions {
 	/// Print version.
 	#[structopt(long)]
 	version: bool,
+
+	/// Set inbound URL. Using this will ignore '--config'.
+	/// '--inbound' and '--outbound' must be both set or both empty.
+	#[structopt(short, long)]
+	inbound: Option<String>,
+
+	/// Set outbound URL. Using this will ignore '--config'.
+	/// '--inbound' and '--outbound' must be both set or both empty.
+	#[structopt(short, long)]
+	outbound: Option<String>,
 }
 
 enum ConfigFormat {
@@ -108,7 +119,39 @@ enum Error {
 }
 
 fn serve(opts: &AppOptions) -> Result<(), Error> {
-	let conf = {
+	let conf = if opts.inbound.is_some() || opts.outbound.is_some() {
+		let inbound = {
+			let s = opts.inbound.as_ref().ok_or_else(|| {
+				Error::Input("`inbound` cannot be empty while `outbound` is not".into())
+			})?;
+			let url = url::Url::from_str(s).map_err(|e| {
+				Error::Input(format!("`inbound` is not a valid URL ({})", e).into())
+			})?;
+			ladder_lib::server::inbound::Builder::parse_url(&url)
+				.map_err(|e| Error::Input(format!("invalid inbound ({})", e).into()))?
+		};
+		let outbound = {
+			let s = opts.outbound.as_ref().ok_or_else(|| {
+				Error::Input("`outbound` cannot be empty while `inbound` is not".into())
+			})?;
+			let url = url::Url::from_str(s).map_err(|e| {
+				Error::Input(format!("`outbound` is not a valid URL ({})", e).into())
+			})?;
+			ladder_lib::server::outbound::Builder::parse_url(&url)
+				.map_err(|e| Error::Input(format!("invalid outbound ({})", e).into()))?
+		};
+		Config {
+			log: config::Log {
+				level: log::LevelFilter::Info,
+				output: String::new(),
+			},
+			server: ladder_lib::server::Builder {
+				inbounds: vec![inbound],
+				outbounds: vec![outbound],
+				..Default::default()
+			},
+		}
+	} else {
 		let format = if let Some(s) = &opts.format {
 			ConfigFormat::from_str(s).ok_or_else(|| {
 				Error::Input(format!("unknown config format from settings value '{}'", s).into())

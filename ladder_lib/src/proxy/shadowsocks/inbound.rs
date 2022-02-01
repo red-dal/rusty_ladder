@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{method_to_algo, tcp, utils::salt_len, Error, Method};
+use super::{method_to_algo, tcp, utils::salt_len, Error, Method, PROTOCOL_NAME};
 use crate::{
 	prelude::*,
 	protocol::{
@@ -31,6 +31,7 @@ use crate::{
 use bytes::Bytes;
 use rand::thread_rng;
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct SettingsBuilder {
@@ -53,8 +54,34 @@ impl SettingsBuilder {
 			self.transport.build()?,
 		))
 	}
+
+	/// Parse a URL with the following format:
+	/// ```plain
+	/// ss://userinfo@bind_addr:bind_port
+	/// ```
+	/// `userinfo` is `base64("method:password")`,
+	/// 
+	/// where `method` must be one of 
+	/// "none", "aes-128-gcm", "aes-256-gcm", "chacha20-poly1305".
+	/// 
+	/// Read more at <https://shadowsocks.org/en/wiki/SIP002-URI-Scheme.html>
+	///
+	/// # Errors
+	/// Return an error if `url` does not match the above format.
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
+		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
+		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
+		let (method, password) = super::utils::get_method_password(url)?;
+		Ok(Self {
+			method,
+			password,
+			transport: Default::default(),
+		})
+	}
 }
 
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 struct CryptoSettings {
 	password: Bytes,
 	algo: Algorithm,
@@ -68,7 +95,7 @@ pub struct Settings {
 impl GetProtocolName for Settings {
 	#[inline]
 	fn protocol_name(&self) -> &'static str {
-		super::PROTOCOL_NAME
+		PROTOCOL_NAME
 	}
 }
 
@@ -171,4 +198,30 @@ fn invalid_request<T>(
 	e: impl Into<Error>,
 ) -> Result<T, AcceptError> {
 	Err(AcceptError::new_protocol(stream, e.into()))
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "parse-url")]
+	#[test]
+	fn test_parse_url() {
+		use super::{Method, SettingsBuilder};
+		use std::str::FromStr;
+		use url::Url;
+
+		let data = [(
+			"ss://YWVzLTEyOC1nY206dGVzdA@192.168.100.1:8888#Example1",
+			SettingsBuilder {
+				method: Method::Aes128Gcm,
+				password: "test".to_owned(),
+				transport: Default::default(),
+			},
+		)];
+
+		for (url, expected) in data {
+			let url = Url::from_str(url).unwrap();
+			let output = SettingsBuilder::parse_url(&url).unwrap();
+			assert_eq!(expected, output);
+		}
+	}
 }

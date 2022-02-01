@@ -44,9 +44,11 @@ pub use lazy_write_half::LazyWriteHalf;
 mod one_or_more;
 pub use one_or_more::OneOrMany;
 
-pub use std::time::{SystemTime, UNIX_EPOCH};
-
-use std::{convert::TryFrom, io};
+use std::{
+	convert::TryFrom,
+	io,
+	time::{SystemTime, UNIX_EPOCH},
+};
 
 #[allow(dead_code)]
 #[inline]
@@ -114,3 +116,89 @@ pub(crate) trait ReadInt: std::io::Read {
 }
 
 impl<T> ReadInt for T where T: std::io::Read {}
+
+pub(crate) struct ListDisplay<'a, T>(pub &'a [T])
+where
+	T: std::fmt::Display;
+
+impl<T> std::fmt::Display for ListDisplay<'_, T>
+where
+	T: std::fmt::Display,
+{
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		use std::fmt::Write;
+		f.write_char('[')?;
+		for (index, value) in self.0.iter().enumerate() {
+			if index > 0 {
+				f.write_str(", ")?;
+			}
+			value.fmt(f)?;
+		}
+		f.write_char(']')?;
+		Ok(())
+	}
+}
+
+#[cfg(feature = "parse-url")]
+pub mod url {
+	use crate::{prelude::BoxStdErr, protocol::SocksAddr};
+	use url::Url;
+
+	pub fn check_empty_path(url: &Url, protocol_name: &str) -> Result<(), BoxStdErr> {
+		if !url.path().is_empty() && url.path() != "/" {
+			let msg = format!(
+				"{} URL must have an empty path, not '{}'",
+				protocol_name,
+				url.path()
+			);
+			return Err(msg.into());
+		}
+		Ok(())
+	}
+
+	pub fn check_scheme(url: &Url, protocol_name: &str) -> Result<(), BoxStdErr> {
+		if url.scheme() != protocol_name {
+			let msg = format!(
+				"wrong scheme '{}', should be '{}'",
+				url.scheme(),
+				protocol_name
+			);
+			return Err(msg.into());
+		}
+		Ok(())
+	}
+
+	#[allow(dead_code)]
+	pub fn get_user_pass(url: &Url) -> Result<Option<(String, String)>, BoxStdErr> {
+		Ok(
+			if let Some((user, pass)) = url.password().map(|pass| (url.username(), pass)) {
+				let user = percent_encoding::percent_decode_str(user)
+					.decode_utf8()
+					.map_err(|e| format!("cannot percent decode `user` ({})", e))?;
+				let pass = percent_encoding::percent_decode_str(pass)
+					.decode_utf8()
+					.map_err(|e| format!("cannot percent decode `pass` ({})", e))?;
+				Some((user.into(), pass.into()))
+			} else {
+				None
+			},
+		)
+	}
+
+	#[allow(dead_code)]
+	pub fn get_socks_addr(url: &Url, default_port: Option<u16>) -> Result<SocksAddr, BoxStdErr> {
+		let host = url.host().ok_or("URL must contains host")?;
+		let port = if let Some(port) = url.port() {
+			port
+		} else if let Some(dp) = default_port {
+			dp
+		} else {
+			return Err("url contains no port".into());
+		};
+		Ok(match host {
+			url::Host::Domain(name) => SocksAddr::new(name.parse()?, port),
+			url::Host::Ipv4(ip) => SocksAddr::new(ip.into(), port),
+			url::Host::Ipv6(ip) => SocksAddr::new(ip.into(), port),
+		})
+	}
+}

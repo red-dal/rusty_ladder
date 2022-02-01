@@ -25,7 +25,7 @@ mod utils;
 
 pub use utils::Error;
 
-const PROTOCOL_NAME: &str = "socks5";
+pub const PROTOCOL_NAME: &str = "socks5";
 
 #[cfg(test)]
 #[cfg(feature = "socks5-inbound")]

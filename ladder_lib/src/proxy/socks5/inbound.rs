@@ -17,9 +17,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::utils::{
-	check_version, AcceptableMethod, Authentication, CommandCode, Error, Reply, ReplyCode, Request,
-	SocksOrIoError, AUTH_FAILED, AUTH_SUCCESSFUL, SUB_VERS, VER5,
+use super::{
+	utils::{
+		check_version, AcceptableMethod, Authentication, CommandCode, Error, Reply, ReplyCode,
+		Request, SocksOrIoError, AUTH_FAILED, AUTH_SUCCESSFUL, SUB_VERS, VER5,
+	},
+	PROTOCOL_NAME,
 };
 use crate::{
 	prelude::*,
@@ -37,9 +40,13 @@ use std::{collections::HashMap, io};
 
 const HANDSHAKE_BUFFER_CAPACITY: usize = 512;
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
-#[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
-#[cfg_attr(feature = "use_serde", serde(deny_unknown_fields))]
+#[cfg_attr(
+	feature = "use_serde",
+	derive(serde::Deserialize),
+	serde(deny_unknown_fields)
+)]
 pub struct SettingsBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub users: HashMap<String, String>,
@@ -69,6 +76,29 @@ impl SettingsBuilder {
 			settings
 		};
 		Ok(settings)
+	}
+
+	/// Parse a URL with the following format:
+	/// ```plain
+	/// socks5://[user:pass@]bind_addr:bind_port
+	/// ```
+	/// where `user` and `pass` is the percent encoded 
+	/// username and password for proxy authentication.
+	///
+	/// # Errors
+	/// Return an error if `url` does not match the above format.
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
+		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
+		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
+		let users = crate::utils::url::get_user_pass(url)?
+			.into_iter()
+			.collect();
+		Ok(SettingsBuilder {
+			users,
+			transport: transport::inbound::SettingsBuilder::default(),
+			is_udp_enabled: false,
+		})
 	}
 }
 
@@ -139,7 +169,7 @@ impl Settings {
 impl GetProtocolName for Settings {
 	#[inline]
 	fn protocol_name(&self) -> &'static str {
-		super::PROTOCOL_NAME
+		PROTOCOL_NAME
 	}
 }
 
@@ -234,7 +264,9 @@ impl TcpAcceptor for Settings {
 			CommandCode::Udp => {
 				#[cfg(feature = "use-udp")]
 				{
-					return self.handle_udp(stream, request, &mut buf, &info.addr.local).await;
+					return self
+						.handle_udp(stream, request, &mut buf, &info.addr.local)
+						.await;
 				}
 				#[cfg(not(feature = "use-udp"))]
 				{
@@ -752,4 +784,43 @@ fn invalid_request<T>(
 		SocksOrIoError::Io(e) => AcceptError::Io(e),
 		SocksOrIoError::Socks(e) => AcceptError::new_protocol(Box::new(stream), e),
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "parse-url")]
+	#[test]
+	fn test_parse_url() {
+		use super::SettingsBuilder;
+		use std::{collections::HashMap, str::FromStr};
+		use url::Url;
+
+		let data = [
+			(
+				"socks5://127.0.0.1:22222",
+				SettingsBuilder {
+					users: HashMap::new(),
+					transport: Default::default(),
+					is_udp_enabled: false,
+				},
+			),
+			(
+				"socks5://user:pass@127.0.0.1",
+				SettingsBuilder {
+					users: [("user", "pass")]
+						.iter()
+						.map(|(user, pass)| (user.to_string(), pass.to_string()))
+						.collect(),
+					transport: Default::default(),
+					is_udp_enabled: false,
+				},
+			),
+		];
+
+		for (url, expected) in data {
+			let url = Url::from_str(url).unwrap();
+			let output = SettingsBuilder::parse_url(&url).unwrap();
+			assert_eq!(expected, output);
+		}
+	}
 }

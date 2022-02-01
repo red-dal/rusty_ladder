@@ -71,6 +71,7 @@ mod settings_builder {
 	use super::Settings;
 	use crate::{prelude::BoxStdErr, transport};
 
+	#[cfg_attr(test, derive(PartialEq, Eq))]
 	#[derive(Debug, Clone)]
 	#[cfg_attr(
 		feature = "use_serde",
@@ -101,6 +102,7 @@ impl Default for SettingsBuilder {
 	}
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 #[derive(Debug, Clone, Copy)]
 pub struct Empty;

@@ -17,8 +17,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::utils::{
-	encode_auth, get_version, insert_headers, put_request_head, read_http, ReadError,
+use super::{
+	utils::{encode_auth, get_version, insert_headers, put_request_head, read_http, ReadError},
+	PROTOCOL_NAME,
 };
 use crate::{
 	prelude::*,
@@ -30,6 +31,7 @@ use crate::{
 };
 use http::{header, Request, StatusCode};
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(
 	feature = "use_serde",
@@ -60,6 +62,33 @@ impl SettingsBuilder {
 			self.addr,
 			self.transport.build()?,
 		))
+	}
+
+	/// Parse a URL with the following format:
+	/// ```plain
+	/// http://[user:pass@]host[:port]/
+	/// ```
+	/// `user` and `pass` is the percent encoded username and password 
+	/// for proxy authentication.
+	///
+	/// `host` and `port` is the domain/IP and port of the proxy server.
+	/// If `port` is not specified, 1080 will be used instead.
+	///
+	/// # Errors
+	/// Return an error if `url` does not match the above format.
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
+		const DEFAULT_PORT: u16 = 1080;
+		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
+		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
+		let (user, pass) = crate::utils::url::get_user_pass(url)?.unwrap_or_default();
+		let addr = crate::utils::url::get_socks_addr(url, Some(DEFAULT_PORT))?;
+		Ok(Self {
+			user,
+			pass,
+			addr,
+			transport: transport::outbound::SettingsBuilder::default(),
+		})
 	}
 }
 
@@ -157,7 +186,7 @@ impl Settings {
 impl GetProtocolName for Settings {
 	#[inline]
 	fn protocol_name(&self) -> &'static str {
-		super::PROTOCOL_NAME
+		PROTOCOL_NAME
 	}
 }
 
@@ -271,4 +300,42 @@ fn parse_response(buf: &[u8]) -> Result<(http::Response<()>, usize), ReadError> 
 
 	trace!("HTTP response read: {:?}", resp);
 	Ok((resp, len))
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "parse-url")]
+	#[test]
+	fn test_parse_url() {
+		use super::SettingsBuilder;
+		use std::str::FromStr;
+		use url::Url;
+
+		let data = [
+			(
+				"http://127.0.0.1:22222",
+				SettingsBuilder {
+					user: String::new(),
+					pass: String::new(),
+					addr: "127.0.0.1:22222".parse().unwrap(),
+					transport: Default::default(),
+				},
+			),
+			(
+				"http://user:pass@127.0.0.1:22222",
+				SettingsBuilder {
+					user: "user".into(),
+					pass: "pass".into(),
+					addr: "127.0.0.1:22222".parse().unwrap(),
+					transport: Default::default(),
+				},
+			),
+		];
+
+		for (url, expected) in data {
+			let url = Url::from_str(url).unwrap();
+			let output = SettingsBuilder::parse_url(&url).unwrap();
+			assert_eq!(expected, output);
+		}
+	}
 }

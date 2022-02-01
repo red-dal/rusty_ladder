@@ -197,7 +197,7 @@ async fn connect_tls(
 			"DNS transport connected, establishing TLS connection to '{}'",
 			server_addr
 		);
-		let tls_stream = tls::Connector::new(vec![], "")?
+		let tls_stream = tls::Connector::new(vec![], None)?
 			.connect(stream, &server_addr)
 			.await?;
 		debug!("DNS over TLS connected");

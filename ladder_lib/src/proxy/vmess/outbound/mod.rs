@@ -22,7 +22,7 @@ mod tcp;
 mod udp;
 
 use super::utils::{Error, SecurityType};
-use super::{Command, HeaderMode, Request};
+use super::{Command, HeaderMode, Request, PROTOCOL_NAME};
 use crate::protocol::{AsyncReadWrite, BufBytesStream};
 use crate::{
 	prelude::*,
@@ -36,6 +36,7 @@ use crate::{
 use rand::{rngs::OsRng, thread_rng};
 use uuid::Uuid;
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(
 	feature = "use_serde",
@@ -99,6 +100,81 @@ impl SettingsBuilder {
 			sec: self.sec,
 			header_mode: mode,
 			transport: self.transport.build()?,
+		})
+	}
+
+	/// Parse a URL with the format stated in 
+	/// <https://github.com/v2fly/v2fly-github-io/issues/26>
+	///
+	/// # Errors
+	/// Return an error if `url` does not match the above format.
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
+		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+		fn make_ws_builder(url: &url::Url) -> transport::ws::OutboundBuilder {
+			let mut path = None;
+			let mut host = None;
+			for (key, value) in url.query_pairs() {
+				if key == "path" {
+					path = Some(value);
+				} else if key == "host" {
+					host = Some(value);
+				}
+			}
+			transport::ws::OutboundBuilder {
+				headers: Default::default(),
+				path: path.map_or_else(String::new, Into::into),
+				host: host.map_or_else(String::new, Into::into),
+				tls: None,
+			}
+		}
+
+		let addr = crate::utils::url::get_socks_addr(url, None)?;
+
+		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
+		let transport_str = url.username();
+		let transport: transport::outbound::SettingsBuilder = match transport_str {
+			"tcp" => transport::outbound::SettingsBuilder::default(),
+			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
+			"tls" => transport::tls::OutboundBuilder::default().into(),
+			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+			"ws" => make_ws_builder(url).into(),
+			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+			"ws+tls" => {
+				let mut builder = make_ws_builder(url);
+				builder.tls = Some(transport::tls::OutboundBuilder::default());
+				builder.into()
+			}
+			_ => return Err(format!("invalid transport string '{}'", transport_str).into()),
+		};
+		let uuid_authid = url.password().ok_or("VMess URL missing UUID")?;
+		let (id_str, auth_id_num) = if uuid_authid.len() <= 36 {
+			// UUID only
+			(uuid_authid, 0)
+		} else {
+			let (id_str, auth_id_str) = uuid_authid.split_at(36);
+			// Skip the first character '-'
+			let auth_id_str = auth_id_str
+				.strip_prefix('-')
+				.ok_or_else(|| format!("invalid auth id format '{}'", auth_id_str))?;
+
+			let auth_id_num = usize::from_str(auth_id_str)
+				.map_err(|_| format!("cannot parse '{}' into usize", auth_id_str))?;
+			(id_str, auth_id_num)
+		};
+		let id =
+			Uuid::from_str(id_str).map_err(|e| format!("invalid UUID '{}' ({})", id_str, e))?;
+
+		if auth_id_num > 0 {
+			return Err("cannot use authid other than 0, only AEAD header is supported".into());
+		}
+
+		Ok(Self {
+			addr,
+			id,
+			sec: SecurityType::Auto,
+			use_legacy_header: false,
+			transport,
 		})
 	}
 }
@@ -203,7 +279,7 @@ impl Settings {
 impl GetProtocolName for Settings {
 	#[inline]
 	fn protocol_name(&self) -> &'static str {
-		super::PROTOCOL_NAME
+		PROTOCOL_NAME
 	}
 }
 
@@ -351,6 +427,56 @@ mod udp_impl {
 			return Ok(SocketOrTunnelStream::Tunnel(udp::new_udp_stream(
 				read_half, write_half,
 			)));
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+
+	#[cfg(feature = "parse-url")]
+	#[test]
+	fn test_parse_url() {
+		use super::{SecurityType, SettingsBuilder};
+		use crate::transport;
+		use std::str::FromStr;
+		use url::Url;
+
+		let data = [
+			(
+				"vmess://tcp:2e09f64c-c967-4ce3-9498-fdcd8e39e04e-0@google.com:4433/?query=Value1#Connection2",
+				SettingsBuilder {
+					addr: "google.com:4433".parse().unwrap(),
+					id: "2e09f64c-c967-4ce3-9498-fdcd8e39e04e".parse().unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+					transport: Default::default(),
+				},
+			),
+			(
+				"vmess://ws+tls:7db04e8f-7cfc-46e0-9e18-d329c22ec353-0@myServer.com:12345/?path=%2FmyServerAddressPath%2F%E4%B8%AD%E6%96%87%E8%B7%AF%E5%BE%84%2F&host=www.myServer.com",
+				SettingsBuilder {
+					addr: "myServer.com:12345".parse().unwrap(),
+					id: "7db04e8f-7cfc-46e0-9e18-d329c22ec353".parse().unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+					transport: transport::outbound::SettingsBuilder::Ws(transport::ws::OutboundBuilder {
+						headers: Default::default(),
+						path: "/myServerAddressPath/中文路径/".into(),
+						host: "www.myServer.com".into(),
+						tls: Some(transport::tls::OutboundBuilder {
+							alpns: Vec::new(),
+							ca_file: None,
+						}),
+					}),
+				},
+			),
+		];
+
+		for (url, expected) in data {
+			let url = Url::from_str(url).unwrap();
+			let output = SettingsBuilder::parse_url(&url).unwrap();
+			assert_eq!(expected, output);
 		}
 	}
 }

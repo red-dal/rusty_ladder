@@ -38,7 +38,7 @@ mod utils;
 pub use utils::Method;
 use utils::{key_to_session_key, method_to_algo, password_to_key, Error};
 
-pub const PROTOCOL_NAME: &str = "shadowsocks";
+pub const PROTOCOL_NAME: &str = "ss";
 
 #[cfg(test)]
 #[cfg(any(feature = "shadowsocks-inbound-openssl", feature = "shadowsocks-inbound-ring"))]

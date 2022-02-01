@@ -38,9 +38,11 @@ impl Outbound {
 		addr: &SocksAddr,
 		context: &dyn ProxyContext,
 	) -> io::Result<Box<dyn AsyncReadWrite>> {
-		self.connect_stream(context.dial_tcp(addr).await?, addr).await.map(Into::into)
+		self.connect_stream(context.dial_tcp(addr).await?, addr)
+			.await
+			.map(Into::into)
 	}
-	
+
 	#[inline]
 	pub async fn connect_stream<IO>(
 		&self,
@@ -54,7 +56,7 @@ impl Outbound {
 	}
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(
 	feature = "use_serde",
 	derive(serde::Deserialize),
@@ -64,7 +66,7 @@ pub struct OutboundBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub alpns: Vec<SmolStr>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub ca_file: String,
+	pub ca_file: Option<String>,
 }
 
 impl OutboundBuilder {
@@ -76,9 +78,13 @@ impl OutboundBuilder {
 	pub fn build(self) -> Result<Outbound, ConfigError> {
 		debug!(
 			"Building TLS outbound with ca_file '{}', alpns '{:?}'",
-			self.ca_file, self.alpns
+			self.ca_file.as_deref().unwrap_or_default(),
+			self.alpns
 		);
-		let connector = Connector::new(self.alpns.iter().map(|s| s.as_bytes()), &self.ca_file)?;
+		let connector = Connector::new(
+			self.alpns.iter().map(|s| s.as_bytes()),
+			self.ca_file.as_deref(),
+		)?;
 		Ok(Outbound { connector })
 	}
 }
@@ -97,6 +103,7 @@ impl Inbound {
 	}
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug, Clone)]
 #[cfg_attr(
 	feature = "use_serde",
@@ -106,8 +113,8 @@ impl Inbound {
 pub struct InboundBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub alpns: Vec<SmolStr>,
-	pub cert_file: String,
-	pub key_file: String,
+	pub cert_file: Cow<'static, str>,
+	pub key_file: Cow<'static, str>,
 }
 
 impl InboundBuilder {
@@ -121,6 +128,12 @@ impl InboundBuilder {
 			"Building TLS inbound with cert_file '{}', key_file '{}', alpns '{:?}'",
 			self.cert_file, self.key_file, self.alpns
 		);
+		if self.cert_file.is_empty() {
+			return Err(ConfigError::Other("empty cert file".into()));
+		}
+		if self.key_file.is_empty() {
+			return Err(ConfigError::Other("empty key file".into()));
+		}
 		let acceptor = Acceptor::new(
 			&self.cert_file,
 			&self.key_file,

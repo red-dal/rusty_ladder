@@ -27,19 +27,19 @@ mod internal;
 pub use internal::{ClientStream, ServerStream, SslError};
 
 use crate::protocol::SocksAddr;
-use std::io;
+use std::{borrow::Cow, io};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-	#[error("empty key file")]
-	EmptyKeyFile,
 	#[error("empty alpns")]
 	EmptyAlpns,
 	#[error("alpn '{0:?}' too long")]
 	AlpnTooLong(Vec<u8>),
 	#[error("TLS error({0})")]
 	SslError(#[from] SslError),
+	#[error("{0}")]
+	Other(Cow<'static, str>),
 }
 
 pub struct Acceptor(internal::Acceptor);
@@ -66,7 +66,7 @@ pub struct Connector(internal::Connector);
 impl Connector {
 	pub fn new<'a>(
 		alpns: impl IntoIterator<Item = &'a [u8]>,
-		ca_file: &str,
+		ca_file: Option<&str>,
 	) -> Result<Self, ConfigError> {
 		internal::Connector::new(alpns, ca_file).map(Connector)
 	}

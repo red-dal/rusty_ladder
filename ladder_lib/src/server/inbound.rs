@@ -342,4 +342,82 @@ impl Builder {
 			err_policy: self.err_policy,
 		})
 	}
+
+	/// Parse a URL into [`Builder`].
+	///
+	/// # Errors
+	/// Return an error if
+	/// - `url` scheme does not match any of the protocol names
+	/// - `url` host is not an IP address
+	/// - the protocol does not support URL parsing
+	/// - `url` does not match the protocol's format
+	#[cfg(feature = "parse-url")]
+	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
+		use crate::proxy;
+		type ParseFunc = Box<dyn Fn(&url::Url) -> Result<DetailsBuilder, BoxStdErr>>;
+
+		let port = url.port().ok_or("URL must have a port")?;
+		let host = url.host().ok_or("URL must have a host")?;
+		let ip: std::net::IpAddr = match host {
+			url::Host::Domain(s) => s
+				.parse()
+				.map_err(|_| format!("URL host '{}' must be an IP", s))?,
+			url::Host::Ipv4(ip) => ip.into(),
+			url::Host::Ipv6(ip) => ip.into(),
+		};
+		let addr = SocketAddr::new(ip, port);
+
+		let mut parse_url_map = std::collections::HashMap::<&str, ParseFunc>::new();
+		// Tunnel
+		parse_url_map.insert(
+			proxy::tunnel::PROTOCOL_NAME,
+			Box::new(|url| proxy::tunnel::Settings::parse_url(url).map(Into::into)),
+		);
+		// SOCKS5
+		#[cfg(feature = "socks5-inbound")]
+		{
+			use proxy::socks5::{inbound::SettingsBuilder, PROTOCOL_NAME};
+			parse_url_map.insert(
+				PROTOCOL_NAME,
+				Box::new(|url| SettingsBuilder::parse_url(url).map(Into::into)),
+			);
+		}
+		// HTTP
+		#[cfg(feature = "http-inbound")]
+		{
+			use proxy::http::{inbound::SettingsBuilder, PROTOCOL_NAME};
+			parse_url_map.insert(
+				PROTOCOL_NAME,
+				Box::new(|url| SettingsBuilder::parse_url(url).map(Into::into)),
+			);
+		}
+		// SS
+		#[cfg(any(
+			feature = "shadowsocks-inbound-openssl",
+			feature = "shadowsocks-inbound-ring"
+		))]
+		{
+			use proxy::shadowsocks::{inbound::SettingsBuilder, PROTOCOL_NAME};
+			parse_url_map.insert(
+				PROTOCOL_NAME,
+				Box::new(|url| SettingsBuilder::parse_url(url).map(Into::into)),
+			);
+		}
+		let parse_url = parse_url_map.get(url.scheme()).ok_or_else(|| {
+			let valid_options = parse_url_map.keys().collect::<Vec<_>>();
+			format!(
+				"unknown protocol '{}', must be one of {}",
+				url.scheme(),
+				crate::utils::ListDisplay(valid_options.as_slice())
+			)
+		})?;
+		let settings = parse_url(url)?;
+		Ok(Self {
+			tag: url.fragment().map(Into::into).unwrap_or_default(),
+			addr: OneOrMany::new_one(Tag::from(addr.to_string())),
+			settings,
+			err_policy: Default::default(),
+			network_type: Default::default(),
+		})
+	}
 }

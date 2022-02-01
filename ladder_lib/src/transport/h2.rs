@@ -144,6 +144,7 @@ impl Outbound {
 	}
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct OutboundBuilder {
@@ -279,6 +280,7 @@ impl Inbound {
 	}
 }
 
+#[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug, Clone)]
 #[cfg_attr(
 	feature = "use_serde",

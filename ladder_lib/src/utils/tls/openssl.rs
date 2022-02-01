@@ -55,14 +55,9 @@ impl Acceptor {
 		}
 
 		// Set cert_file and key_file.
-		if !cert_file.is_empty() {
-			builder.set_certificate_chain_file(cert_file)?;
-			if key_file.is_empty() {
-				return Err(ConfigError::EmptyKeyFile);
-			}
-			builder.set_private_key_file(key_file, SslFiletype::PEM)?;
-			builder.check_private_key()?;
-		}
+		builder.set_certificate_chain_file(cert_file)?;
+		builder.set_private_key_file(key_file, SslFiletype::PEM)?;
+		builder.check_private_key()?;
 
 		Ok(Self(builder.build()))
 	}
@@ -86,7 +81,7 @@ pub struct Connector(SslConnector);
 impl Connector {
 	pub fn new<'a>(
 		alpns: impl IntoIterator<Item = &'a [u8]>,
-		ca_file: &str,
+		ca_file: Option<&str>,
 	) -> Result<Self, ConfigError> {
 		let mut builder = SslConnector::builder(SslMethod::tls_client())?;
 
@@ -94,7 +89,7 @@ impl Connector {
 		if !protocols.is_empty() {
 			builder.set_alpn_protos(&protocols)?;
 		}
-		if !ca_file.is_empty() {
+		if let Some(ca_file) = ca_file {
 			builder.set_ca_file(ca_file)?;
 		}
 
