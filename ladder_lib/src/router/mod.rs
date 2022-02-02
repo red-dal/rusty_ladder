@@ -24,8 +24,8 @@ mod protos;
 pub mod cidr;
 pub use cidr::{Cidr, Cidr4, Cidr6};
 
-mod rule;
-pub use rule::{Destination, DestinationContainer, Error as RuleError, Plain as PlainRule, Rule};
+pub mod rule;
+pub use rule::{Destination, DestinationContainer, Error as RuleError, Plain as PlainRule, Rule, Source};
 
 use crate::protocol::SocksAddr;
 use std::{

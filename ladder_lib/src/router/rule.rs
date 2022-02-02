@@ -588,6 +588,7 @@ impl SourceContainer {
 
 	/// Returns true if a source ip is allowed
 	#[inline]
+	#[must_use]
 	pub fn contains(&self, src_ip: &IpAddr) -> bool {
 		if self.ips.is_empty() && self.cidrs.is_empty() {
 			return true;

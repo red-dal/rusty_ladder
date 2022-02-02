@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![allow(clippy::default_trait_access)]
 
 use config::Config;
+use ladder_lib::router;
 use std::{
 	borrow::Cow,
 	fs::File,
@@ -38,6 +39,9 @@ type BoxStdErr = Box<dyn std::error::Error + Send + Sync>;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_CONF_FORMAT: ConfigFormat = ConfigFormat::Toml;
 
+const LAN_STR: &str = "$lan";
+const LOCALLOOP_STR: &str = "localloop";
+
 #[cfg(feature = "use-tui")]
 mod tui;
 
@@ -49,26 +53,52 @@ pub struct AppOptions {
 	tui: bool,
 
 	/// Set the format of the config file. Can be 'toml' (default) or 'json'.
-	#[structopt(short, long)]
+	///
+	/// This only works if '--config' is specified.
+	#[structopt(short, long, name = "CONF FORMAT")]
 	format: Option<String>,
 
 	/// Read config from file. STDIN will be used if not specified.
-	#[structopt(short, long)]
+	#[structopt(short, long, name = "CONF_PATH")]
 	config: Option<String>,
 
 	/// Print version.
 	#[structopt(long)]
 	version: bool,
 
-	/// Set inbound URL. Using this will ignore '--config'.
+	/// Set inbound URL.
+	///
+	/// Using this will ignore '--config'.
 	/// '--inbound' and '--outbound' must be both set or both empty.
-	#[structopt(short, long)]
+	#[structopt(short, long, name = "INBOUND_URL")]
 	inbound: Option<String>,
 
-	/// Set outbound URL. Using this will ignore '--config'.
+	/// Set outbound URL.
+	///
+	/// Using this will ignore '--config'.
 	/// '--inbound' and '--outbound' must be both set or both empty.
-	#[structopt(short, long)]
+	#[structopt(short, long, name = "OUTBOUND_URL")]
 	outbound: Option<String>,
+
+	/// Block request to these addresees (separated by ',')
+	///
+	/// Each address can be either an IP (like "127.0.0.1") or a subnet (like "127.0.0.0/8").
+	///
+	/// Some special addresses are reserved:
+	/// - "$lan": private network like 192.168.0.0/16
+	/// - "$localloop": local loop like 127.0.0.0/8
+	///
+	/// "$lan,$localloop" will be used if not set.
+	/// This only works if '--inbound' and '--outbound' is set.
+	#[structopt(long, verbatim_doc_comment, name = "BLOCK_LIST")]
+	block: Option<String>,
+
+	/// Set the log level. Must be one of ["debug", "info", "warn", "error"]
+	///
+	/// If not specified, "warn" will be used.
+	/// This only works if '--inbound' and '--outbound' is set.
+	#[structopt(long, name = "LOG_LEVEL")]
+	log: Option<log::LevelFilter>,
 }
 
 enum ConfigFormat {
@@ -118,39 +148,81 @@ enum Error {
 	Runtime(BoxStdErr),
 }
 
+/// Make [`Config`] with arguments like `--inbound`, `--outbound`.
+fn make_config_from_args(opts: &AppOptions) -> Result<Config, Error> {
+	let inbound = {
+		let s = opts.inbound.as_ref().ok_or_else(|| {
+			Error::Input("`inbound` cannot be empty while `outbound` is not".into())
+		})?;
+		let url = url::Url::from_str(s)
+			.map_err(|e| Error::Input(format!("`inbound` is not a valid URL ({})", e).into()))?;
+		ladder_lib::server::inbound::Builder::parse_url(&url)
+			.map_err(|e| Error::Input(format!("invalid inbound ({})", e).into()))?
+	};
+	let outbound = {
+		let s = opts.outbound.as_ref().ok_or_else(|| {
+			Error::Input("`outbound` cannot be empty while `inbound` is not".into())
+		})?;
+		let url = url::Url::from_str(s)
+			.map_err(|e| Error::Input(format!("`outbound` is not a valid URL ({})", e).into()))?;
+		ladder_lib::server::outbound::Builder::parse_url(&url)
+			.map_err(|e| Error::Input(format!("invalid outbound ({})", e).into()))?
+	};
+
+	let rules: Vec<router::PlainRule> = {
+		let mut srcs: Vec<router::Source> = Vec::new();
+		let block = opts.block.as_deref().map_or_else(
+			|| Cow::Owned(format!("{},{}", LAN_STR, LOCALLOOP_STR)),
+			Cow::Borrowed,
+		);
+
+		for part in block.split(',') {
+			match part {
+				LAN_STR => srcs.extend(
+					Vec::from(router::Cidr::private_networks())
+						.into_iter()
+						.map(router::Source::Cidr),
+				),
+				LOCALLOOP_STR => {
+					srcs.push(router::Source::Cidr(router::Cidr4::LOCALLOOP.into()));
+					srcs.push(router::Source::Cidr(router::Cidr6::LOCALLOOP.into()));
+				}
+				_ => {
+					let ip = std::net::IpAddr::from_str(part).map_err(|_| {
+						Error::Input(format!("'{}' is not a valid IP address", part).into())
+					})?;
+					srcs.push(router::Source::Ip(ip));
+				}
+			}
+		}
+		if srcs.is_empty() {
+			Vec::new()
+		} else {
+			vec![router::PlainRule {
+				srcs,
+				outbound_tag: None,
+				..Default::default()
+			}]
+		}
+	};
+	let level_filter = opts.log.unwrap_or(log::LevelFilter::Warn);
+	Ok(Config {
+		log: config::Log {
+			level: level_filter,
+			output: String::new(),
+		},
+		server: ladder_lib::server::Builder {
+			inbounds: vec![inbound],
+			outbounds: vec![outbound],
+			router: router::Builder { rules },
+			..Default::default()
+		},
+	})
+}
+
 fn serve(opts: &AppOptions) -> Result<(), Error> {
 	let conf = if opts.inbound.is_some() || opts.outbound.is_some() {
-		let inbound = {
-			let s = opts.inbound.as_ref().ok_or_else(|| {
-				Error::Input("`inbound` cannot be empty while `outbound` is not".into())
-			})?;
-			let url = url::Url::from_str(s).map_err(|e| {
-				Error::Input(format!("`inbound` is not a valid URL ({})", e).into())
-			})?;
-			ladder_lib::server::inbound::Builder::parse_url(&url)
-				.map_err(|e| Error::Input(format!("invalid inbound ({})", e).into()))?
-		};
-		let outbound = {
-			let s = opts.outbound.as_ref().ok_or_else(|| {
-				Error::Input("`outbound` cannot be empty while `inbound` is not".into())
-			})?;
-			let url = url::Url::from_str(s).map_err(|e| {
-				Error::Input(format!("`outbound` is not a valid URL ({})", e).into())
-			})?;
-			ladder_lib::server::outbound::Builder::parse_url(&url)
-				.map_err(|e| Error::Input(format!("invalid outbound ({})", e).into()))?
-		};
-		Config {
-			log: config::Log {
-				level: log::LevelFilter::Info,
-				output: String::new(),
-			},
-			server: ladder_lib::server::Builder {
-				inbounds: vec![inbound],
-				outbounds: vec![outbound],
-				..Default::default()
-			},
-		}
+		make_config_from_args(opts)?
 	} else {
 		let format = if let Some(s) = &opts.format {
 			ConfigFormat::from_str(s).ok_or_else(|| {

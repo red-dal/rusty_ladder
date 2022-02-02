@@ -53,11 +53,18 @@ pub struct Cidr4 {
 }
 
 impl Cidr4 {
+	pub const LOCALLOOP: Self = Self::from_ip(Ipv4Addr::new(127, 0, 0, 0), 8);
+
 	#[must_use]
-	pub fn from_ip(ip: Ipv4Addr, length: u8) -> Self {
+	pub const fn from_ip(ip: Ipv4Addr, length: u8) -> Self {
 		debug_assert!(length <= 32);
 		let mask = (!0 as u32) << (32 - length);
 		Cidr4 { ip, mask }
+	}
+
+	#[must_use]
+	pub fn new(ip: impl Into<Ipv4Addr>, length: u8) -> Self {
+		Self::from_ip(ip.into(), length)
 	}
 
 	#[must_use]
@@ -82,11 +89,17 @@ pub struct Cidr6 {
 }
 
 impl Cidr6 {
+	pub const LOCALLOOP: Self = Self::from_ip(Ipv6Addr::LOCALHOST, 128);
+
 	#[must_use]
-	pub fn from_ip(ip: Ipv6Addr, length: u8) -> Self {
+	pub const fn from_ip(ip: Ipv6Addr, length: u8) -> Self {
 		debug_assert!(length <= 128);
 		let mask = (!0 as u128) << (128 - length);
 		Cidr6 { ip, mask }
+	}
+
+	pub fn new(ip: impl Into<Ipv6Addr>, length: u8) -> Self {
+		Self::from_ip(ip.into(), length)
 	}
 
 	#[must_use]
@@ -154,6 +167,23 @@ impl Cidr {
 	#[must_use]
 	pub fn from_ipv6(ip: Ipv6Addr, len: u8) -> Self {
 		Cidr::V6(Cidr6::from_ip(ip, len))
+	}
+
+	/// Return a list of private networks. 
+	/// This does not include local loop.
+	/// 
+	/// Read more at <https://en.wikipedia.org/wiki/Reserved_IP_addresses>
+	#[must_use]
+	pub fn private_networks() -> [Self; 5] {
+		[
+			// IPv4
+			Cidr4::new([10, 0, 0, 0], 8).into(),
+			Cidr4::new([100, 64, 0, 0], 10).into(),
+			Cidr4::new([172, 16, 0, 0], 12).into(),
+			Cidr4::new([192, 168, 0, 0], 24).into(),
+			// IPv6
+			Cidr6::new([0xfe80, 0, 0, 0, 0, 0, 0, 0], 10).into(),
+		]
 	}
 }
 
