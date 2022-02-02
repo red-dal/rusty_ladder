@@ -327,7 +327,7 @@ fn main() {
 		let mut features_msg = String::new();
 		for (index, feature) in FEATURES.iter().chain(ladder_lib::FEATURES).enumerate() {
 			if index != 0 {
-				features_msg.push_str(",");
+				features_msg.push(',');
 			}
 			features_msg.push_str(feature);
 		}
