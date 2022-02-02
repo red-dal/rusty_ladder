@@ -31,6 +31,19 @@ type BoxStdErr = Box<dyn std::error::Error + Send + Sync>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+macro_rules! make_feature_str {
+	($name: literal) => {
+		#[cfg(feature = $name)]
+		$name
+	};
+}
+
+const FEATURES: &[&str] = &[
+	make_feature_str!("parse-url"),
+	make_feature_str!("parse-config"),
+	make_feature_str!("use-tui"),
+];
+
 #[cfg(all(not(feature = "parse-url"), not(feature = "parse-config")))]
 compile_error!("At least one of the features ['parse-url', 'parse-config'] must be enabled");
 
@@ -48,7 +61,7 @@ pub struct AppOptions {
 	///
 	/// This only works if '--config' is specified.
 	#[cfg(feature = "parse-config")]
-	#[structopt(short, long, name = "CONF FORMAT")]
+	#[structopt(short, long, name = "CONF_FORMAT")]
 	format: Option<ConfigFormat>,
 
 	/// Read config from file. STDIN will be used if not specified.
@@ -142,6 +155,7 @@ mod parse_config_impl {
 	fn read_conf_str(path: Option<&str>) -> Result<String, std::io::Error> {
 		let mut conf_str = String::with_capacity(1024);
 		if let Some(path) = path {
+			println!("Reading config file '{}'", path);
 			File::open(path)?.read_to_string(&mut conf_str)?;
 		} else {
 			std::io::stdin().read_to_string(&mut conf_str)?;
@@ -310,7 +324,14 @@ fn serve(opts: &AppOptions) -> Result<(), Error> {
 fn main() {
 	let opts = AppOptions::from_args();
 	if opts.version {
-		println!("{}", VERSION);
+		let mut features_msg = String::new();
+		for (index, feature) in FEATURES.iter().chain(ladder_lib::FEATURES).enumerate() {
+			if index != 0 {
+				features_msg.push_str(",");
+			}
+			features_msg.push_str(feature);
+		}
+		println!("{}\nFeatures: {}", VERSION, features_msg);
 		return;
 	}
 	if let Err(err) = serve(&opts) {
@@ -447,9 +468,10 @@ mod config {
 	#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
 	#[cfg_attr(feature = "parse-config", serde(deny_unknown_fields))]
 	pub struct Log {
-		#[cfg_attr(feature = "use-config", serde(default = "default_log_level"))]
+		#[cfg_attr(feature = "parse-config", serde(default = "default_log_level"))]
 		pub level: LevelFilter,
-		#[cfg_attr(feature = "use-config", serde(default))]
+		#[cfg_attr(feature = "parse-config", serde(default))]
+		#[cfg_attr(feature = "parse-config", serde(rename = "output"))]
 		pub log_file: Option<Cow<'static, str>>,
 	}
 
@@ -464,9 +486,9 @@ mod config {
 
 	#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
 	pub struct Config {
-		#[cfg_attr(feature = "use-config", serde(default))]
+		#[cfg_attr(feature = "parse-config", serde(default))]
 		pub log: Log,
-		#[cfg_attr(feature = "use-config", serde(default))]
+		#[cfg_attr(feature = "parse-config", serde(flatten))]
 		pub server: ServerBuilder,
 	}
 
