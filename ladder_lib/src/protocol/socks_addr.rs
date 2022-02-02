@@ -532,7 +532,7 @@ impl From<(Ipv6Addr, u16)> for SocksAddr {
 	}
 }
 
-#[cfg(feature = "use_serde")]
+#[cfg(feature = "serde")]
 mod serde_internal {
 	use super::SocksAddr;
 	use serde::{de::Visitor, Deserialize, Serialize};

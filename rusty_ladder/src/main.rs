@@ -97,6 +97,14 @@ pub struct AppOptions {
 	#[cfg(feature = "parse-url")]
 	#[structopt(long, name = "LOG_LEVEL")]
 	log: Option<log::LevelFilter>,
+
+	/// Set the path for log file.
+	///
+	/// If not specified, STDOUT will be used as log output.
+	/// This only works if '--inbound' and '--outbound' is set.
+	#[cfg(feature = "parse-url")]
+	#[structopt(long, name = "LOG_FILE")]
+	log_file: Option<String>,
 }
 
 #[cfg(feature = "parse-config")]
@@ -239,7 +247,7 @@ fn make_config_from_args(opts: &AppOptions) -> Result<Config, Error> {
 	Ok(Config {
 		log: config::Log {
 			level: level_filter,
-			output: String::new(),
+			log_file: opts.log_file.clone().map(Into::into),
 		},
 		server: ladder_lib::server::Builder {
 			inbounds: vec![inbound],
@@ -324,12 +332,8 @@ mod tui_utils {
 	use std::{sync::mpsc, thread};
 
 	pub fn run_with_tui(use_tui: bool, conf: Config, rt: Runtime) -> Result<(), BoxStdErr> {
-		if use_tui && conf.log.output.is_empty() {
-			return Err(format!(
-				"Cannot use TUI when 'output' in settings is empty (currently '{}')",
-				conf.log.output
-			)
-			.into());
+		if use_tui && conf.log.log_file.is_none() {
+			return Err("cannot use TUI when log file is not set".into());
 		}
 
 		// Initialize logger
@@ -396,7 +400,7 @@ fn init_logger(conf: &config::Log) -> Result<(), BoxStdErr> {
 	let time_format =
 		time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]Z").unwrap();
 	let colors = fern::colors::ColoredLevelConfig::new().info(fern::colors::Color::Blue);
-	let is_output_to_std = conf.output.is_empty();
+	let is_log_file_none = conf.log_file.is_none();
 	let dispatch = fern::Dispatch::new()
 		.level(conf.level)
 		.format(move |out, message, record| {
@@ -409,7 +413,7 @@ fn init_logger(conf: &config::Log) -> Result<(), BoxStdErr> {
 			} else {
 				record.target()
 			};
-			if is_output_to_std {
+			if is_log_file_none {
 				out.finish(format_args!(
 					"[{} {} {}] {}",
 					now_str,
@@ -427,12 +431,10 @@ fn init_logger(conf: &config::Log) -> Result<(), BoxStdErr> {
 				));
 			}
 		});
-	if is_output_to_std {
-		// Use stdout
-		dispatch.chain(std::io::stdout()).apply()?;
+	if let Some(log_file) = &conf.log_file {
+		dispatch.chain(fern::log_file(log_file.as_ref())?).apply()?;
 	} else {
-		// Use file
-		dispatch.chain(fern::log_file(&conf.output)?).apply()?;
+		dispatch.chain(std::io::stdout()).apply()?;
 	}
 	Ok(())
 }
@@ -440,6 +442,7 @@ fn init_logger(conf: &config::Log) -> Result<(), BoxStdErr> {
 mod config {
 	use ladder_lib::ServerBuilder;
 	use log::LevelFilter;
+	use std::borrow::Cow;
 
 	#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
 	#[cfg_attr(feature = "parse-config", serde(deny_unknown_fields))]
@@ -447,14 +450,14 @@ mod config {
 		#[cfg_attr(feature = "use-config", serde(default = "default_log_level"))]
 		pub level: LevelFilter,
 		#[cfg_attr(feature = "use-config", serde(default))]
-		pub output: String,
+		pub log_file: Option<Cow<'static, str>>,
 	}
 
 	impl Default for Log {
 		fn default() -> Self {
 			Log {
 				level: default_log_level(),
-				output: String::new(),
+				log_file: None,
 			}
 		}
 	}
