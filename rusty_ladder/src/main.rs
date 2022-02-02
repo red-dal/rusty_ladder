@@ -23,24 +23,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![allow(clippy::default_trait_access)]
 
 use config::Config;
-use ladder_lib::router;
-use std::{
-	borrow::Cow,
-	fs::File,
-	io::{self, Read},
-	str::FromStr,
-	sync::Arc,
-};
+use std::{borrow::Cow, io, str::FromStr, sync::Arc};
 use structopt::StructOpt;
 use tokio::runtime::Runtime;
 
 type BoxStdErr = Box<dyn std::error::Error + Send + Sync>;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const DEFAULT_CONF_FORMAT: ConfigFormat = ConfigFormat::Toml;
 
-const LAN_STR: &str = "$lan";
-const LOCALLOOP_STR: &str = "localloop";
+#[cfg(all(not(feature = "parse-url"), not(feature = "parse-config")))]
+compile_error!("At least one of the features ['parse-url', 'parse-config'] must be enabled");
 
 #[cfg(feature = "use-tui")]
 mod tui;
@@ -55,10 +47,12 @@ pub struct AppOptions {
 	/// Set the format of the config file. Can be 'toml' (default) or 'json'.
 	///
 	/// This only works if '--config' is specified.
+	#[cfg(feature = "parse-config")]
 	#[structopt(short, long, name = "CONF FORMAT")]
-	format: Option<String>,
+	format: Option<ConfigFormat>,
 
 	/// Read config from file. STDIN will be used if not specified.
+	#[cfg(feature = "parse-config")]
 	#[structopt(short, long, name = "CONF_PATH")]
 	config: Option<String>,
 
@@ -70,6 +64,7 @@ pub struct AppOptions {
 	///
 	/// Using this will ignore '--config'.
 	/// '--inbound' and '--outbound' must be both set or both empty.
+	#[cfg(feature = "parse-url")]
 	#[structopt(short, long, name = "INBOUND_URL")]
 	inbound: Option<String>,
 
@@ -77,6 +72,7 @@ pub struct AppOptions {
 	///
 	/// Using this will ignore '--config'.
 	/// '--inbound' and '--outbound' must be both set or both empty.
+	#[cfg(feature = "parse-url")]
 	#[structopt(short, long, name = "OUTBOUND_URL")]
 	outbound: Option<String>,
 
@@ -90,6 +86,7 @@ pub struct AppOptions {
 	///
 	/// "$lan,$localloop" will be used if not set.
 	/// This only works if '--inbound' and '--outbound' is set.
+	#[cfg(feature = "parse-url")]
 	#[structopt(long, verbatim_doc_comment, name = "BLOCK_LIST")]
 	block: Option<String>,
 
@@ -97,44 +94,70 @@ pub struct AppOptions {
 	///
 	/// If not specified, "warn" will be used.
 	/// This only works if '--inbound' and '--outbound' is set.
+	#[cfg(feature = "parse-url")]
 	#[structopt(long, name = "LOG_LEVEL")]
 	log: Option<log::LevelFilter>,
 }
 
-enum ConfigFormat {
-	Toml,
-	Json,
-}
+#[cfg(feature = "parse-config")]
+mod parse_config_impl {
+	use super::{AppOptions, BoxStdErr, Config, Error, FromStr};
+	use std::borrow::Cow;
+	use std::{fs::File, io::Read};
 
-impl ConfigFormat {
-	fn from_str(s: &str) -> Option<Self> {
-		let mut s = s.to_string();
-		s.make_ascii_lowercase();
-		Some(match s.as_str() {
-			"toml" => Self::Toml,
-			"json" => Self::Json,
-			_ => return None,
-		})
+	#[derive(Clone, Copy)]
+	pub(super) enum ConfigFormat {
+		Toml,
+		Json,
+	}
+
+	impl FromStr for ConfigFormat {
+		type Err = Cow<'static, str>;
+
+		fn from_str(s: &str) -> Result<Self, Self::Err> {
+			let mut s = s.to_string();
+			s.make_ascii_lowercase();
+			Ok(match s.as_str() {
+				"toml" => Self::Toml,
+				"json" => Self::Json,
+				_ => return Err("must be either 'toml' or 'json'".into()),
+			})
+		}
+	}
+
+	impl Default for ConfigFormat {
+		fn default() -> Self {
+			ConfigFormat::Toml
+		}
+	}
+
+	fn read_conf_str(path: Option<&str>) -> Result<String, std::io::Error> {
+		let mut conf_str = String::with_capacity(1024);
+		if let Some(path) = path {
+			File::open(path)?.read_to_string(&mut conf_str)?;
+		} else {
+			std::io::stdin().read_to_string(&mut conf_str)?;
+		}
+		Ok(conf_str)
+	}
+
+	#[cfg(feature = "parse-config")]
+	pub(super) fn make_config(opts: &AppOptions) -> Result<Config, Error> {
+		fn read_config(conf_str: &str, format: ConfigFormat) -> Result<Config, BoxStdErr> {
+			let conf: Config = match format {
+				ConfigFormat::Toml => toml::from_str(conf_str)?,
+				ConfigFormat::Json => serde_json::from_str(conf_str)?,
+			};
+			Ok(conf)
+		}
+		let format = opts.format.unwrap_or_default();
+		let conf_str = read_conf_str(opts.config.as_deref())
+			.map_err(|e| Error::Input(format!("cannot read config: {}", e).into()))?;
+		read_config(&conf_str, format).map_err(Error::Config)
 	}
 }
-
-fn read_conf_str(path: Option<&str>) -> Result<String, std::io::Error> {
-	let mut conf_str = String::with_capacity(1024);
-	if let Some(path) = path {
-		File::open(path)?.read_to_string(&mut conf_str)?;
-	} else {
-		std::io::stdin().read_to_string(&mut conf_str)?;
-	}
-	Ok(conf_str)
-}
-
-fn read_config(conf_str: &str, format: &ConfigFormat) -> Result<Config, BoxStdErr> {
-	let conf: Config = match format {
-		ConfigFormat::Toml => toml::from_str(conf_str)?,
-		ConfigFormat::Json => serde_json::from_str(conf_str)?,
-	};
-	Ok(conf)
-}
+#[cfg(feature = "parse-config")]
+use parse_config_impl::{make_config, ConfigFormat};
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -142,6 +165,7 @@ enum Error {
 	Io(#[from] io::Error),
 	#[error("[input] {0}")]
 	Input(Cow<'static, str>),
+	#[allow(dead_code)]
 	#[error("[config] {0}")]
 	Config(BoxStdErr),
 	#[error("[runtime] {0}")]
@@ -149,7 +173,13 @@ enum Error {
 }
 
 /// Make [`Config`] with arguments like `--inbound`, `--outbound`.
+#[cfg(feature = "parse-url")]
 fn make_config_from_args(opts: &AppOptions) -> Result<Config, Error> {
+	use ladder_lib::router;
+
+	const LAN_STR: &str = "$lan";
+	const LOCALLOOP_STR: &str = "localloop";
+
 	let inbound = {
 		let s = opts.inbound.as_ref().ok_or_else(|| {
 			Error::Input("`inbound` cannot be empty while `outbound` is not".into())
@@ -221,21 +251,23 @@ fn make_config_from_args(opts: &AppOptions) -> Result<Config, Error> {
 }
 
 fn serve(opts: &AppOptions) -> Result<(), Error> {
-	let conf = if opts.inbound.is_some() || opts.outbound.is_some() {
-		make_config_from_args(opts)?
-	} else {
-		let format = if let Some(s) = &opts.format {
-			ConfigFormat::from_str(s).ok_or_else(|| {
-				Error::Input(format!("unknown config format from settings value '{}'", s).into())
-			})?
-		} else {
-			DEFAULT_CONF_FORMAT
-		};
-
-		let conf_str = read_conf_str(opts.config.as_deref())
-			.map_err(|e| Error::Input(format!("cannot read config: {}", e).into()))?;
-
-		read_config(&conf_str, &format).map_err(Error::Config)?
+	let conf = {
+		#[cfg(all(feature = "parse-config", feature = "parse-url"))]
+		{
+			if opts.inbound.is_some() || opts.outbound.is_some() {
+				make_config_from_args(opts)?
+			} else {
+				make_config(opts)?
+			}
+		}
+		#[cfg(all(feature = "parse-config", not(feature = "parse-url")))]
+		{
+			make_config(opts)?
+		}
+		#[cfg(all(not(feature = "parse-config"), feature = "parse-url"))]
+		{
+			make_config_from_args(opts)?
+		}
 	};
 
 	let rt = Runtime::new()?;
@@ -408,14 +440,13 @@ fn init_logger(conf: &config::Log) -> Result<(), BoxStdErr> {
 mod config {
 	use ladder_lib::ServerBuilder;
 	use log::LevelFilter;
-	use serde::Deserialize;
 
-	#[derive(Deserialize)]
-	#[serde(deny_unknown_fields)]
+	#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
+	#[cfg_attr(feature = "parse-config", serde(deny_unknown_fields))]
 	pub struct Log {
-		#[serde(default = "default_log_level")]
+		#[cfg_attr(feature = "use-config", serde(default = "default_log_level"))]
 		pub level: LevelFilter,
-		#[serde(default)]
+		#[cfg_attr(feature = "use-config", serde(default))]
 		pub output: String,
 	}
 
@@ -428,11 +459,11 @@ mod config {
 		}
 	}
 
-	#[derive(Deserialize)]
+	#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
 	pub struct Config {
-		#[serde(default)]
+		#[cfg_attr(feature = "use-config", serde(default))]
 		pub log: Log,
-		#[serde(flatten)]
+		#[cfg_attr(feature = "use-config", serde(default))]
 		pub server: ServerBuilder,
 	}
 

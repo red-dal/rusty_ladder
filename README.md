@@ -95,6 +95,16 @@ cargo build --target aarch64-unknown-linux-gnu
 See more at https://docs.rs/openssl/0.10.36/openssl/#manual
 
 ## **Feature Flags**
+Commandline:
+- `parse-url` (*Enabled by default*)
+
+    Enable commandline option that parse URL:
+    `--inbound`, `--outbound`, `--log`, `--block`
+
+- `parse-config` (*Enabled by default*)
+
+    Enable commandline option that parse JSON or TOML: `--config`
+
 DNS:
 - `local-dns`
 

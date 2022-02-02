@@ -102,9 +102,9 @@ impl AsyncReadWrite for tokio::net::UnixStream {
 }
 
 impl From<tokio::net::TcpStream> for Box<dyn AsyncReadWrite> {
-    fn from(stream: tokio::net::TcpStream) -> Self {
-        Box::new(stream)
-    }
+	fn from(stream: tokio::net::TcpStream) -> Self {
+		Box::new(stream)
+	}
 }
 
 // --------------------------------------------
@@ -244,6 +244,13 @@ impl Network {
 	#[must_use]
 	pub fn use_udp(self) -> bool {
 		matches!(self, Network::Udp | Network::TcpAndUdp)
+	}
+}
+
+impl Default for Network {
+	#[inline]
+	fn default() -> Self {
+		Network::Tcp
 	}
 }
 

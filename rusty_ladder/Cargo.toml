@@ -11,7 +11,14 @@ default = [
     "all-transports-openssl",
     "all-proxies-openssl",
     "use-udp",
+    "parse-url",
+    "parse-config",
 ]
+
+# Enable commandline options that parses URL.
+parse-url = ["ladder_lib/parse-url"]
+# Enable commandline options that parses JSON or TOML config.
+parse-config = ["ladder_lib/use_serde"]
 
 local-dns = ["ladder_lib/local-dns"]
 local-dns-over-openssl = ["ladder_lib/local-dns-over-openssl"]
@@ -79,10 +86,7 @@ chain-outbound = ["ladder_lib/chain-outbound"]
 trojan-outbound = ["ladder_lib/trojan-outbound"]
 
 [dependencies]
-ladder_lib = { version = "*", path = "../ladder_lib", default-features = false, features = [
-    "use_serde",
-    "parse-url",
-] }
+ladder_lib = { version = "*", path = "../ladder_lib", default-features = false, features = [] }
 serde = { version = "1.0" }
 serde_json = "1.0"
 toml = "0.5"

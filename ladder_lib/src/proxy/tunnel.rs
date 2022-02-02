@@ -27,8 +27,9 @@ use crate::{
 
 pub const PROTOCOL_NAME: &str = "tunnel";
 
+#[cfg(feature = "use_serde")]
 fn default_network_tcp() -> Network {
-	Network::Tcp
+	Network::default()
 }
 
 #[derive(Debug)]
