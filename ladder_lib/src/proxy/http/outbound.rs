@@ -46,7 +46,7 @@ pub struct SettingsBuilder {
 	pub pass: String,
 	pub addr: SocksAddr,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::SettingsBuilder,
+	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -87,7 +87,7 @@ impl SettingsBuilder {
 			user,
 			pass,
 			addr,
-			transport: transport::outbound::SettingsBuilder::default(),
+			transport: transport::outbound::Builder::default(),
 		})
 	}
 }
@@ -95,7 +95,7 @@ impl SettingsBuilder {
 pub struct Settings {
 	auth: Option<String>,
 	addr: SocksAddr,
-	transport: transport::outbound::Settings,
+	transport: transport::Outbound,
 }
 
 impl Settings {
@@ -234,7 +234,7 @@ impl Settings {
 		user: &str,
 		pass: &str,
 		addr: SocksAddr,
-		transport: transport::outbound::Settings,
+		transport: transport::Outbound,
 	) -> Self {
 		let auth = if user.is_empty() && pass.is_empty() {
 			None
@@ -251,7 +251,7 @@ impl Settings {
 
 	#[inline]
 	#[must_use]
-	pub fn new_no_auth(addr: SocksAddr, transport: transport::outbound::Settings) -> Self {
+	pub fn new_no_auth(addr: SocksAddr, transport: transport::Outbound) -> Self {
 		Self::new("", "", addr, transport)
 	}
 }

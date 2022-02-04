@@ -53,7 +53,7 @@ pub struct SettingsBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub users: HashMap<String, String>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::inbound::SettingsBuilder,
+	pub transport: transport::inbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -88,21 +88,21 @@ impl SettingsBuilder {
 		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
 		Ok(SettingsBuilder {
 			users,
-			transport: transport::inbound::SettingsBuilder::default(),
+			transport: transport::inbound::Builder::default(),
 		})
 	}
 }
 
 pub struct Settings {
 	auths: HashSet<String>,
-	transport: transport::inbound::Settings,
+	transport: transport::Inbound,
 }
 
 impl Settings {
 	#[inline]
 	pub fn new<'a>(
 		users: impl IntoIterator<Item = (&'a str, &'a str)>,
-		transport: transport::inbound::Settings,
+		transport: transport::Inbound,
 	) -> Self {
 		let auths = users
 			.into_iter()

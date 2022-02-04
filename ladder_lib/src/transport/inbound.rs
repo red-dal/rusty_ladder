@@ -20,13 +20,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{prelude::BoxStdErr, protocol::AsyncReadWrite};
 use std::io;
 
-#[ladder_lib_macro::impl_variants(Settings)]
+#[ladder_lib_macro::impl_variants(Inbound)]
 mod settings {
 	use crate::{protocol::AsyncReadWrite, transport};
 	use std::io;
 	use tokio::io::{AsyncRead, AsyncWrite};
 
-	pub enum Settings {
+	pub enum Inbound {
 		None(transport::inbound::Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(transport::tls::Inbound),
@@ -36,7 +36,7 @@ mod settings {
 		H2(transport::h2::Inbound),
 	}
 
-	impl Settings {
+	impl Inbound {
 		#[implement(map_into_map_err_into)]
 		pub async fn accept<IO>(&self, stream: IO) -> io::Result<Box<dyn AsyncReadWrite>>
 		where
@@ -51,24 +51,24 @@ mod settings {
 		}
 	}
 }
-pub use settings::Settings;
+pub use settings::Inbound;
 
-impl Settings {
+impl Inbound {
 	#[inline]
 	pub fn is_none(&self) -> bool {
 		matches!(self, Self::None(_))
 	}
 }
 
-impl Default for Settings {
+impl Default for Inbound {
 	fn default() -> Self {
 		Self::None(Empty)
 	}
 }
 
-#[ladder_lib_macro::impl_variants(SettingsBuilder)]
+#[ladder_lib_macro::impl_variants(Builder)]
 mod settings_builder {
-	use super::Settings;
+	use super::Inbound;
 	use crate::{prelude::BoxStdErr, transport};
 
 	#[cfg_attr(test, derive(PartialEq, Eq))]
@@ -78,7 +78,7 @@ mod settings_builder {
 		derive(serde::Deserialize),
 		serde(rename_all = "lowercase", tag = "type")
 	)]
-	pub enum SettingsBuilder {
+	pub enum Builder {
 		None(transport::inbound::Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(transport::tls::InboundBuilder),
@@ -88,17 +88,17 @@ mod settings_builder {
 		H2(transport::h2::InboundBuilder),
 	}
 
-	impl SettingsBuilder {
+	impl Builder {
 		#[implement(map_into_map_err_into)]
-		pub fn build(self) -> Result<Settings, BoxStdErr> {}
+		pub fn build(self) -> Result<Inbound, BoxStdErr> {}
 	}
 }
 
-pub use settings_builder::SettingsBuilder;
+pub use settings_builder::Builder;
 
-impl Default for SettingsBuilder {
+impl Default for Builder {
 	fn default() -> Self {
-		SettingsBuilder::None(Empty)
+		Builder::None(Empty)
 	}
 }
 

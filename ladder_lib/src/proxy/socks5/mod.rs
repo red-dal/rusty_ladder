@@ -38,9 +38,9 @@ mod tests {
 
 	#[test]
 	fn test_socks5() {
-		let inbound = InboundSettings::new_no_auth(transport::inbound::Settings::default());
+		let inbound = InboundSettings::new_no_auth(transport::Inbound::default());
 		run_proxy_test("socks5".into(), inbound, |in_addr| {
-			OutboundSettings::new_no_auth(in_addr, transport::outbound::Settings::default())
+			OutboundSettings::new_no_auth(in_addr, transport::Outbound::default())
 		});
 	}
 

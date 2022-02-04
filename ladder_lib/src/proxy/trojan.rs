@@ -66,7 +66,7 @@ pub struct SettingsBuilder {
 	pub password: String,
 	pub addr: SocksAddr,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::SettingsBuilder,
+	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -128,7 +128,7 @@ impl SettingsBuilder {
 pub struct Settings {
 	password: String,
 	addr: SocksAddr,
-	transport: transport::outbound::Settings,
+	transport: transport::Outbound,
 }
 
 impl Settings {

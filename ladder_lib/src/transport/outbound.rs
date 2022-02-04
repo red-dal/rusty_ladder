@@ -1,4 +1,4 @@
-/**********************************************************************
+/**builder****************************************************
 
 Copyright (C) 2021 by reddal
 
@@ -22,14 +22,14 @@ use crate::protocol::ProxyContext;
 use crate::{prelude::*, protocol::AsyncReadWrite};
 use std::io;
 
-#[ladder_lib_macro::impl_variants(Settings)]
+#[ladder_lib_macro::impl_variants(Outbound)]
 mod settings {
 	use super::Empty;
 	use crate::protocol::{AsyncReadWrite, ProxyContext, SocksAddr};
 	use std::io;
 	use tokio::io::{AsyncRead, AsyncWrite};
 
-	pub enum Settings {
+	pub enum Outbound {
 		None(Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(super::super::tls::Outbound),
@@ -41,7 +41,7 @@ mod settings {
 		Browser(super::super::browser::Settings),
 	}
 
-	impl Settings {
+	impl Outbound {
 		#[implement(map_into)]
 		pub async fn connect_stream<'a, IO>(
 			&'a self,
@@ -69,17 +69,17 @@ mod settings {
 	}
 }
 
-pub use settings::Settings;
+pub use settings::Outbound;
 
-impl Default for Settings {
+impl Default for Outbound {
 	fn default() -> Self {
 		Self::None(Empty)
 	}
 }
 
-#[ladder_lib_macro::impl_variants(SettingsBuilder)]
-mod settings_builder {
-	use super::{Empty, Settings};
+#[ladder_lib_macro::impl_variants(Builder)]
+mod builder {
+	use super::{Empty, Outbound};
 	use crate::prelude::BoxStdErr;
 
 	#[cfg_attr(test, derive(PartialEq, Eq))]
@@ -89,7 +89,7 @@ mod settings_builder {
 		derive(serde::Deserialize),
 		serde(rename_all = "lowercase", tag = "type")
 	)]
-	pub enum SettingsBuilder {
+	pub enum Builder {
 		None(Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(super::super::tls::OutboundBuilder),
@@ -101,17 +101,16 @@ mod settings_builder {
 		Browser(super::super::browser::SettingsBuilder),
 	}
 
-	impl SettingsBuilder {
+	impl Builder {
 		#[implement(map_into_map_err_into)]
-		pub fn build(self) -> Result<Settings, BoxStdErr> {}
+		pub fn build(self) -> Result<Outbound, BoxStdErr> {}
 	}
 }
+pub use builder::Builder;
 
-pub use settings_builder::SettingsBuilder;
-
-impl Default for SettingsBuilder {
+impl Default for Builder {
 	fn default() -> Self {
-		SettingsBuilder::None(Empty)
+		Builder::None(Empty)
 	}
 }
 

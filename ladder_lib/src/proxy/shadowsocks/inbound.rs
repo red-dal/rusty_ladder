@@ -38,7 +38,7 @@ pub struct SettingsBuilder {
 	pub method: Method,
 	pub password: String,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::inbound::SettingsBuilder,
+	pub transport: transport::inbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -89,7 +89,7 @@ struct CryptoSettings {
 
 pub struct Settings {
 	crypto: Option<CryptoSettings>,
-	transport: transport::inbound::Settings,
+	transport: transport::Inbound,
 }
 
 impl GetProtocolName for Settings {
@@ -171,7 +171,7 @@ impl TcpAcceptor for Settings {
 
 impl Settings {
 	#[must_use]
-	pub fn new(password: &str, method: Method, transport: transport::inbound::Settings) -> Self {
+	pub fn new(password: &str, method: Method, transport: transport::Inbound) -> Self {
 		let crypt_settings = method_to_algo(method).map(|algo| {
 			let password = super::password_to_key(salt_len(algo), password);
 			CryptoSettings { password, algo }

@@ -51,7 +51,7 @@ pub struct SettingsBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub users: HashMap<String, String>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::inbound::SettingsBuilder,
+	pub transport: transport::inbound::Builder,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub is_udp_enabled: bool,
 }
@@ -96,7 +96,7 @@ impl SettingsBuilder {
 			.collect();
 		Ok(SettingsBuilder {
 			users,
-			transport: transport::inbound::SettingsBuilder::default(),
+			transport: transport::inbound::Builder::default(),
 			is_udp_enabled: false,
 		})
 	}
@@ -105,7 +105,7 @@ impl SettingsBuilder {
 #[derive(Default)]
 pub struct Settings {
 	users: HashMap<Vec<u8>, Vec<u8>>,
-	transport: transport::inbound::Settings,
+	transport: transport::Inbound,
 	#[cfg(feature = "use-udp")]
 	pub is_udp_enabled: bool,
 }
@@ -114,7 +114,7 @@ impl Settings {
 	#[inline]
 	pub fn new(
 		users: impl IntoIterator<Item = (String, String)>,
-		transport: transport::inbound::Settings,
+		transport: transport::Inbound,
 	) -> Self {
 		let users = users
 			.into_iter()
@@ -130,7 +130,7 @@ impl Settings {
 
 	#[inline]
 	#[must_use]
-	pub fn new_no_auth(transport: transport::inbound::Settings) -> Self {
+	pub fn new_no_auth(transport: transport::Inbound) -> Self {
 		Self::new(Vec::new(), transport)
 	}
 

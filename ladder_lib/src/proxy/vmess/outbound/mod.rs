@@ -50,7 +50,7 @@ pub struct SettingsBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub use_legacy_header: bool,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::SettingsBuilder,
+	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -61,12 +61,12 @@ impl SettingsBuilder {
 			id,
 			sec: SecurityType::default(),
 			use_legacy_header: false,
-			transport: transport::outbound::SettingsBuilder::default(),
+			transport: transport::outbound::Builder::default(),
 		}
 	}
 
 	#[must_use]
-	pub fn transport(mut self, transport: transport::outbound::SettingsBuilder) -> Self {
+	pub fn transport(mut self, transport: transport::outbound::Builder) -> Self {
 		self.transport = transport;
 		self
 	}
@@ -133,8 +133,8 @@ impl SettingsBuilder {
 
 		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
 		let transport_str = url.username();
-		let transport: transport::outbound::SettingsBuilder = match transport_str {
-			"tcp" => transport::outbound::SettingsBuilder::default(),
+		let transport: transport::outbound::Builder = match transport_str {
+			"tcp" => transport::outbound::Builder::default(),
 			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 			"tls" => transport::tls::OutboundBuilder::default().into(),
 			#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -184,7 +184,7 @@ pub struct Settings {
 	pub(super) id: Uuid,
 	pub(super) sec: SecurityType,
 	pub(super) header_mode: HeaderMode,
-	transport: transport::outbound::Settings,
+	transport: transport::Outbound,
 }
 
 impl Settings {
@@ -195,7 +195,7 @@ impl Settings {
 	}
 
 	#[must_use]
-	pub fn new(addr: SocksAddr, id: Uuid, transport: transport::outbound::Settings) -> Self {
+	pub fn new(addr: SocksAddr, id: Uuid, transport: transport::Outbound) -> Self {
 		Self {
 			addr,
 			id,
@@ -460,7 +460,7 @@ mod tests {
 					id: "7db04e8f-7cfc-46e0-9e18-d329c22ec353".parse().unwrap(),
 					sec: SecurityType::Auto,
 					use_legacy_header: false,
-					transport: transport::outbound::SettingsBuilder::Ws(transport::ws::OutboundBuilder {
+					transport: transport::outbound::Builder::Ws(transport::ws::OutboundBuilder {
 						headers: Default::default(),
 						path: "/myServerAddressPath/中文路径/".into(),
 						host: "www.myServer.com".into(),

@@ -63,7 +63,7 @@ use user_validator::spawn_update_task;
 pub struct SettingsBuilder {
 	pub users: Vec<User>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::inbound::SettingsBuilder,
+	pub transport: transport::inbound::Builder,
 	/// Enable legacy authentication. False by default.
 	///
 	/// Legacy authentication is deprecated and unsecured.
@@ -128,7 +128,7 @@ enum LegacyAuthenticator {
 
 pub struct Settings {
 	users: Vec<User>,
-	transport: transport::inbound::Settings,
+	transport: transport::Inbound,
 	container: auth_id::GuardedContainer,
 	#[cfg(feature = "vmess-legacy-auth")]
 	legacy_authenticator: LegacyAuthenticator,

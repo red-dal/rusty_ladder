@@ -38,7 +38,7 @@ pub struct SettingsBuilder {
 	pub method: Method,
 	pub password: String,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::SettingsBuilder,
+	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -93,7 +93,7 @@ struct EncryptionSettings {
 pub struct Settings {
 	addr: SocksAddr,
 	inner: Option<EncryptionSettings>,
-	transport: transport::outbound::Settings,
+	transport: transport::Outbound,
 }
 
 impl Settings {
@@ -192,7 +192,7 @@ impl Settings {
 		addr: SocksAddr,
 		password: &str,
 		method: Method,
-		transport: transport::outbound::Settings,
+		transport: transport::Outbound,
 	) -> Self {
 		let inner = method_to_algo(method).map(|algo| EncryptionSettings {
 			password: password_to_key(salt_len(algo), password),
