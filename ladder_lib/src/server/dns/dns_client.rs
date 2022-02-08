@@ -234,7 +234,7 @@ async fn create_transport_stream_timedout(
 	let task = async move {
 		// Raw TCP or outbound stream
 		let stream = if let Some(outbound) = outbound {
-			outbound.settings.connect(addr, ctx).await?
+			outbound.connect(addr, ctx).await?
 		} else {
 			ctx.dial_tcp(addr).await?.into()
 		};

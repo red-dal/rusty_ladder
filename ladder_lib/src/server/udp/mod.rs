@@ -231,7 +231,7 @@ impl Dispatcher {
 				let result = {
 					let sess_handle = sess_handle.as_ref();
 					async move {
-						let stream = connect_outbound(sess, &outbound.settings, server).await?;
+						let stream = connect_outbound(sess, outbound, server).await?;
 						self.map
 							.register_session(
 								self.inbound_sender.clone(),

@@ -17,7 +17,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use crate::{prelude::*, protocol::outbound::Error as OutboundError};
+use crate::{
+	prelude::*,
+	protocol::{
+		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		BufBytesStream, GetProtocolName, ProxyContext,
+	},
+};
+#[cfg(feature = "use-udp")]
+use crate::protocol::outbound::udp;
 
 #[ladder_lib_macro::impl_variants(Details)]
 mod details {
@@ -133,10 +141,44 @@ pub use details_builder::DetailsBuilder;
 
 pub struct Outbound {
 	pub tag: Tag,
-	pub settings: Details,
+	settings: Details,
 }
 
-impl Outbound {}
+impl Outbound {
+	#[must_use]
+	pub fn get_tcp_connector(&self) -> &dyn TcpConnector {
+		self.settings.get_tcp_connector()
+	}
+
+	#[must_use]
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+		self.settings.get_tcp_stream_connector()
+	}
+}
+
+#[cfg(feature = "use-udp")]
+impl udp::GetConnector for Outbound {
+	fn get_udp_connector(&self) -> Option<udp::Connector<'_>> {
+		self.settings.get_udp_connector()
+	}
+}
+
+impl GetProtocolName for Outbound {
+	fn protocol_name(&self) -> &'static str {
+		self.settings.protocol_name()
+	}
+}
+
+#[async_trait]
+impl TcpConnector for Outbound {
+	async fn connect(
+		&self,
+		dst: &SocksAddr,
+		context: &dyn ProxyContext,
+	) -> Result<BufBytesStream, OutboundError> {
+		self.settings.connect(dst, context).await
+	}
+}
 
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]

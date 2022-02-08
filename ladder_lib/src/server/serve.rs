@@ -20,19 +20,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #[cfg(feature = "use-udp")]
 use super::udp;
 use super::{
-	inbound::{Callback, ErrorHandlingPolicy},
-	stat::{Id, Monitor, SessionHandle},
+	inbound::{Callback, CallbackArgs, ErrorHandlingPolicy},
+	stat::{Monitor, SessionHandle},
 	Error, Inbound, Outbound, Server,
 };
 use crate::{
-	network,
 	prelude::*,
 	protocol::{
 		inbound::{
 			AcceptError, AcceptResult, FinishHandshake, HandshakeError, SessionInfo, TcpAcceptor,
 		},
 		outbound::{Error as OutboundError, TcpConnector},
-		AsyncReadWrite, BufBytesStream, GetProtocolName,
+		BufBytesStream, GetProtocolName,
 	},
 	utils::{
 		relay::{Counter, Relay},
@@ -83,9 +82,7 @@ impl Server {
 			// Serving TCP
 			let tcp_task = {
 				let callback = ServerCallback {
-					inbound: inbound.clone(),
 					server: self.clone(),
-					inbound_ind,
 					#[cfg(feature = "use-udp")]
 					udp_session_timeout: self.global.udp_session_timeout,
 				};
@@ -158,38 +155,32 @@ impl Server {
 
 struct ServerCallback {
 	server: Arc<Server>,
-	inbound: Arc<Inbound>,
-	inbound_ind: usize,
 	#[cfg(feature = "use-udp")]
 	udp_session_timeout: std::time::Duration,
 }
 
 impl ServerCallback {
-	fn priv_run(
-		&self,
-		sh: Option<SessionHandle>,
-		stream: Box<dyn AsyncReadWrite>,
-		addr: &network::Addrs,
-		conn_id: Id,
-	) -> impl Future<Output = Result<(), Error>> {
-		let conn_id_str = format_conn_id(conn_id, &self.inbound.tag);
+	fn priv_run(&self, args: CallbackArgs) -> impl Future<Output = Result<(), Error>> {
+		let conn_id_str = format_conn_id(args.conn_id, &args.inbound.tag);
 		// ------ handshake ------
-		let src = addr.get_peer();
+		let src = args.addr.get_peer();
 		warn!(
 			"{} Making {} handshake with incoming connection from {}.",
 			conn_id_str,
-			self.inbound.protocol_name(),
+			args.inbound.protocol_name(),
 			src,
 		);
 
-		let info = SessionInfo { addr: addr.clone() };
-		let inbound_ind = self.inbound_ind;
-		let inbound = self.inbound.clone();
+		let info = SessionInfo {
+			addr: args.addr.clone(),
+		};
+		let inbound_ind = args.inbound_ind;
+		let inbound = args.inbound.clone();
 		let server = self.server.clone();
 		#[cfg(feature = "use-udp")]
 		let udp_session_timeout = self.udp_session_timeout;
 		async move {
-			let accept_res = match inbound.settings.accept_tcp(stream, info).await {
+			let accept_res = match inbound.accept_tcp(args.stream, info).await {
 				Ok(res) => res,
 				Err(e) => {
 					match e {
@@ -224,7 +215,7 @@ impl ServerCallback {
 						inbound: &inbound,
 						inbound_ind,
 						conn_id_str,
-						stat_handle: sh,
+						stat_handle: args.sh,
 						src: &src,
 						handshake_handler,
 						dst: &dst,
@@ -234,7 +225,7 @@ impl ServerCallback {
 				}
 				#[cfg(feature = "use-udp")]
 				AcceptResult::Udp(inbound_stream) => {
-					let monitor = sh.as_ref().map(|h| h.monitor().clone());
+					let monitor = args.sh.as_ref().map(|h| h.monitor().clone());
 					udp::dispatch(
 						inbound_stream,
 						inbound.tag.clone(),
@@ -254,14 +245,8 @@ impl ServerCallback {
 impl Callback for ServerCallback {
 	type Fut = BoxFuture<'static, Result<(), Error>>;
 
-	fn run(
-		&self,
-		sh: Option<SessionHandle>,
-		stream: Box<dyn AsyncReadWrite>,
-		addr: network::Addrs,
-		conn_id: Id,
-	) -> Self::Fut {
-		self.priv_run(sh, stream, &addr, conn_id).boxed()
+	fn run(&self, args: CallbackArgs) -> Self::Fut {
+		self.priv_run(args).boxed()
 	}
 }
 
@@ -327,7 +312,7 @@ impl<'a> StreamSession<'a> {
 			}
 			timeout(
 				self.server.global.outbound_handshake_timeout,
-				outbound.settings.connect(self.dst, self.server),
+				outbound.connect(self.dst, self.server),
 			)
 			.await
 			.map_err(|_| OutboundError::new_timeout())?
@@ -422,9 +407,9 @@ fn new_route_name(
 		"['{}'--{}({})--{}({})--'{}']",
 		src_addr,
 		inbound.tag,
-		inbound.settings.protocol_name(),
+		inbound.protocol_name(),
 		outbound.tag,
-		outbound.settings.protocol_name(),
+		outbound.protocol_name(),
 		dst_addr,
 	)
 	.into()

@@ -63,7 +63,7 @@ impl ProxyContext for Server {
 		let outbound = self
 			.get_outbound(tag)
 			.ok_or_else(|| GetConnectorError::UnknownTag(Tag::from(tag)))?;
-		Ok(outbound.settings.get_tcp_connector())
+		Ok(outbound.get_tcp_connector())
 	}
 
 	fn get_tcp_stream_connector(
@@ -73,10 +73,10 @@ impl ProxyContext for Server {
 		let outbound = self
 			.get_outbound(tag)
 			.ok_or_else(|| GetConnectorError::UnknownTag(Tag::from(tag)))?;
-		outbound.settings.get_tcp_stream_connector().ok_or_else(|| {
+		outbound.get_tcp_stream_connector().ok_or_else(|| {
 			GetConnectorError::NotSupported {
 				tag: Tag::from(tag),
-				type_name: outbound.settings.protocol_name().into(),
+				type_name: outbound.protocol_name().into(),
 			}
 		})
 	}

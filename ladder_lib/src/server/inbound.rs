@@ -22,9 +22,12 @@ use super::{
 	Error,
 };
 use crate::{
-	network,
+	network::{self},
 	prelude::*,
-	protocol::{AsyncReadWrite, GetProtocolName},
+	protocol::{
+		inbound::{AcceptError, AcceptResult, SessionInfo, TcpAcceptor},
+		AsyncReadWrite, GetProtocolName,
+	},
 	utils::OneOrMany,
 	Monitor,
 };
@@ -152,9 +155,9 @@ impl Default for ErrorHandlingPolicy {
 
 pub struct Inbound {
 	pub tag: Tag,
-	pub settings: Details,
 	pub network: network::Config,
 	pub err_policy: ErrorHandlingPolicy,
+	settings: Details,
 }
 
 impl Inbound {
@@ -198,10 +201,15 @@ impl Inbound {
 						from,
 					})
 				});
-				if let Err(e) = callback
-					.run(stat_handle.clone(), stream, ar.addr, conn_id)
-					.await
-				{
+				let args = CallbackArgs {
+					sh: stat_handle.clone(),
+					stream,
+					addr: ar.addr,
+					conn_id,
+					inbound_ind,
+					inbound: inbound.clone(),
+				};
+				if let Err(e) = callback.run(args).await {
 					error!(
 						"Error occurred when serving {} inbound '{}': {} ",
 						inbound.protocol_name(),
@@ -219,16 +227,37 @@ impl Inbound {
 	}
 }
 
+impl GetProtocolName for Inbound {
+	#[inline]
+	fn protocol_name(&self) -> &'static str {
+		self.settings.protocol_name()
+	}
+}
+
+#[async_trait]
+impl TcpAcceptor for Inbound {
+	async fn accept_tcp<'a>(
+		&'a self,
+		stream: Box<dyn AsyncReadWrite>,
+		info: SessionInfo,
+	) -> Result<AcceptResult<'a>, AcceptError> {
+		self.settings.accept_tcp(stream, info).await
+	}
+}
+
+pub struct CallbackArgs {
+	pub sh: Option<SessionHandle>,
+	pub stream: Box<dyn AsyncReadWrite>,
+	pub addr: network::Addrs,
+	pub conn_id: Id,
+	pub inbound_ind: usize,
+	pub inbound: Arc<Inbound>,
+}
+
 pub trait Callback: Send + Sync {
 	type Fut: Future<Output = Result<(), Error>> + Send;
 
-	fn run(
-		&self,
-		sh: Option<SessionHandle>,
-		stream: Box<dyn AsyncReadWrite>,
-		addr: network::Addrs,
-		conn_id: Id,
-	) -> Self::Fut;
+	fn run(&self, args: CallbackArgs) -> Self::Fut;
 }
 
 #[cfg(feature = "use-udp")]
