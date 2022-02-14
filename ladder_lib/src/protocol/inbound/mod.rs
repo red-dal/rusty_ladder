@@ -96,15 +96,15 @@ impl From<io::Error> for HandshakeError {
 pub enum AcceptError {
 	Io(io::Error),
 	Protocol(BoxStdErr),
-	ProtocolSilentDrop((Box<dyn AsyncReadWrite>, BoxStdErr)),
+	ProtocolSilentDrop(Box<dyn AsyncReadWrite>, BoxStdErr),
 	TcpNotAcceptable,
 	UdpNotAcceptable,
 }
 
 impl AcceptError {
 	#[inline]
-	pub fn new_protocol(stream: Box<dyn AsyncReadWrite>, e: impl Into<BoxStdErr>) -> Self {
-		AcceptError::ProtocolSilentDrop((stream, e.into()))
+	pub fn new_silent_drop(stream: Box<dyn AsyncReadWrite>, e: impl Into<BoxStdErr>) -> Self {
+		AcceptError::ProtocolSilentDrop(stream, e.into())
 	}
 
 	#[inline]
@@ -113,7 +113,7 @@ impl AcceptError {
 		stream: Box<dyn AsyncReadWrite>,
 		e: impl Into<BoxStdErr>,
 	) -> Result<T, Self> {
-		Err(AcceptError::ProtocolSilentDrop((stream, e.into())))
+		Err(AcceptError::ProtocolSilentDrop(stream, e.into()))
 	}
 }
 
@@ -121,7 +121,7 @@ impl fmt::Display for AcceptError {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
 			AcceptError::Io(e) => write!(f, "inbound handshake IO error ({})", e),
-			AcceptError::ProtocolSilentDrop((_, e)) => {
+			AcceptError::ProtocolSilentDrop(_, e) => {
 				write!(f, "inbound handshake protocol error ({})", e)
 			}
 			AcceptError::TcpNotAcceptable => write!(f, "inbound cannot accept TCP"),

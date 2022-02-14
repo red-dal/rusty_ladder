@@ -122,7 +122,7 @@ impl TcpAcceptor for Settings {
 			Err(ReadError::BadRequest(e)) => {
 				return write_err_response(&mut stream, StatusCode::BAD_REQUEST, e).await;
 			}
-			Err(ReadError::Protocol(e)) => return Err(AcceptError::new_protocol(stream, e)),
+			Err(ReadError::Protocol(e)) => return Err(AcceptError::new_silent_drop(stream, e)),
 			Err(ReadError::Partial) => {
 				debug!("Only partial HTTP request is read.");
 				return Err(AcceptError::Io(io::Error::new(

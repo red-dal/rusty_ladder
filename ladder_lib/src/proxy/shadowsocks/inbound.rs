@@ -182,7 +182,7 @@ fn invalid_request<T>(
 	stream: Box<dyn AsyncReadWrite>,
 	e: impl Into<Error>,
 ) -> Result<T, AcceptError> {
-	Err(AcceptError::new_protocol(stream, e.into()))
+	Err(AcceptError::new_silent_drop(stream, e.into()))
 }
 
 #[cfg(test)]

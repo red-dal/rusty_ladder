@@ -173,11 +173,7 @@ impl TcpAcceptor for Settings {
 		let mut stream = BufBytesStream::from(stream);
 		let mut buf = Vec::with_capacity(HANDSHAKE_BUFFER_CAPACITY);
 		{
-			let methods = Methods::read(&mut stream, &mut buf).await;
-			let methods = match methods {
-				Ok(m) => m,
-				Err(e) => return invalid_request(stream, e),
-			};
+			let methods = Methods::read(&mut stream, &mut buf).await?;
 			let acceptable_method = methods.choose(!self.users.is_empty());
 			if let Some(acceptable_method) = acceptable_method {
 				stream.write_all(&[VER5, acceptable_method as u8]).await?;
@@ -186,13 +182,7 @@ impl TcpAcceptor for Settings {
 						// Do nothing
 					}
 					AcceptableMethod::UsernamePassword => {
-						let success = self
-							.perform_userpass_authentication(&mut stream)
-							.await
-							.map_err(|e| match e {
-								SocksOrIoError::Io(e) => AcceptError::Io(e),
-								SocksOrIoError::Socks(e) => AcceptError::Protocol(e.into()),
-							})?;
+						let success = self.perform_userpass_authentication(&mut stream).await?;
 						if !success {
 							return Err(AcceptError::Protocol(Error::FailedAuthentication.into()));
 						}
@@ -206,15 +196,7 @@ impl TcpAcceptor for Settings {
 			}
 		}
 		debug!("Reading SOCKS5 request...");
-		let request = match Request::read(&mut stream).await {
-			Ok(res) => res,
-			Err(e) => {
-				return Err(match e {
-					SocksOrIoError::Io(e) => AcceptError::Io(e),
-					SocksOrIoError::Socks(e) => AcceptError::new_protocol(Box::new(stream), e),
-				})
-			}
-		};
+		let request = Request::read(&mut stream).await?;
 		let cmd = request.code;
 		let cmd = if let Ok(cmd) = CommandCode::try_from(cmd) {
 			cmd
@@ -766,17 +748,6 @@ where
 	buf.resize(len, 0);
 	reader.read_exact(buf).await?;
 	Ok(())
-}
-
-#[inline]
-fn invalid_request<T>(
-	stream: impl 'static + AsyncReadWrite,
-	e: SocksOrIoError,
-) -> Result<T, AcceptError> {
-	Err(match e {
-		SocksOrIoError::Io(e) => AcceptError::Io(e),
-		SocksOrIoError::Socks(e) => AcceptError::new_protocol(Box::new(stream), e),
-	})
 }
 
 #[cfg(test)]

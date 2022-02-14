@@ -19,7 +19,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
 	prelude::*,
-	protocol::{inbound::HandshakeError, outbound::Error as OutboundError, socks_addr::ReadError},
+	protocol::{
+		inbound::{AcceptError, HandshakeError},
+		outbound::Error as OutboundError,
+		socks_addr::ReadError,
+	},
 };
 use num_enum::TryFromPrimitive;
 use std::{fmt::Display, io};
@@ -189,8 +193,18 @@ impl From<SocksOrIoError> for OutboundError {
 	#[inline]
 	fn from(e: SocksOrIoError) -> Self {
 		match e {
-			SocksOrIoError::Io(e) => OutboundError::Io(e),
-			SocksOrIoError::Socks(e) => OutboundError::Protocol(e.into()),
+			SocksOrIoError::Io(e) => Self::Io(e),
+			SocksOrIoError::Socks(e) => Self::Protocol(e.into()),
+		}
+	}
+}
+
+impl From<SocksOrIoError> for AcceptError {
+	#[inline]
+	fn from(e: SocksOrIoError) -> Self {
+		match e {
+			SocksOrIoError::Io(e) => Self::Io(e),
+			SocksOrIoError::Socks(e) => Self::Protocol(e.into()),
 		}
 	}
 }

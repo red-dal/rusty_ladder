@@ -171,7 +171,7 @@ where
 					error!("{}", err);
 					Err(err.into())
 				}
-				AcceptError::ProtocolSilentDrop((_, err)) => {
+				AcceptError::ProtocolSilentDrop(_, err) => {
 					error!("{}", err);
 					Err(err)
 				}

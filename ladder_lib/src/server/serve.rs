@@ -186,7 +186,7 @@ impl ServerCallback {
 				Err(e) => {
 					match e {
 						AcceptError::Io(e) => return Err(HandshakeError::Io(e).into()),
-						AcceptError::ProtocolSilentDrop((stream, e)) => {
+						AcceptError::ProtocolSilentDrop(stream, e) => {
 							match inbound.err_policy {
 								ErrorHandlingPolicy::Drop => {
 									// do nothing
