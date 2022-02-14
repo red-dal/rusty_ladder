@@ -21,10 +21,9 @@ use super::{method_to_algo, password_to_key, tcp, utils::salt_len, Method, PROTO
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		outbound::{Error as OutboundError, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
-	transport,
 	utils::{crypto::aead::Algorithm, LazyWriteHalf},
 };
 use bytes::Bytes;
@@ -37,8 +36,6 @@ pub struct SettingsBuilder {
 	pub addr: SocksAddr,
 	pub method: Method,
 	pub password: String,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -48,12 +45,7 @@ impl SettingsBuilder {
 	///
 	/// Returns an error if error occurred when building `self.transport`.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		Ok(Settings::new(
-			self.addr,
-			&self.password,
-			self.method,
-			self.transport.build()?,
-		))
+		Ok(Settings::new(self.addr, &self.password, self.method))
 	}
 
 	/// Parse a URL with the following format:
@@ -79,7 +71,6 @@ impl SettingsBuilder {
 			addr,
 			method,
 			password,
-			transport: Default::default(),
 		})
 	}
 }
@@ -93,7 +84,6 @@ struct EncryptionSettings {
 pub struct Settings {
 	addr: SocksAddr,
 	inner: Option<EncryptionSettings>,
-	transport: transport::Outbound,
 }
 
 impl Settings {
@@ -164,45 +154,23 @@ impl TcpStreamConnector for Settings {
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		self.priv_connect(stream, dst).await
 	}
 
 	#[inline]
-	fn addr(&self) -> &SocksAddr {
-		&self.addr
-	}
-}
-
-#[async_trait]
-impl TcpConnector for Settings {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect(&self.addr, context).await?;
-		self.priv_connect(stream, dst).await
+	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
+		Ok(Some(self.addr.clone()))
 	}
 }
 
 impl Settings {
 	#[must_use]
-	pub fn new(
-		addr: SocksAddr,
-		password: &str,
-		method: Method,
-		transport: transport::Outbound,
-	) -> Self {
+	pub fn new(addr: SocksAddr, password: &str, method: Method) -> Self {
 		let inner = method_to_algo(method).map(|algo| EncryptionSettings {
 			password: password_to_key(salt_len(algo), password),
 			algo,
 		});
-		Self {
-			addr,
-			inner,
-			transport,
-		}
+		Self { addr, inner }
 	}
 }
 
@@ -297,7 +265,6 @@ mod tests {
 				method: Method::Aes128Gcm,
 				password: "test".to_owned(),
 				addr: "192.168.100.1:8888".parse().unwrap(),
-				transport: Default::default(),
 			},
 		)];
 

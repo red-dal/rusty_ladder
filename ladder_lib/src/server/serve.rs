@@ -173,6 +173,7 @@ impl ServerCallback {
 
 		let info = SessionInfo {
 			addr: args.addr.clone(),
+			is_transport_empty: false,
 		};
 		let inbound_ind = args.inbound_ind;
 		let inbound = args.inbound.clone();

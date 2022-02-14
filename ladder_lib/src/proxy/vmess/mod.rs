@@ -87,10 +87,7 @@ mod tests {
 
 		let args = vec![
 			(format!("vmess-{}-none", aead_str), SecurityType::None),
-			(
-				format!("vmess-{}-aes", aead_str),
-				SecurityType::Aes128Gcm,
-			),
+			(format!("vmess-{}-aes", aead_str), SecurityType::Aes128Gcm),
 			(
 				format!("vmess-{}-chacha", aead_str),
 				SecurityType::Chacha20Poly1305,
@@ -100,7 +97,6 @@ mod tests {
 		for (tag, sec) in args {
 			let inbound = InboundSettingsBuilder {
 				users: users.clone(),
-				transport: Default::default(),
 				// For testing
 				#[cfg(feature = "vmess-legacy-auth")]
 				enable_legacy_auth: true,
@@ -108,7 +104,7 @@ mod tests {
 			.build()
 			.unwrap();
 			run_proxy_test(tag.into(), inbound, |in_addr| {
-				let mut outbound = OutboundSettings::new(in_addr, id, Default::default());
+				let mut outbound = OutboundSettings::new(in_addr, id);
 				outbound.header_mode = HeaderMode::Aead;
 				outbound.sec = sec;
 				outbound

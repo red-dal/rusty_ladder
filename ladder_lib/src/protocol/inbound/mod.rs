@@ -34,6 +34,7 @@ pub mod udp;
 #[derive(Debug)]
 pub struct SessionInfo {
 	pub addr: network::Addrs,
+	pub is_transport_empty: bool,
 }
 
 // TODO: More description

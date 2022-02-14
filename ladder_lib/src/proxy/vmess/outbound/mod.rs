@@ -27,10 +27,9 @@ use crate::protocol::{AsyncReadWrite, BufBytesStream};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		outbound::{Error as OutboundError, TcpStreamConnector},
 		GetProtocolName, ProxyContext,
 	},
-	transport,
 	utils::{crypto::aead::Algorithm, timestamp_now},
 };
 use rand::{rngs::OsRng, thread_rng};
@@ -47,10 +46,9 @@ pub struct SettingsBuilder {
 	pub addr: SocksAddr,
 	pub id: Uuid,
 	pub sec: SecurityType,
+	// TODO: make feature `vmess-legacy-auth` a requirement
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub use_legacy_header: bool,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -61,14 +59,7 @@ impl SettingsBuilder {
 			id,
 			sec: SecurityType::default(),
 			use_legacy_header: false,
-			transport: transport::outbound::Builder::default(),
 		}
-	}
-
-	#[must_use]
-	pub fn transport(mut self, transport: transport::outbound::Builder) -> Self {
-		self.transport = transport;
-		self
 	}
 
 	#[must_use]
@@ -87,7 +78,7 @@ impl SettingsBuilder {
 	///
 	/// # Errors
 	///
-	/// Returns an error if error occurred when building `self.transport`.
+	/// No error is returned currently.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
 		let mode = if self.use_legacy_header {
 			HeaderMode::Legacy
@@ -99,17 +90,20 @@ impl SettingsBuilder {
 			id: self.id,
 			sec: self.sec,
 			header_mode: mode,
-			transport: self.transport.build()?,
 		})
 	}
 
-	/// Parse a URL with the format stated in 
+	/// Parse a URL with the format stated in
 	/// <https://github.com/v2fly/v2fly-github-io/issues/26>
 	///
 	/// # Errors
 	/// Return an error if `url` does not match the above format.
 	#[cfg(feature = "parse-url")]
-	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
+	pub fn parse_url(
+		url: &url::Url,
+	) -> Result<(Self, crate::transport::outbound::Builder), BoxStdErr> {
+		use crate::transport;
+
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
 		fn make_ws_builder(url: &url::Url) -> transport::ws::OutboundBuilder {
 			let mut path = None;
@@ -169,13 +163,15 @@ impl SettingsBuilder {
 			return Err("cannot use authid other than 0, only AEAD header is supported".into());
 		}
 
-		Ok(Self {
-			addr,
-			id,
-			sec: SecurityType::Auto,
-			use_legacy_header: false,
+		Ok((
+			Self {
+				addr,
+				id,
+				sec: SecurityType::Auto,
+				use_legacy_header: false,
+			},
 			transport,
-		})
+		))
 	}
 }
 
@@ -184,7 +180,6 @@ pub struct Settings {
 	pub(super) id: Uuid,
 	pub(super) sec: SecurityType,
 	pub(super) header_mode: HeaderMode,
-	transport: transport::Outbound,
 }
 
 impl Settings {
@@ -195,13 +190,12 @@ impl Settings {
 	}
 
 	#[must_use]
-	pub fn new(addr: SocksAddr, id: Uuid, transport: transport::Outbound) -> Self {
+	pub fn new(addr: SocksAddr, id: Uuid) -> Self {
 		Self {
 			addr,
 			id,
 			sec: SecurityType::auto(),
 			header_mode: HeaderMode::Aead,
-			transport,
 		}
 	}
 
@@ -291,25 +285,12 @@ impl TcpStreamConnector for Settings {
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
 
 	#[inline]
-	fn addr(&self) -> &SocksAddr {
-		&self.addr
-	}
-}
-
-#[async_trait]
-impl TcpConnector for Settings {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect(&self.addr, context).await?;
-		Ok(self.priv_connect(stream, dst).await?)
+	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
+		Ok(Some(self.addr.clone()))
 	}
 }
 
@@ -445,22 +426,23 @@ mod tests {
 		let data = [
 			(
 				"vmess://tcp:2e09f64c-c967-4ce3-9498-fdcd8e39e04e-0@google.com:4433/?query=Value1#Connection2",
-				SettingsBuilder {
+				(SettingsBuilder {
 					addr: "google.com:4433".parse().unwrap(),
 					id: "2e09f64c-c967-4ce3-9498-fdcd8e39e04e".parse().unwrap(),
 					sec: SecurityType::Auto,
 					use_legacy_header: false,
-					transport: Default::default(),
-				},
+				}, Default::default()),
 			),
 			(
 				"vmess://ws+tls:7db04e8f-7cfc-46e0-9e18-d329c22ec353-0@myServer.com:12345/?path=%2FmyServerAddressPath%2F%E4%B8%AD%E6%96%87%E8%B7%AF%E5%BE%84%2F&host=www.myServer.com",
-				SettingsBuilder {
-					addr: "myServer.com:12345".parse().unwrap(),
-					id: "7db04e8f-7cfc-46e0-9e18-d329c22ec353".parse().unwrap(),
-					sec: SecurityType::Auto,
-					use_legacy_header: false,
-					transport: transport::outbound::Builder::Ws(transport::ws::OutboundBuilder {
+				(
+					SettingsBuilder {
+						addr: "myServer.com:12345".parse().unwrap(),
+						id: "7db04e8f-7cfc-46e0-9e18-d329c22ec353".parse().unwrap(),
+						sec: SecurityType::Auto,
+						use_legacy_header: false,
+					}, 
+					transport::outbound::Builder::Ws(transport::ws::OutboundBuilder {
 						headers: Default::default(),
 						path: "/myServerAddressPath/中文路径/".into(),
 						host: "www.myServer.com".into(),
@@ -469,7 +451,7 @@ mod tests {
 							ca_file: None,
 						}),
 					}),
-				},
+				),
 			),
 		];
 

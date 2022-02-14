@@ -25,12 +25,21 @@ Currently only supports AEAD ciphers.
 Beware that GFW can probably detect and block foreign shadowsocks servers.
 */
 
-#[cfg(any(feature = "shadowsocks-inbound-openssl", feature = "shadowsocks-inbound-ring"))]
+#[cfg(any(
+	feature = "shadowsocks-inbound-openssl",
+	feature = "shadowsocks-inbound-ring"
+))]
 pub mod inbound;
-#[cfg(any(feature = "shadowsocks-outbound-openssl", feature = "shadowsocks-outbound-ring"))]
+#[cfg(any(
+	feature = "shadowsocks-outbound-openssl",
+	feature = "shadowsocks-outbound-ring"
+))]
 pub mod outbound;
 mod tcp;
-#[cfg(any(feature = "shadowsocks-outbound-openssl", feature = "shadowsocks-outbound-ring"))]
+#[cfg(any(
+	feature = "shadowsocks-outbound-openssl",
+	feature = "shadowsocks-outbound-ring"
+))]
 #[cfg(feature = "use-udp")]
 mod udp;
 mod utils;
@@ -41,8 +50,14 @@ use utils::{key_to_session_key, method_to_algo, password_to_key, Error};
 pub const PROTOCOL_NAME: &str = "ss";
 
 #[cfg(test)]
-#[cfg(any(feature = "shadowsocks-inbound-openssl", feature = "shadowsocks-inbound-ring"))]
-#[cfg(any(feature = "shadowsocks-outbound-openssl", feature = "shadowsocks-outbound-ring"))]
+#[cfg(any(
+	feature = "shadowsocks-inbound-openssl",
+	feature = "shadowsocks-inbound-ring"
+))]
+#[cfg(any(
+	feature = "shadowsocks-outbound-openssl",
+	feature = "shadowsocks-outbound-ring"
+))]
 mod tests {
 	use super::*;
 	use crate::test_utils::run_proxy_test;
@@ -62,9 +77,9 @@ mod tests {
 		for (tag, method) in &args {
 			let method = *method;
 			let tag = *tag;
-			let inbound = InboundSettings::new(password, method, Default::default());
+			let inbound = InboundSettings::new(password, method);
 			run_proxy_test(tag.into(), inbound, |in_addr| {
-				OutboundSettings::new(in_addr, password, method, Default::default())
+				OutboundSettings::new(in_addr, password, method)
 			});
 		}
 	}

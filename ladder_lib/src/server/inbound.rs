@@ -153,11 +153,16 @@ impl Default for ErrorHandlingPolicy {
 	}
 }
 
+//-----------------------------------
+//               Inbound
+//-----------------------------------
+
 pub struct Inbound {
 	pub tag: Tag,
 	pub network: network::Config,
 	pub err_policy: ErrorHandlingPolicy,
 	settings: Details,
+	transport: crate::transport::Inbound,
 }
 
 impl Inbound {
@@ -241,6 +246,9 @@ impl TcpAcceptor for Inbound {
 		stream: Box<dyn AsyncReadWrite>,
 		info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
+		let stream = self.transport.accept(stream).await?;
+		let mut info = info;
+		info.is_transport_empty = matches!(&self.transport, crate::transport::Inbound::None(_));
 		self.settings.accept_tcp(stream, info).await
 	}
 }
@@ -329,6 +337,10 @@ impl Default for NetworkType {
 	}
 }
 
+//-----------------------------------
+//               Builder
+//-----------------------------------
+
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct Builder {
@@ -341,6 +353,8 @@ pub struct Builder {
 	pub err_policy: ErrorHandlingPolicy,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub network_type: NetworkType,
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub transport: crate::transport::inbound::Builder,
 }
 
 impl Builder {
@@ -369,6 +383,7 @@ impl Builder {
 			settings: self.settings.build()?,
 			network,
 			err_policy: self.err_policy,
+			transport: self.transport.build()?,
 		})
 	}
 
@@ -447,6 +462,7 @@ impl Builder {
 			settings,
 			err_policy: Default::default(),
 			network_type: Default::default(),
+			transport: Default::default(),
 		})
 	}
 }

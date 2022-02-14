@@ -186,8 +186,8 @@ impl TcpStreamConnector for Settings {
 	}
 
 	#[inline]
-	fn addr(&self) -> &SocksAddr {
-		&self.addr
+	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
+		Ok(Some(self.addr.clone()))
 	}
 }
 

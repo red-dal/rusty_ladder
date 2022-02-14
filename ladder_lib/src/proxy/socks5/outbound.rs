@@ -29,11 +29,10 @@ use crate::protocol::outbound::udp::{Connector, GetConnector};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		outbound::{Error as OutboundError, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	proxy::socks5::utils::AUTH_FAILED,
-	transport,
 };
 
 const METHODS_USERNAME: &[u8] = &[
@@ -53,8 +52,6 @@ pub struct SettingsBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub pass: String,
 	pub addr: SocksAddr,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -69,14 +66,14 @@ impl SettingsBuilder {
 		} else {
 			Some((self.user, self.pass))
 		};
-		Ok(Settings::new(user_pass, self.addr, self.transport.build()?))
+		Ok(Settings::new(user_pass, self.addr))
 	}
 
 	/// Parse a URL with the following format:
 	/// ```plain
 	/// socks5://[user:pass@]host[:port]/
 	/// ```
-	/// `user` and `pass` is the percent encoded username 
+	/// `user` and `pass` is the percent encoded username
 	/// and password for proxy authentication.
 	///
 	/// `host` and `port` is the domain/IP and port of the proxy server.
@@ -93,19 +90,13 @@ impl SettingsBuilder {
 			.unwrap_or_else(|| (String::new(), String::new()));
 		let addr = crate::utils::url::get_socks_addr(url, Some(DEFAULT_PORT))?;
 
-		Ok(SettingsBuilder {
-			user,
-			pass,
-			addr,
-			transport: transport::outbound::Builder::default(),
-		})
+		Ok(SettingsBuilder { user, pass, addr })
 	}
 }
 
 pub struct Settings {
 	user_pass: Option<(String, String)>,
 	addr: SocksAddr,
-	transport: transport::Outbound,
 }
 
 impl Settings {
@@ -117,22 +108,14 @@ impl Settings {
 
 	#[inline]
 	#[must_use]
-	pub fn new(
-		user_pass: Option<(String, String)>,
-		addr: SocksAddr,
-		transport: transport::Outbound,
-	) -> Self {
-		Self {
-			user_pass,
-			addr,
-			transport,
-		}
+	pub fn new(user_pass: Option<(String, String)>, addr: SocksAddr) -> Self {
+		Self { user_pass, addr }
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn new_no_auth(addr: SocksAddr, transport: transport::Outbound) -> Self {
-		Self::new(None, addr, transport)
+	pub fn new_no_auth(addr: SocksAddr) -> Self {
+		Self::new(None, addr)
 	}
 
 	async fn priv_connect<'a>(
@@ -236,25 +219,12 @@ impl TcpStreamConnector for Settings {
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		self.priv_connect(stream, dst).await
 	}
 
 	#[inline]
-	fn addr(&self) -> &SocksAddr {
-		&self.addr
-	}
-}
-
-#[async_trait]
-impl TcpConnector for Settings {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect(&self.addr, context).await?;
-		self.priv_connect(stream, dst).await
+	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
+		Ok(Some(self.addr.clone()))
 	}
 }
 
@@ -343,7 +313,6 @@ mod tests {
 				SettingsBuilder {
 					user: String::new(),
 					pass: String::new(),
-					transport: Default::default(),
 					addr: "127.0.0.1:22222".parse().unwrap(),
 				},
 			),
@@ -352,7 +321,6 @@ mod tests {
 				SettingsBuilder {
 					user: "user".into(),
 					pass: "pass".into(),
-					transport: Default::default(),
 					addr: "127.0.0.1:1080".parse().unwrap(),
 				},
 			),

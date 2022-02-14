@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{common::BufBytesStream, AsyncReadWrite, ProxyContext};
+use super::{common::BufBytesStream, AsyncReadWrite, GetProtocolName, ProxyContext};
 use crate::prelude::*;
 use std::io;
 
@@ -34,7 +34,7 @@ pub trait TcpConnector: Send + Sync {
 }
 
 #[async_trait]
-pub trait TcpStreamConnector: Send + Sync {
+pub trait TcpStreamConnector: GetProtocolName + Send + Sync {
 	async fn connect_stream<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
@@ -42,7 +42,14 @@ pub trait TcpStreamConnector: Send + Sync {
 		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, Error>;
 
-	fn addr(&self) -> &SocksAddr;
+	/// Return the address for the proxy server for transport to connect to.
+	/// 
+	/// If [`None`] is returned, transport will directly connect to 
+	/// target address instead of the proxy server.
+	/// 
+	/// # Errors
+	/// Return an [`Error`] if outbound is not configured correctly.
+	fn addr(&self, context: &dyn ProxyContext) -> Result<Option<SocksAddr>, Error>;
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -33,7 +33,6 @@ use crate::{
 		outbound::Error as OutboundError,
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
-	transport,
 };
 use http::{header, uri::Scheme, Method, StatusCode, Uri};
 use std::{
@@ -52,8 +51,6 @@ pub struct SettingsBuilder {
 	// A list of (username, password)
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub users: HashMap<String, String>,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::inbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -63,19 +60,18 @@ impl SettingsBuilder {
 	///
 	/// Returns an error if error occurred when building `self.transport`.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		let transport = self.transport.build()?;
 		let users = self
 			.users
 			.iter()
 			.map(|(name, pass)| (name.as_str(), pass.as_str()));
-		Ok(Settings::new(users, transport))
+		Ok(Settings::new(users))
 	}
 
 	/// Parse a URL with the following format:
 	/// ```plain
 	/// http://[user:pass@]bind_addr:bind_port/
 	/// ```
-	/// `user` and `pass` is the percent encoding username and password 
+	/// `user` and `pass` is the percent encoding username and password
 	/// for proxy authentication.
 	///
 	/// # Errors
@@ -86,29 +82,22 @@ impl SettingsBuilder {
 		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
 		let users = crate::utils::url::get_user_pass(url)?.into_iter().collect();
 		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
-		Ok(SettingsBuilder {
-			users,
-			transport: transport::inbound::Builder::default(),
-		})
+		Ok(SettingsBuilder { users })
 	}
 }
 
 pub struct Settings {
 	auths: HashSet<String>,
-	transport: transport::Inbound,
 }
 
 impl Settings {
 	#[inline]
-	pub fn new<'a>(
-		users: impl IntoIterator<Item = (&'a str, &'a str)>,
-		transport: transport::Inbound,
-	) -> Self {
+	pub fn new<'a>(users: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
 		let auths = users
 			.into_iter()
 			.map(|(user, pass)| encode_auth(user, pass))
 			.collect();
-		Self { auths, transport }
+		Self { auths }
 	}
 }
 
@@ -124,10 +113,9 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
+		mut stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
-		let mut stream = self.transport.accept(stream).await?;
 		let (mut req, leftover) = match read_request(&mut stream).await {
 			Ok(r) => r,
 			Err(ReadError::Io(e)) => return Err(AcceptError::Io(e)),
@@ -445,7 +433,6 @@ mod tests {
 				"http://127.0.0.1:22222",
 				SettingsBuilder {
 					users: HashMap::new(),
-					transport: Default::default(),
 				},
 			),
 			(
@@ -455,7 +442,6 @@ mod tests {
 						.iter()
 						.map(|(user, pass)| (user.to_string(), pass.to_string()))
 						.collect(),
-					transport: Default::default(),
 				},
 			),
 		];

@@ -25,7 +25,6 @@ use crate::{
 		socks_addr::ReadError,
 		AsyncReadWrite, BufBytesStream, CompositeBytesStream, GetProtocolName,
 	},
-	transport,
 	utils::crypto::aead::Algorithm,
 };
 use bytes::Bytes;
@@ -37,8 +36,6 @@ use rand::thread_rng;
 pub struct SettingsBuilder {
 	pub method: Method,
 	pub password: String,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::inbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -48,11 +45,7 @@ impl SettingsBuilder {
 	///
 	/// Returns an error if error occurred when building `self.transport`.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		Ok(Settings::new(
-			&self.password,
-			self.method,
-			self.transport.build()?,
-		))
+		Ok(Settings::new(&self.password, self.method))
 	}
 
 	/// Parse a URL with the following format:
@@ -60,10 +53,10 @@ impl SettingsBuilder {
 	/// ss://userinfo@bind_addr:bind_port
 	/// ```
 	/// `userinfo` is `base64("method:password")`,
-	/// 
-	/// where `method` must be one of 
+	///
+	/// where `method` must be one of
 	/// "none", "aes-128-gcm", "aes-256-gcm", "chacha20-poly1305".
-	/// 
+	///
 	/// Read more at <https://shadowsocks.org/en/wiki/SIP002-URI-Scheme.html>
 	///
 	/// # Errors
@@ -73,11 +66,7 @@ impl SettingsBuilder {
 		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
 		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
 		let (method, password) = super::utils::get_method_password(url)?;
-		Ok(Self {
-			method,
-			password,
-			transport: Default::default(),
-		})
+		Ok(Self { method, password })
 	}
 }
 
@@ -89,7 +78,6 @@ struct CryptoSettings {
 
 pub struct Settings {
 	crypto: Option<CryptoSettings>,
-	transport: transport::Inbound,
 }
 
 impl GetProtocolName for Settings {
@@ -104,12 +92,10 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
+		mut stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		trace!("Accepting shadowsocks inbound");
-		let mut stream = self.transport.accept(stream).await?;
-
 		if let Some(s) = &self.crypto {
 			// with encryption
 			trace!("Reading shadowsocks salt");
@@ -171,7 +157,7 @@ impl TcpAcceptor for Settings {
 
 impl Settings {
 	#[must_use]
-	pub fn new(password: &str, method: Method, transport: transport::Inbound) -> Self {
+	pub fn new(password: &str, method: Method) -> Self {
 		let crypt_settings = method_to_algo(method).map(|algo| {
 			let password = super::password_to_key(salt_len(algo), password);
 			CryptoSettings { password, algo }
@@ -179,7 +165,6 @@ impl Settings {
 
 		Settings {
 			crypto: crypt_settings,
-			transport,
 		}
 	}
 }
@@ -214,7 +199,6 @@ mod tests {
 			SettingsBuilder {
 				method: Method::Aes128Gcm,
 				password: "test".to_owned(),
-				transport: Default::default(),
 			},
 		)];
 

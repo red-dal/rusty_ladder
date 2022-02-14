@@ -24,10 +24,9 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		outbound::{Error as OutboundError, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
-	transport,
 };
 use http::{header, Request, StatusCode};
 
@@ -45,8 +44,6 @@ pub struct SettingsBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub pass: String,
 	pub addr: SocksAddr,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -56,19 +53,14 @@ impl SettingsBuilder {
 	///
 	/// Returns an error if error occurred when building `self.transport`.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		Ok(Settings::new(
-			&self.user,
-			&self.pass,
-			self.addr,
-			self.transport.build()?,
-		))
+		Ok(Settings::new(&self.user, &self.pass, self.addr))
 	}
 
 	/// Parse a URL with the following format:
 	/// ```plain
 	/// http://[user:pass@]host[:port]/
 	/// ```
-	/// `user` and `pass` is the percent encoded username and password 
+	/// `user` and `pass` is the percent encoded username and password
 	/// for proxy authentication.
 	///
 	/// `host` and `port` is the domain/IP and port of the proxy server.
@@ -83,19 +75,13 @@ impl SettingsBuilder {
 		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
 		let (user, pass) = crate::utils::url::get_user_pass(url)?.unwrap_or_default();
 		let addr = crate::utils::url::get_socks_addr(url, Some(DEFAULT_PORT))?;
-		Ok(Self {
-			user,
-			pass,
-			addr,
-			transport: transport::outbound::Builder::default(),
-		})
+		Ok(Self { user, pass, addr })
 	}
 }
 
 pub struct Settings {
 	auth: Option<String>,
 	addr: SocksAddr,
-	transport: transport::Outbound,
 }
 
 impl Settings {
@@ -190,18 +176,6 @@ impl GetProtocolName for Settings {
 	}
 }
 
-#[async_trait]
-impl TcpConnector for Settings {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect(&self.addr, context).await?;
-		Ok(self.priv_connect(stream, dst).await?)
-	}
-}
-
 #[cfg(feature = "use-udp")]
 impl crate::protocol::outbound::udp::GetConnector for Settings {
 	fn get_udp_connector(&self) -> Option<crate::protocol::outbound::udp::Connector<'_>> {
@@ -217,42 +191,32 @@ impl TcpStreamConnector for Settings {
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
 
 	#[inline]
-	fn addr(&self) -> &SocksAddr {
-		&self.addr
+	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
+		Ok(Some(self.addr.clone()))
 	}
 }
 
 impl Settings {
 	#[inline]
 	#[must_use]
-	pub fn new(
-		user: &str,
-		pass: &str,
-		addr: SocksAddr,
-		transport: transport::Outbound,
-	) -> Self {
+	pub fn new(user: &str, pass: &str, addr: SocksAddr) -> Self {
 		let auth = if user.is_empty() && pass.is_empty() {
 			None
 		} else {
 			Some(encode_auth(user, pass))
 		};
 
-		Self {
-			auth,
-			addr,
-			transport,
-		}
+		Self { auth, addr }
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn new_no_auth(addr: SocksAddr, transport: transport::Outbound) -> Self {
-		Self::new("", "", addr, transport)
+	pub fn new_no_auth(addr: SocksAddr) -> Self {
+		Self::new("", "", addr)
 	}
 }
 
@@ -318,7 +282,6 @@ mod tests {
 					user: String::new(),
 					pass: String::new(),
 					addr: "127.0.0.1:22222".parse().unwrap(),
-					transport: Default::default(),
 				},
 			),
 			(
@@ -327,7 +290,6 @@ mod tests {
 					user: "user".into(),
 					pass: "pass".into(),
 					addr: "127.0.0.1:22222".parse().unwrap(),
-					transport: Default::default(),
 				},
 			),
 		];

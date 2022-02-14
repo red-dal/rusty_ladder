@@ -22,8 +22,8 @@ use crate::protocol::outbound::udp::{Connector, GetConnector};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BufBytesStream, GetConnectorError, GetProtocolName, ProxyContext,
+		outbound::{Error as OutboundError, TcpStreamConnector},
+		AsyncReadWrite, BufBytesStream, GetConnectorError, GetProtocolName, ProxyContext,
 	},
 };
 
@@ -40,8 +40,11 @@ impl Settings {
 	///
 	/// # Errors
 	///
-	/// No error will be returned.
-	pub fn build<E>(self) -> Result<Self, E> {
+	/// Return an error if `chain` is empty.
+	pub fn build(self) -> Result<Self, BoxStdErr> {
+		if self.chain.is_empty() {
+			return Err("empty chain".into());
+		}
 		Ok(self)
 	}
 
@@ -60,45 +63,68 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpConnector for Settings {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
+impl TcpStreamConnector for Settings {
+	async fn connect_stream<'a>(
+		&'a self,
+		stream: Box<dyn AsyncReadWrite>,
+		dst: &'a SocksAddr,
+		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
 		debug_assert!(!self.chain.is_empty());
-
-		let mut tag_iter = self.chain.iter();
-
-		let first = {
-			let tag = tag_iter.next().ok_or(Error::EmptyChain)?;
-			context.get_tcp_connector(tag).map_err(Error::from)?
-		};
-
-		let nodes: Vec<&dyn TcpStreamConnector> = {
-			let mut nodes: Vec<&dyn TcpStreamConnector> = Vec::new();
-			for tag in tag_iter {
-				let connector = context.get_tcp_stream_connector(tag).map_err(Error::from)?;
-				nodes.push(connector);
-			}
-			nodes
-		};
-
+		let links: Result<Vec<(&dyn TcpStreamConnector, SocksAddr, &Tag)>, Error> = self
+			.chain
+			.iter()
+			.map(|tag| {
+				context
+					.get_tcp_stream_connector(tag)
+					.map_err(Error::from)
+					.and_then(|con| {
+						con.addr(context)
+							.map_err(|err| Error::Node {
+								tag: tag.clone(),
+								err,
+							})?
+							.ok_or_else(|| Error::WrongType {
+								tag: tag.clone(),
+								proto_name: con.protocol_name().into(),
+							})
+							.map(|addr| (con, addr, tag))
+					})
+			})
+			.collect();
+		let mut links = links?.into_iter().peekable();
 		let mut stream = {
-			let first_addr = nodes.first().map_or(dst, |node| node.addr());
-			first.connect(first_addr, context).await?
+			let (con, _addr, tag) = links.next().ok_or(Error::EmptyChain)?;
+			let next_addr = links.peek().map_or(dst, |(_, addr, _)| addr);
+			con.connect_stream(stream, next_addr, context)
+				.await
+				.map_err(|err| Error::Node {
+					tag: tag.clone(),
+					err,
+				})?
 		};
-
-		let mut nodes_iter = nodes.iter().peekable();
-
-		while let Some(node) = nodes_iter.next() {
-			let next_addr = nodes_iter.peek().map_or(dst, |node| node.addr());
-			stream = node
+		while let Some((con, _addr, tag)) = links.next() {
+			let next_addr = links.peek().map_or(dst, |(_, addr, _)| addr);
+			stream = con
 				.connect_stream(Box::new(stream), next_addr, context)
-				.await?;
+				.await
+				.map_err(|err| Error::Node {
+					tag: tag.clone(),
+					err,
+				})?;
 		}
 
 		Ok(stream)
+	}
+
+	#[inline]
+	fn addr(&self, context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
+		let first_tag = self.chain.first().ok_or(Error::EmptyChain)?;
+		let first = context
+			.get_tcp_stream_connector(first_tag)
+			.map_err(Error::from)?;
+		let first_addr = first.addr(context)?.ok_or(Error::ConnectOverStream)?;
+		Ok(Some(first_addr))
 	}
 }
 

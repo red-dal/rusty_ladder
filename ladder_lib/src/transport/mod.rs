@@ -29,14 +29,10 @@ pub mod tls;
 #[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
 pub mod h2;
 
-#[cfg(feature = "__transport-inbound")]
 pub mod inbound;
-#[cfg(feature = "__transport-inbound")]
 pub use inbound::Inbound;
 
-#[cfg(feature = "__transport-outbound")]
 pub mod outbound;
-#[cfg(feature = "__transport-outbound")]
 pub use outbound::Outbound;
 
 #[cfg(any(

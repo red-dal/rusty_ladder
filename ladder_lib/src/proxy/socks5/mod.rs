@@ -32,15 +32,15 @@ pub const PROTOCOL_NAME: &str = "socks5";
 #[cfg(feature = "socks5-outbound")]
 mod tests {
 	use super::*;
-	use crate::{test_utils::run_proxy_test, transport};
+	use crate::test_utils::run_proxy_test;
 	use inbound::Settings as InboundSettings;
 	use outbound::Settings as OutboundSettings;
 
 	#[test]
 	fn test_socks5() {
-		let inbound = InboundSettings::new_no_auth(transport::Inbound::default());
+		let inbound = InboundSettings::new_no_auth();
 		run_proxy_test("socks5".into(), inbound, |in_addr| {
-			OutboundSettings::new_no_auth(in_addr, transport::Outbound::default())
+			OutboundSettings::new_no_auth(in_addr)
 		});
 	}
 
@@ -50,9 +50,9 @@ mod tests {
 		let users = users
 			.into_iter()
 			.map(|(user, pass)| (user.to_owned(), pass.to_owned()));
-		let inbound = InboundSettings::new(users, Default::default());
+		let inbound = InboundSettings::new(users);
 		run_proxy_test("socks5-auth".into(), inbound, |in_addr| {
-			OutboundSettings::new(Some(("a".into(), "b".into())), in_addr, Default::default())
+			OutboundSettings::new(Some(("a".into(), "b".into())), in_addr)
 		});
 	}
 }

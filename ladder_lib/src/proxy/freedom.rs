@@ -20,8 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BufBytesStream, GetProtocolName, ProxyContext,
+		outbound::{Error as OutboundError, TcpStreamConnector},
+		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
 use async_trait::async_trait;
@@ -77,14 +77,19 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpConnector for Settings {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
+impl TcpStreamConnector for Settings {
+	async fn connect_stream<'a>(
+		&'a self,
+		stream: Box<dyn AsyncReadWrite>,
+		_dst: &'a SocksAddr,
+		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let stream = context.dial_tcp(dst).await?;
 		Ok(stream.into())
+	}
+
+	#[inline]
+	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
+		Ok(None)
 	}
 }
 

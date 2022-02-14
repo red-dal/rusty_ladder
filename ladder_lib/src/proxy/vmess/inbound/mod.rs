@@ -34,7 +34,6 @@ use crate::{
 		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, SessionInfo, TcpAcceptor},
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
-	transport,
 	utils::{crypto::aead::Algorithm, timestamp_now},
 };
 use uuid::Uuid;
@@ -62,8 +61,6 @@ use user_validator::spawn_update_task;
 )]
 pub struct SettingsBuilder {
 	pub users: Vec<User>,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::inbound::Builder,
 	/// Enable legacy authentication. False by default.
 	///
 	/// Legacy authentication is deprecated and unsecured.
@@ -104,7 +101,6 @@ impl SettingsBuilder {
 
 		Ok(Settings {
 			users: self.users.into_iter().collect(),
-			transport: self.transport.build()?,
 			container: auth_id::GuardedContainer::new(MAX_TIMESTAMP_DIFF),
 			#[cfg(feature = "vmess-legacy-auth")]
 			legacy_authenticator: if self.enable_legacy_auth {
@@ -128,7 +124,6 @@ enum LegacyAuthenticator {
 
 pub struct Settings {
 	users: Vec<User>,
-	transport: transport::Inbound,
 	container: auth_id::GuardedContainer,
 	#[cfg(feature = "vmess-legacy-auth")]
 	legacy_authenticator: LegacyAuthenticator,
@@ -242,13 +237,10 @@ impl TcpAcceptor for Settings {
 	#[inline]
 	async fn accept_tcp<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
+		mut stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		debug!("Accepting VMess handshake");
-		let mut stream = self.transport.accept(stream).await?;
-
-		trace!("Handling vmess handshake");
 
 		let mut auth_id = AuthId::default();
 		stream.read_exact(&mut auth_id).await?;

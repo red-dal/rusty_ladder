@@ -33,7 +33,6 @@ use crate::{
 		outbound::Error as OutboundError,
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
-	transport,
 };
 use log::{info, trace};
 use std::{collections::HashMap, io};
@@ -51,8 +50,6 @@ pub struct SettingsBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub users: HashMap<String, String>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::inbound::Builder,
-	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub is_udp_enabled: bool,
 }
 
@@ -63,12 +60,11 @@ impl SettingsBuilder {
 	///
 	/// Returns an error if error occurred when building `self.transport`.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		let transport = self.transport.build()?;
 		#[cfg(not(feature = "use-udp"))]
 		if self.is_udp_enabled {
 			return Err("`use-udp` feature must be enabled in order to use SOCKS5 UDP".into());
 		}
-		let settings = Settings::new(self.users, transport);
+		let settings = Settings::new(self.users);
 		#[cfg(feature = "use-udp")]
 		let settings = {
 			let mut settings = settings;
@@ -82,7 +78,7 @@ impl SettingsBuilder {
 	/// ```plain
 	/// socks5://[user:pass@]bind_addr:bind_port
 	/// ```
-	/// where `user` and `pass` is the percent encoded 
+	/// where `user` and `pass` is the percent encoded
 	/// username and password for proxy authentication.
 	///
 	/// # Errors
@@ -91,12 +87,9 @@ impl SettingsBuilder {
 	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
 		crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
 		crate::utils::url::check_empty_path(url, PROTOCOL_NAME)?;
-		let users = crate::utils::url::get_user_pass(url)?
-			.into_iter()
-			.collect();
+		let users = crate::utils::url::get_user_pass(url)?.into_iter().collect();
 		Ok(SettingsBuilder {
 			users,
-			transport: transport::inbound::Builder::default(),
 			is_udp_enabled: false,
 		})
 	}
@@ -105,24 +98,19 @@ impl SettingsBuilder {
 #[derive(Default)]
 pub struct Settings {
 	users: HashMap<Vec<u8>, Vec<u8>>,
-	transport: transport::Inbound,
 	#[cfg(feature = "use-udp")]
 	pub is_udp_enabled: bool,
 }
 
 impl Settings {
 	#[inline]
-	pub fn new(
-		users: impl IntoIterator<Item = (String, String)>,
-		transport: transport::Inbound,
-	) -> Self {
+	pub fn new(users: impl IntoIterator<Item = (String, String)>) -> Self {
 		let users = users
 			.into_iter()
 			.map(|(name, pass)| (name.into(), pass.into()))
 			.collect();
 		Self {
 			users,
-			transport,
 			#[cfg(feature = "use-udp")]
 			is_udp_enabled: false,
 		}
@@ -130,8 +118,8 @@ impl Settings {
 
 	#[inline]
 	#[must_use]
-	pub fn new_no_auth(transport: transport::Inbound) -> Self {
-		Self::new(Vec::new(), transport)
+	pub fn new_no_auth() -> Self {
+		Self::new(Vec::new())
 	}
 
 	async fn perform_userpass_authentication(
@@ -182,7 +170,6 @@ impl TcpAcceptor for Settings {
 		info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
 		info!("Performing SOCKS5 handshake with client ({:?}).", info);
-		let stream = self.transport.accept(stream).await?;
 		let mut stream = BufBytesStream::from(stream);
 		let mut buf = Vec::with_capacity(HANDSHAKE_BUFFER_CAPACITY);
 		{
@@ -265,7 +252,13 @@ impl TcpAcceptor for Settings {
 				#[cfg(feature = "use-udp")]
 				{
 					return self
-						.handle_udp(stream, request, &mut buf, &info.addr.local)
+						.handle_udp(
+							stream,
+							request,
+							&mut buf,
+							&info.addr.local,
+							info.is_transport_empty,
+						)
 						.await;
 				}
 				#[cfg(not(feature = "use-udp"))]
@@ -342,9 +335,9 @@ mod udp {
 			request: Request,
 			buf: &mut Vec<u8>,
 			local_addr: &SocketAddr,
+			is_transport_empty: bool,
 		) -> Result<AcceptResult<'_>, AcceptError> {
-			#[allow(irrefutable_let_patterns)]
-			if self.transport.is_none() {
+			if is_transport_empty {
 				// Do nothing
 			} else {
 				return Err(reply_error(
@@ -729,7 +722,7 @@ impl<'a> Methods<'a> {
 		let n = ver_n[1];
 		check_version(ver)?;
 
-		buf.resize(n as usize, 0);
+		buf.resize(n.into(), 0);
 		reader.read_exact(buf).await?;
 
 		let res = Cow::Borrowed(buf.as_slice());
@@ -800,7 +793,6 @@ mod tests {
 				"socks5://127.0.0.1:22222",
 				SettingsBuilder {
 					users: HashMap::new(),
-					transport: Default::default(),
 					is_udp_enabled: false,
 				},
 			),
@@ -811,7 +803,6 @@ mod tests {
 						.iter()
 						.map(|(user, pass)| (user.to_string(), pass.to_string()))
 						.collect(),
-					transport: Default::default(),
 					is_udp_enabled: false,
 				},
 			),

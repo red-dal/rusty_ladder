@@ -17,23 +17,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
+#[cfg(feature = "use-udp")]
+use crate::protocol::outbound::udp;
 use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		BufBytesStream, GetProtocolName, ProxyContext,
+		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
-#[cfg(feature = "use-udp")]
-use crate::protocol::outbound::udp;
 
 #[ladder_lib_macro::impl_variants(Details)]
 mod details {
 	use super::OutboundError;
 	use crate::{
 		protocol::{
-			outbound::{TcpConnector, TcpStreamConnector},
-			BufBytesStream, GetProtocolName, ProxyContext, SocksAddr,
+			outbound::TcpStreamConnector, AsyncReadWrite, BufBytesStream, GetProtocolName,
+			ProxyContext, SocksAddr,
 		},
 		proxy,
 	};
@@ -65,14 +65,18 @@ mod details {
 	}
 
 	#[async_trait]
-	impl TcpConnector for Details {
+	impl TcpStreamConnector for Details {
 		#[implement]
-		async fn connect(
-			&self,
-			dst: &SocksAddr,
-			context: &dyn ProxyContext,
+		async fn connect_stream<'a>(
+			&'a self,
+			stream: Box<dyn AsyncReadWrite>,
+			_dst: &'a SocksAddr,
+			_context: &'a dyn ProxyContext,
 		) -> Result<BufBytesStream, OutboundError> {
 		}
+
+		#[implement]
+		fn addr(&self, context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {}
 	}
 
 	#[cfg(feature = "use-udp")]
@@ -85,10 +89,6 @@ mod details {
 	}
 
 	impl Details {
-		#[must_use]
-		#[implement(only_as_ref)]
-		pub fn get_tcp_connector(&self) -> &dyn TcpConnector {}
-
 		#[must_use]
 		#[implement]
 		pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {}
@@ -142,14 +142,10 @@ pub use details_builder::DetailsBuilder;
 pub struct Outbound {
 	pub tag: Tag,
 	settings: Details,
+	pub transport: crate::transport::Outbound,
 }
 
 impl Outbound {
-	#[must_use]
-	pub fn get_tcp_connector(&self) -> &dyn TcpConnector {
-		self.settings.get_tcp_connector()
-	}
-
 	#[must_use]
 	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
 		self.settings.get_tcp_stream_connector()
@@ -176,7 +172,32 @@ impl TcpConnector for Outbound {
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		self.settings.connect(dst, context).await
+		let proxy_addr = self.settings.addr(context)?;
+		let transport_addr = proxy_addr.as_ref().unwrap_or(dst);
+		let stream = self.transport.connect(transport_addr, context).await?;
+		self.settings.connect_stream(stream, dst, context).await
+	}
+}
+
+#[async_trait]
+impl TcpStreamConnector for Outbound {
+	async fn connect_stream<'a>(
+		&'a self,
+		stream: Box<dyn AsyncReadWrite>,
+		dst: &'a SocksAddr,
+		context: &'a dyn ProxyContext,
+	) -> Result<BufBytesStream, OutboundError> {
+		let proxy_addr = self.settings.addr(context)?;
+		let transport_addr = proxy_addr.as_ref().unwrap_or(dst);
+		let stream = self
+			.transport
+			.connect_stream(stream, transport_addr)
+			.await?;
+		self.settings.connect_stream(stream, dst, context).await
+	}
+
+	fn addr(&self, context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
+		self.settings.addr(context)
 	}
 }
 
@@ -187,6 +208,8 @@ pub struct Builder {
 	pub tag: Tag,
 	#[cfg_attr(feature = "use_serde", serde(flatten))]
 	pub settings: DetailsBuilder,
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub transport: crate::transport::outbound::Builder,
 }
 
 impl Builder {
@@ -200,6 +223,7 @@ impl Builder {
 		Ok(Outbound {
 			tag: self.tag,
 			settings: self.settings.build()?,
+			transport: self.transport.build()?,
 		})
 	}
 
@@ -212,21 +236,27 @@ impl Builder {
 	/// - the protocol does not support URL parsing
 	#[cfg(feature = "parse-url")]
 	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
-		use crate::proxy;
-		type ParseFunc = Box<dyn Fn(&url::Url) -> Result<DetailsBuilder, BoxStdErr>>;
+		use crate::{proxy, transport};
+		type ParseFunc = Box<
+			dyn Fn(&url::Url) -> Result<(DetailsBuilder, transport::outbound::Builder), BoxStdErr>,
+		>;
 
 		let tag: Tag = url.fragment().map(Into::into).unwrap_or_default();
 		let mut parse_url_map = std::collections::HashMap::<&str, ParseFunc>::new();
 		parse_url_map.insert(
 			proxy::freedom::PROTOCOL_NAME,
-			Box::new(|url| proxy::freedom::Settings::parse_url(url).map(Into::into)),
+			Box::new(|url| {
+				proxy::freedom::Settings::parse_url(url).map(|b| (b.into(), Default::default()))
+			}),
 		);
 		#[cfg(feature = "socks5-outbound")]
 		{
 			use proxy::socks5::{outbound::SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| SettingsBuilder::parse_url(url).map(Into::into)),
+				Box::new(|url| {
+					SettingsBuilder::parse_url(url).map(|b| (b.into(), Default::default()))
+				}),
 			);
 		}
 		#[cfg(feature = "http-outbound")]
@@ -234,7 +264,9 @@ impl Builder {
 			use proxy::http::{outbound::SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| SettingsBuilder::parse_url(url).map(Into::into)),
+				Box::new(|url| {
+					SettingsBuilder::parse_url(url).map(|b| (b.into(), Default::default()))
+				}),
 			);
 		}
 		#[cfg(any(
@@ -245,7 +277,9 @@ impl Builder {
 			use proxy::shadowsocks::{outbound::SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| SettingsBuilder::parse_url(url).map(Into::into)),
+				Box::new(|url| {
+					SettingsBuilder::parse_url(url).map(|b| (b.into(), Default::default()))
+				}),
 			);
 		}
 		#[cfg(feature = "trojan-outbound")]
@@ -253,7 +287,9 @@ impl Builder {
 			use proxy::trojan::{SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| SettingsBuilder::parse_url(url).map(Into::into)),
+				Box::new(|url| {
+					SettingsBuilder::parse_url(url).map(|b| (b.into(), Default::default()))
+				}),
 			);
 		}
 		#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
@@ -261,7 +297,9 @@ impl Builder {
 			use proxy::vmess::{outbound::SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| SettingsBuilder::parse_url(url).map(Into::into)),
+				Box::new(|url| {
+					SettingsBuilder::parse_url(url).map(|(b, transport)| (b.into(), transport))
+				}),
 			);
 		}
 
@@ -273,8 +311,12 @@ impl Builder {
 				crate::utils::ListDisplay(valid_options.as_slice())
 			)
 		})?;
-		let settings = parse_url(url)?;
+		let (settings, transport) = parse_url(url)?;
 
-		Ok(Builder { tag, settings })
+		Ok(Builder {
+			tag,
+			settings,
+			transport,
+		})
 	}
 }

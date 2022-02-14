@@ -159,6 +159,7 @@ where
 					peer: SocketAddr::new(addr.into(), 11111),
 					local: SocketAddr::new(addr.into(), 22222),
 				},
+				is_transport_empty: true,
 			},
 		)
 		.await;

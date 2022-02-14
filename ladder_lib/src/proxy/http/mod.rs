@@ -40,9 +40,9 @@ mod tests {
 
 	#[test]
 	fn test_http() {
-		let inbound = InboundSettings::new(vec![], Default::default());
+		let inbound = InboundSettings::new(vec![]);
 		run_proxy_test("http".into(), inbound, |in_addr| {
-			OutboundSettings::new_no_auth(in_addr, Default::default())
+			OutboundSettings::new_no_auth(in_addr)
 		});
 	}
 
@@ -55,9 +55,9 @@ mod tests {
 			("a", "b"),
 			("aa", "bb"),
 		];
-		let inbound = InboundSettings::new(users, Default::default());
+		let inbound = InboundSettings::new(users);
 		run_proxy_test("http-auth".into(), inbound, |in_addr| {
-			OutboundSettings::new("a", "b", in_addr, Default::default())
+			OutboundSettings::new("a", "b", in_addr)
 		});
 	}
 }
