@@ -139,6 +139,13 @@ mod details_builder {
 }
 pub use details_builder::DetailsBuilder;
 
+impl Default for DetailsBuilder {
+	#[inline]
+    fn default() -> Self {
+        Self::Freedom(Default::default())
+    }
+}
+
 pub struct Outbound {
 	pub tag: Tag,
 	settings: Details,

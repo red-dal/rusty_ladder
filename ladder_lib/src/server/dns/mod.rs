@@ -285,7 +285,6 @@ where
 mod tests {
 	use super::*;
 	use crate::{
-		proxy::freedom,
 		server::{self, Server},
 		test_utils::init_log,
 	};
@@ -605,10 +604,13 @@ mod tests {
 					server_addr: DnsServerAddr::Tcp(server_addr),
 					outbound_tag: Some(OUTBOUND_TAG.into()),
 				};
-				let outbound = server::outbound::Outbound {
+				let outbound = server::outbound::Builder {
 					tag: OUTBOUND_TAG.into(),
-					settings: server::outbound::Details::Freedom(freedom::Settings {}.into()),
-				};
+					settings: server::outbound::DetailsBuilder::default(),
+					transport: Default::default(),
+				}
+				.build()
+				.unwrap();
 				let mut server = Server::new(vec![], vec![outbound]).unwrap();
 				server.dns = Some(dns_config);
 				Arc::new(server)
@@ -661,21 +663,26 @@ mod tests {
 					let settings = vmess::inbound::SettingsBuilder {
 						users: vec![user],
 						..Default::default()
+					};
+					server::inbound::Builder {
+						tag: "".into(),
+						addr: OneOrMany::new_one(vmess_addr.to_string().into()),
+						settings: settings.into(),
+						network_type: server::inbound::NetworkType::Net,
+						err_policy: Default::default(),
+						transport: Default::default(),
 					}
 					.build()
-					.unwrap();
-					server::Inbound {
-						tag: "".into(),
-						addr: OneOrMany::One([vmess_addr]),
-						settings: server::inbound::Details::Vmess(settings),
-						err_policy: server::inbound::ErrorHandlingPolicy::Drop,
-					}
+					.unwrap()
 				};
-				let outbound = server::Outbound {
+				let outbound = server::outbound::Builder {
 					tag: "".into(),
-					settings: server::outbound::Details::Freedom(freedom::Settings {}.into()),
-				};
-				let server = Server::new(vec![inbound], vec![outbound]).unwrap();
+					settings: server::outbound::DetailsBuilder::default(),
+					transport: Default::default(),
+				}
+				.build()
+				.unwrap();
+				let server = Server::new(vec![inbound.into()], vec![outbound]).unwrap();
 				async move {
 					Arc::new(server).serve(None).await.unwrap();
 				}
@@ -689,14 +696,20 @@ mod tests {
 					server_addr: DnsServerAddr::Tcp(server_addr),
 					outbound_tag: Some(OUTBOUND_TAG.into()),
 				};
-				let vmess_settings = {
-					let mut builder = vmess::outbound::SettingsBuilder::new(vmess_addr.into(), id);
-					builder.sec = vmess::SecurityType::Chacha20Poly1305;
-					builder.build().unwrap()
-				};
-				let outbound = server::outbound::Outbound {
-					tag: OUTBOUND_TAG.into(),
-					settings: server::outbound::Details::Vmess(vmess_settings.into()),
+				let outbound = {
+					let vmess = {
+						let mut builder =
+							vmess::outbound::SettingsBuilder::new(vmess_addr.into(), id);
+						builder.sec = vmess::SecurityType::Chacha20Poly1305;
+						builder
+					};
+					server::outbound::Builder {
+						tag: OUTBOUND_TAG.into(),
+						settings: vmess.into(),
+						transport: Default::default(),
+					}
+					.build()
+					.unwrap()
 				};
 				let mut server = Server::new(vec![], vec![outbound]).unwrap();
 				server.dns = Some(dns_config);

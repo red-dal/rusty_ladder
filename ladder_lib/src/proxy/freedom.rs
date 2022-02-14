@@ -28,7 +28,7 @@ use async_trait::async_trait;
 
 pub const PROTOCOL_NAME: &str = "freedom";
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct Settings {}
 
