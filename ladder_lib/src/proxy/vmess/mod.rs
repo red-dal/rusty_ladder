@@ -56,6 +56,7 @@ const MAX_PAYLOAD_LENGTH: usize = 16384; // 2 ^ 14
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub enum HeaderMode {
+	#[cfg(feature = "vmess-legacy-auth")]
 	Legacy,
 	Aead,
 }

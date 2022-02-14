@@ -19,10 +19,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::Block;
 use aes::{Aes128, BlockDecrypt, BlockEncrypt, NewBlockCipher};
-use cfb_mode::cipher::{AsyncStreamCipher, NewCipher};
-use cfb_mode::Cfb;
-
-type AesCfb = Cfb<Aes128>;
 
 /// Encrypt a single block using AES-128.
 ///
@@ -41,38 +37,51 @@ pub fn decrypt_aes_128(key: &Block, block: &mut Block) {
 	Aes128::new(key.into()).decrypt_block(block.into());
 }
 
-pub struct Aes128CfbEncryptor {
-	inner: AesCfb,
-}
+#[cfg(feature = "vmess-legacy-auth")]
+mod legacy {
+	use cfb_mode::{
+		cipher::{AsyncStreamCipher, NewCipher},
+		Cfb,
+	};
 
-impl Aes128CfbEncryptor {
-	#[inline]
-	pub fn new(key: &Block, iv: &Block) -> Self {
-		Self {
-			inner: AesCfb::new(key.into(), iv.into()),
+	type AesCfb = Cfb<Aes128>;
+
+	pub struct Aes128CfbEncryptor {
+		inner: AesCfb,
+	}
+
+	impl Aes128CfbEncryptor {
+		#[inline]
+		pub fn new(key: &Block, iv: &Block) -> Self {
+			Self {
+				inner: AesCfb::new(key.into(), iv.into()),
+			}
+		}
+
+		#[inline]
+		pub fn encrypt(&mut self, data: &mut [u8]) {
+			self.inner.encrypt(data);
 		}
 	}
 
-	#[inline]
-	pub fn encrypt(&mut self, data: &mut [u8]) {
-		self.inner.encrypt(data);
+	pub struct Aes128CfbDecrypter {
+		inner: AesCfb,
 	}
-}
 
-pub struct Aes128CfbDecrypter {
-	inner: AesCfb,
-}
+	impl Aes128CfbDecrypter {
+		#[inline]
+		pub fn new(key: &Block, iv: &Block) -> Self {
+			Self {
+				inner: AesCfb::new(key.into(), iv.into()),
+			}
+		}
 
-impl Aes128CfbDecrypter {
-	#[inline]
-	pub fn new(key: &Block, iv: &Block) -> Self {
-		Self {
-			inner: AesCfb::new(key.into(), iv.into()),
+		#[inline]
+		pub fn decrypt(&mut self, data: &mut [u8]) {
+			self.inner.decrypt(data);
 		}
 	}
-
-	#[inline]
-	pub fn decrypt(&mut self, data: &mut [u8]) {
-		self.inner.decrypt(data);
-	}
 }
+
+#[cfg(feature = "vmess-legacy-auth")]
+pub use legacy::{Aes128CfbDecrypter, Aes128CfbEncryptor};

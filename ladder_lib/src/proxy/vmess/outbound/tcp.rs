@@ -17,8 +17,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
+#[cfg(feature = "vmess-legacy-auth")]
+use super::super::crypto;
+
 use super::super::{
-	crypto,
 	response::{open_len, open_payload},
 	utils::{
 		aead_codec, generate_chacha20_key, new_response_key_and_iv, plain_codec, Error,
@@ -49,9 +51,16 @@ type VMessKey = [u8; 16];
 type VMessIv = [u8; 16];
 
 enum ReadResponseState {
-	ReadingResponseLegacy { pos: usize },
-	ReadingResponseAeadLen { pos: usize },
-	ReadingResponseAeadPayload { pos: usize },
+	#[cfg(feature = "vmess-legacy-auth")]
+	ReadingResponseLegacy {
+		pos: usize,
+	},
+	ReadingResponseAeadLen {
+		pos: usize,
+	},
+	ReadingResponseAeadPayload {
+		pos: usize,
+	},
 	Done,
 }
 
@@ -115,6 +124,7 @@ impl ResponseHelper {
 		}
 		loop {
 			match &mut self.state {
+				#[cfg(feature = "vmess-legacy-auth")]
 				ReadResponseState::ReadingResponseLegacy { pos } => {
 					buf.resize(4, 0);
 					debug_assert_eq!(buf.len(), 4);
@@ -229,6 +239,7 @@ impl ReadHalfState {
 		}
 	}
 
+	#[cfg(feature = "vmess-legacy-auth")]
 	#[inline]
 	pub fn new_legacy(response_key: VMessKey, response_iv: VMessIv, req: Request) -> Self {
 		Self::new(
@@ -264,6 +275,7 @@ where
 	R: AsyncRead + Unpin,
 	D: Decode,
 {
+	#[cfg(feature = "vmess-legacy-auth")]
 	pub fn new_legacy(
 		r: R,
 		dec: D,
@@ -367,23 +379,22 @@ where
 		D: Decode,
 	{
 		let read_half = {
-			// chunk reader
-			if HeaderMode::Aead == self.mode {
-				ReadHalf::new_aead(
+			match self.mode {
+				HeaderMode::Aead => ReadHalf::new_aead(
 					self.r,
 					self.dec,
 					*self.response_key,
 					*self.response_iv,
 					self.req,
-				)
-			} else {
-				ReadHalf::new_legacy(
+				),
+				#[cfg(feature = "vmess-legacy-auth")]
+				HeaderMode::Legacy => ReadHalf::new_legacy(
 					self.r,
 					self.dec,
 					*self.response_key,
 					*self.response_iv,
 					self.req,
-				)
+				),
 			}
 		};
 
@@ -501,6 +512,7 @@ where
 		new_response_key_and_iv(&req.payload_key, &req.payload_iv, mode);
 
 	let (request_data, state) = match mode {
+		#[cfg(feature = "vmess-legacy-auth")]
 		HeaderMode::Legacy => (
 			req.encode_legacy(id, time),
 			ReadResponseState::ReadingResponseLegacy { pos: 0 },
@@ -548,6 +560,7 @@ where
 		new_response_key_and_iv(&req.payload_key, &req.payload_iv, mode);
 
 	let request_data = match mode {
+		#[cfg(feature = "vmess-legacy-auth")]
 		HeaderMode::Legacy => req.encode_legacy(id, time),
 		HeaderMode::Aead => req.encode_aead(id, time),
 	};
@@ -663,6 +676,7 @@ where
 	};
 
 	let request_data = match mode {
+		#[cfg(feature = "vmess-legacy-auth")]
 		HeaderMode::Legacy => req.encode_legacy(id, time),
 		HeaderMode::Aead => req.encode_aead(id, time),
 	};

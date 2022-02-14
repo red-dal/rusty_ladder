@@ -255,6 +255,7 @@ pub fn new_cmd_key(id: &Uuid) -> [u8; 16] {
 	md5.finalize().into()
 }
 
+#[cfg(feature = "vmess-legacy-auth")]
 #[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
 pub fn new_auth(time: i64, uuid: &Uuid) -> Result<[u8; AUTH_ID_LEN], Error> {
 	use hmac::{Hmac, Mac, NewMac};
@@ -267,6 +268,7 @@ pub fn new_auth(time: i64, uuid: &Uuid) -> Result<[u8; AUTH_ID_LEN], Error> {
 	Ok(auth)
 }
 
+#[cfg(feature = "vmess-legacy-auth")]
 pub fn new_request_key_iv(id: &Uuid, time: i64) -> (Key, Iv) {
 	let request_key = new_cmd_key(id);
 
@@ -284,6 +286,7 @@ pub fn new_request_key_iv(id: &Uuid, time: i64) -> (Key, Iv) {
 
 pub fn new_response_key_and_iv(payload_key: &Key, payload_iv: &Iv, mode: HeaderMode) -> (Key, Iv) {
 	match mode {
+		#[cfg(feature = "vmess-legacy-auth")]
 		HeaderMode::Legacy => {
 			let mut md5 = Md5::new();
 			md5.update(payload_key);

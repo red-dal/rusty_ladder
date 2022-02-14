@@ -46,7 +46,10 @@ pub struct SettingsBuilder {
 	pub addr: SocksAddr,
 	pub id: Uuid,
 	pub sec: SecurityType,
-	// TODO: make feature `vmess-legacy-auth` a requirement
+	/// Use legacy request header instead of AEAD header.
+	/// 
+	/// This has been deprecated and feature `vmess-legacy-auth` 
+	/// must be enabled in order to use it.
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub use_legacy_header: bool,
 }
@@ -78,10 +81,17 @@ impl SettingsBuilder {
 	///
 	/// # Errors
 	///
-	/// No error is returned currently.
+	/// Return an error if `use_legacy_header` is true but 
+	/// feature `vmess-legacy-auth` is not enabled.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
 		let mode = if self.use_legacy_header {
-			HeaderMode::Legacy
+			#[cfg(feature = "vmess-legacy-auth")]
+			{
+				HeaderMode::Legacy
+			}
+			#[cfg(not(feature = "vmess-legacy-auth"))] {
+				return Err("'use_legacy_header' is true but feature 'vmess-legacy-auth' is not enabled".into());
+			}
 		} else {
 			HeaderMode::Aead
 		};

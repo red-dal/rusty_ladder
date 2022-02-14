@@ -17,8 +17,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use openssl::symm::{Cipher, Crypter, Mode};
 use super::{Block, AES_KEY_LEN};
+use openssl::symm::{Cipher, Crypter, Mode};
 
 /// Encrypt a single block using AES-128.
 ///
@@ -48,69 +48,75 @@ fn do_cipher(mode: Mode, key: &Block, block: &mut Block) {
 	block.copy_from_slice(&tmp_buf[..AES_KEY_LEN]);
 }
 
-pub struct Aes128CfbEncryptor {
-	inner: CfbInternal,
-}
+#[cfg(feature = "vmess-legacy-auth")]
+mod legacy {
+	pub struct Aes128CfbEncryptor {
+		inner: CfbInternal,
+	}
 
-impl Aes128CfbEncryptor {
-	#[inline]
-	pub fn new(key: &Block, iv: &Block) -> Self {
-		Self {
-			inner: CfbInternal::new(Mode::Encrypt, key, iv),
+	impl Aes128CfbEncryptor {
+		#[inline]
+		pub fn new(key: &Block, iv: &Block) -> Self {
+			Self {
+				inner: CfbInternal::new(Mode::Encrypt, key, iv),
+			}
+		}
+
+		#[inline]
+		pub fn encrypt(&mut self, data: &mut [u8]) {
+			self.inner.do_crypt(data);
 		}
 	}
 
-	#[inline]
-	pub fn encrypt(&mut self, data: &mut [u8]) {
-		self.inner.do_crypt(data);
+	pub struct Aes128CfbDecrypter {
+		inner: CfbInternal,
 	}
-}
 
-pub struct Aes128CfbDecrypter {
-	inner: CfbInternal,
-}
+	impl Aes128CfbDecrypter {
+		#[inline]
+		pub fn new(key: &Block, iv: &Block) -> Self {
+			Self {
+				inner: CfbInternal::new(Mode::Decrypt, key, iv),
+			}
+		}
 
-impl Aes128CfbDecrypter {
-	#[inline]
-	pub fn new(key: &Block, iv: &Block) -> Self {
-		Self {
-			inner: CfbInternal::new(Mode::Decrypt, key, iv),
+		#[inline]
+		pub fn decrypt(&mut self, data: &mut [u8]) {
+			self.inner.do_crypt(data);
 		}
 	}
 
-	#[inline]
-	pub fn decrypt(&mut self, data: &mut [u8]) {
-		self.inner.do_crypt(data);
+	struct CfbInternal {
+		c: Crypter,
+		buf: Vec<u8>,
+		block_size: usize,
 	}
-}
 
-struct CfbInternal {
-	c: Crypter,
-	buf: Vec<u8>,
-	block_size: usize,
-}
+	impl CfbInternal {
+		fn new(mode: Mode, key: &Block, iv: &Block) -> Self {
+			let t = Cipher::aes_128_cfb128();
+			Self {
+				c: Crypter::new(t, mode, key, Some(iv)).expect("cannot initialize_crypter"),
+				buf: Vec::new(),
+				block_size: t.block_size(),
+			}
+		}
 
-impl CfbInternal {
-	fn new(mode: Mode, key: &Block, iv: &Block) -> Self {
-		let t = Cipher::aes_128_cfb128();
-		Self {
-			c: Crypter::new(t, mode, key, Some(iv)).expect("cannot initialize_crypter"),
-			buf: Vec::new(),
-			block_size: t.block_size(),
+		fn do_crypt(&mut self, data: &mut [u8]) {
+			// Zero all memories.
+			self.buf.clear();
+			self.buf.resize(data.len() + self.block_size, 0);
+
+			let count = self.c.update(data, &mut self.buf).expect("cannot update");
+			let rest = self
+				.c
+				.finalize(&mut self.buf[count..])
+				.expect("cannot finalize");
+			debug_assert_eq!(count + rest, data.len());
+			data.copy_from_slice(&self.buf[..data.len()]);
 		}
 	}
-
-	fn do_crypt(&mut self, data: &mut [u8]) {
-		// Zero all memories.
-		self.buf.clear();
-		self.buf.resize(data.len() + self.block_size, 0);
-
-		let count = self.c.update(data, &mut self.buf).expect("cannot update");
-		let rest = self
-			.c
-			.finalize(&mut self.buf[count..])
-			.expect("cannot finalize");
-		debug_assert_eq!(count + rest, data.len());
-		data.copy_from_slice(&self.buf[..data.len()]);
-	}
 }
+
+#[cfg(feature = "vmess-legacy-auth")]
+pub use legacy::{Aes128CfbDecrypter, Aes128CfbEncryptor};
