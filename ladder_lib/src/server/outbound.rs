@@ -141,9 +141,9 @@ pub use details_builder::DetailsBuilder;
 
 impl Default for DetailsBuilder {
 	#[inline]
-    fn default() -> Self {
-        Self::Freedom(Default::default())
-    }
+	fn default() -> Self {
+		Self::Freedom(Default::default())
+	}
 }
 
 pub struct Outbound {

@@ -12,11 +12,16 @@ default = [
     "all-proxies-openssl",
     "use-udp",
     "parse-url",
+    "parse-url-v2rayn",
     "parse-config",
 ]
 
-# Enable commandline options that parses URL.
+# Enable commandline options to parse URL.
 parse-url = ["ladder_lib/parse-url"]
+# Enable commandline options to parse URL using v2rayn format if possible.
+# This feature only works on VMess proxy.
+parse-url-v2rayn = ["ladder_lib/parse-url-v2rayn"]
+
 # Enable commandline options that parses JSON or TOML config.
 parse-config = ["ladder_lib/use_serde", "serde", "serde_json", "toml"]
 

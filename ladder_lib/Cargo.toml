@@ -15,7 +15,10 @@ use-webapi = ["warp", "serde", "serde_json", "http"]
 
 use-udp = []
 
+# Enable URL parsing for some proxies.
 parse-url = ["url", "percent-encoding", "base64"]
+# Enable URL parsing using 
+parse-url-v2rayn = ["parse-url", "serde", "serde_json"]
 
 # Enable all transport.
 all-transports-openssl = [
