@@ -11,7 +11,6 @@ default = [
     "all-transports-openssl",
     "all-proxies-openssl",
     "use-udp",
-    "parse-url",
     "parse-url-v2rayn",
     "parse-config",
 ]

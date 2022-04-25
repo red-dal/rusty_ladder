@@ -1,5 +1,8 @@
 use super::{SecurityType, SettingsBuilder, PROTOCOL_NAME};
-use crate::{prelude::BoxStdErr, transport::outbound::Builder as TransportBuilder};
+use crate::{
+	prelude::{BoxStdErr, Tag},
+	transport::outbound::Builder as TransportBuilder,
+};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -15,14 +18,14 @@ impl SettingsBuilder {
 	///
 	/// # Errors
 	/// Return an error if `url` does not match the above format.
-	pub fn parse_url(url: &url::Url) -> Result<(Self, TransportBuilder), BoxStdErr> {
+	pub fn parse_url(url: &url::Url) -> Result<(Option<Tag>, Self, TransportBuilder), BoxStdErr> {
 		#[cfg(feature = "parse-url-v2rayn")]
 		{
 			if let Ok(result) = parse_url_v2rayn(url) {
 				return Ok(result);
 			}
 		}
-		parse_url_std(url)
+		parse_url_std(url).map(|(s, t)| (None, s, t))
 	}
 }
 
@@ -100,22 +103,15 @@ fn parse_url_std(url: &url::Url) -> Result<(SettingsBuilder, TransportBuilder), 
 	))
 }
 
-#[cfg(feature = "parse-url-v2rayn")]
-/// Parse `url` using
-/// [v2ray format](https://github.com/2dust/v2rayN/wiki/%E5%88%86%E4%BA%AB%E9%93%BE%E6%8E%A5%E6%A0%BC%E5%BC%8F%E8%AF%B4%E6%98%8E(ver-2))
-/// .
-fn parse_url_v2rayn(url: &url::Url) -> Result<(SettingsBuilder, TransportBuilder), BoxStdErr> {
-	todo!()
-}
-
 #[cfg(test)]
 mod tests {
-	use super::{SecurityType, SettingsBuilder};
+	use super::{parse_url_std, SecurityType, SettingsBuilder};
 	use crate::transport;
 	use std::str::FromStr;
 	use url::Url;
+
 	#[test]
-	fn test_parse_url() {
+	fn test_parse_url_std() {
 		let data = [
 			(
 				"vmess://tcp:2e09f64c-c967-4ce3-9498-fdcd8e39e04e-0@google.com:4433/?query=Value1#Connection2",
@@ -127,7 +123,8 @@ mod tests {
 				}, Default::default()),
 			),
 			(
-				"vmess://ws+tls:7db04e8f-7cfc-46e0-9e18-d329c22ec353-0@myServer.com:12345/?path=%2FmyServerAddressPath%2F%E4%B8%AD%E6%96%87%E8%B7%AF%E5%BE%84%2F&host=www.myServer.com",
+				"vmess://ws+tls:7db04e8f-7cfc-46e0-9e18-d329c22ec353-0@myServer.com:12345\
+				/?path=%2FmyServerAddressPath%2F%E4%B8%AD%E6%96%87%E8%B7%AF%E5%BE%84%2F&host=www.myServer.com",
 				(
 					SettingsBuilder {
 						addr: "myServer.com:12345".parse().unwrap(),
@@ -149,8 +146,459 @@ mod tests {
 		];
 		for (url, expected) in data {
 			let url = Url::from_str(url).unwrap();
-			let output = SettingsBuilder::parse_url(&url).unwrap();
-			assert_eq!(expected, output);
+			let (settings, transport) = parse_url_std(&url).unwrap();
+			assert_eq!(expected, (settings, transport));
 		}
 	}
 }
+
+#[cfg(feature = "parse-url-v2rayn")]
+mod parse_v2rayn_impl {
+	use super::{SecurityType, SettingsBuilder, TransportBuilder};
+	use crate::{
+		prelude::{BoxStdErr, Tag},
+		protocol::{SocksAddr, SocksDestination},
+		transport,
+	};
+	use serde::Deserialize;
+	use std::str::FromStr;
+	use url::Url;
+	use uuid::Uuid;
+
+	#[cfg_attr(test, derive(Debug))]
+	#[derive(Deserialize, PartialEq, Eq)]
+	#[serde(rename_all = "lowercase")]
+	enum Net {
+		Tcp,
+		Kcp,
+		Ws,
+		Http,
+		Quic,
+	}
+
+	impl Default for Net {
+		fn default() -> Self {
+			Net::Tcp
+		}
+	}
+
+	#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+	#[derive(Deserialize)]
+	struct ConfigObject {
+		v: usize,
+		ps: String,
+		add: String,
+		port: u16,
+		id: Uuid,
+		#[serde(default)]
+		aid: u16,
+		#[serde(default)]
+		scy: SecurityType,
+		#[serde(default)]
+		net: Net,
+		#[serde(default, rename = "type")]
+		type_: String,
+		#[serde(default)]
+		host: String,
+		#[serde(default)]
+		path: String,
+		#[serde(default)]
+		tls: String,
+		#[serde(default)]
+		sni: String,
+	}
+
+	impl ConfigObject {
+		pub fn from_data(encoded_data: &str) -> Result<Self, BoxStdErr> {
+			let cfg_str = base64::decode_config(encoded_data, base64::STANDARD_NO_PAD)?;
+			let cfg_str = String::from_utf8(cfg_str)?;
+			serde_json::from_str(&cfg_str).map_err(Into::into)
+		}
+	}
+
+	/// Parse `url` using
+	/// [v2ray format](https://github.com/2dust/v2rayN/wiki/%E5%88%86%E4%BA%AB%E9%93%BE%E6%8E%A5%E6%A0%BC%E5%BC%8F%E8%AF%B4%E6%98%8E(ver-2))
+	/// .
+	pub(super) fn parse_url_v2rayn(
+		url: &Url,
+	) -> Result<(Option<Tag>, SettingsBuilder, TransportBuilder), BoxStdErr> {
+		if !(url.username().is_empty() && url.password().is_none()) {
+			return Err("v2rayn format URL should not have username and password".into());
+		}
+		let encoded_data = url.host_str().ok_or("URL missing host")?;
+		// Check if URL is v2rayn format
+		let obj = ConfigObject::from_data(encoded_data)?;
+		if obj.v != 2 {
+			return Err("only version 2 is supported".into());
+		}
+		if obj.aid != 0 {
+			return Err("aid other than 0 (legacy header) is not supported".into());
+		}
+		if !(obj.type_ == "" || obj.type_ == "none") {
+			return Err("only 'none` type is supported".into());
+		}
+		let ps = if obj.ps.is_empty() {
+			None
+		} else {
+			Some(Tag::from(obj.ps.as_str()))
+		};
+		let addr = {
+			let dest = SocksDestination::from_str(&obj.add)
+				.map_err(|e| format!("invalid `add` ({})", e))?;
+			SocksAddr::new(dest, obj.port)
+		};
+		let settings = SettingsBuilder {
+			addr,
+			id: obj.id,
+			sec: obj.scy,
+			use_legacy_header: false,
+		};
+		let transport = {
+			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
+			{
+				let tls_transport = match obj.tls.as_str() {
+					"tls" => {
+						if !(obj.sni.is_empty() || obj.sni == obj.add) {
+							return Err(
+								"does not support sni that is not empty or same as add".into()
+							);
+						}
+						Some(crate::transport::tls::OutboundBuilder::default())
+					}
+					"" => None,
+					_ => return Err("invalid tls value, can only be 'tls' or empty".into()),
+				};
+
+				let transport = match obj.net {
+					Net::Tcp => {
+						tls_transport.map_or_else(|| TransportBuilder::default(), |tls| tls.into())
+					}
+					#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+					Net::Ws => transport::ws::OutboundBuilder {
+						headers: Default::default(),
+						path: obj.path,
+						host: obj.host,
+						tls: tls_transport,
+					}
+					.into(),
+					#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
+					Net::Http => transport::h2::OutboundBuilder {
+						path: obj.path,
+						tls: tls_transport,
+					}
+					.into(),
+					_ => return Err("net not supported".into()),
+				};
+				transport
+			}
+			#[cfg(not(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls")))]
+			{
+				if !obj.tls.is_empty() {
+					return Err("TLS not supported".into());
+				}
+				TransportBuilder::default()
+			}
+		};
+		Ok((ps, settings, transport))
+	}
+
+	#[cfg(test)]
+	mod tests {
+		use super::*;
+
+		#[test]
+		fn test_config_object_from_url() {
+			let input = Url::from_str(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlSIsInNjeS\
+				I6ImF1dG8iLCJ0eXBlIjoiIiwic25pIjoiIiwicGF0aCI6IiIsInBvcnQiOjEwMDAwLCJ2Ijo\
+				yLCJob3N0IjoiIiwidGxzIjoiIiwiaWQiOiJlZjdlMjc0Yy04ZWVkLTQ3YTgtYjNkYi04ODY1\
+				N2Q0ZmViM2UiLCJuZXQiOiJ3cyJ9",
+			)
+			.unwrap();
+			let expected = ConfigObject {
+				v: 2,
+				ps: "测试".into(),
+				add: "test.test".into(),
+				port: 10000,
+				id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+				aid: 0,
+				scy: SecurityType::Auto,
+				net: Net::Ws,
+				type_: "".into(),
+				host: "".into(),
+				path: "".into(),
+				tls: "".into(),
+				sni: "".into(),
+			};
+			assert_eq!(
+				ConfigObject::from_data(input.host_str().unwrap()).unwrap(),
+				expected
+			);
+		}
+
+		fn check_v2rayn(
+			input: &str,
+			expected_tag: impl Into<Tag>,
+			expected_settings: &SettingsBuilder,
+			expected_transport: &TransportBuilder,
+		) {
+			let input = Url::from_str(input).unwrap();
+			let expected_tag = Some(expected_tag.into());
+			let (tag, settings, transport) = parse_url_v2rayn(&input).unwrap();
+			assert_eq!(&tag, &expected_tag);
+			assert_eq!(&settings, expected_settings);
+			assert_eq!(&transport, expected_transport);
+		}
+
+		#[test]
+		fn test_parse_url_v2rayn_plain() {
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlSIsInNjeSI6ImF1dG8iLCJ0eXBl\
+					Ijoibm9uZSIsInNuaSI6IiIsInBhdGgiOiIvdGVzdHBhdGgiLCJwb3J0IjoxMDAwMCwidiI6Miwia\
+					G9zdCI6InRlc3QuaG9zdCIsInRscyI6IiIsImlkIjoiZWY3ZTI3NGMtOGVlZC00N2E4LWIzZGItOD\
+					g2NTdkNGZlYjNlIiwibmV0IjoidGNwIn0=",
+				"测试",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::default(),
+			);
+		}
+
+		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
+		#[test]
+		fn test_parse_url_v2rayn_tls() {
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iu\
+					a1i+ivlSIsInNjeSI6ImF1dG8iLCJ0eXBlIjoibm9uZSIsInNuaSI6IiIsInBhdGgiOiIiLCJw\
+					b3J0IjoxMDAwMCwidiI6MiwiaG9zdCI6IiIsInRscyI6InRscyIsImlkIjoiZWY3ZTI3NGMtOG\
+					VlZC00N2E4LWIzZGItODg2NTdkNGZlYjNlIiwibmV0IjoidGNwIn0=",
+				"测试",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::Tls(transport::tls::OutboundBuilder::default()),
+			);
+		}
+
+		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+		#[test]
+		fn test_parse_url_v2rayn_ws() {
+			// With host and path
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlXdzIiwic2N5IjoiYXV0byI\
+					sInR5cGUiOiIiLCJzbmkiOiIiLCJwYXRoIjoiL3Rlc3RwYXRoIiwicG9ydCI6MTAwMDAsInY\
+					iOjIsImhvc3QiOiJ0ZXN0Lmhvc3QiLCJ0bHMiOiIiLCJpZCI6ImVmN2UyNzRjLThlZWQtNDd\
+					hOC1iM2RiLTg4NjU3ZDRmZWIzZSIsIm5ldCI6IndzIn0=",
+				"测试ws",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
+					headers: Default::default(),
+					path: "/testpath".into(),
+					host: "test.host".into(),
+					tls: None,
+				}),
+			);
+			// Without host and path
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlXdzIiwic2N5IjoiY\
+					XV0byIsInR5cGUiOiIiLCJzbmkiOiIiLCJwYXRoIjoiIiwicG9ydCI6MTAwMDAsInY\
+					iOjIsImhvc3QiOiIiLCJ0bHMiOiIiLCJpZCI6ImVmN2UyNzRjLThlZWQtNDdhOC1iM\
+					2RiLTg4NjU3ZDRmZWIzZSIsIm5ldCI6IndzIn0=",
+				"测试ws",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
+					headers: Default::default(),
+					path: Default::default(),
+					host: Default::default(),
+					tls: None,
+				}),
+			);
+		}
+
+		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
+		#[test]
+		fn test_parse_url_v2rayn_wss() {
+			// With host and path
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlXdzK3RscyIsInNjeSI6I\
+					mF1dG8iLCJ0eXBlIjoiIiwic25pIjoiIiwicGF0aCI6Ii90ZXN0cGF0aCIsInBvcnQiOjE\
+					wMDAwLCJ2IjoyLCJob3N0IjoidGVzdC5ob3N0IiwidGxzIjoidGxzIiwiaWQiOiJlZjdlM\
+					jc0Yy04ZWVkLTQ3YTgtYjNkYi04ODY1N2Q0ZmViM2UiLCJuZXQiOiJ3cyJ9",
+				"测试ws+tls",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
+					headers: Default::default(),
+					host: "test.host".into(),
+					path: "/testpath".into(),
+					tls: Some(transport::tls::OutboundBuilder::default()),
+				}),
+			);
+			// Without host and path
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlXdzK3RscyIsInNjeSI\
+					6ImF1dG8iLCJ0eXBlIjoiIiwic25pIjoiIiwicGF0aCI6IiIsInBvcnQiOjEwMDAwLCJ\
+					2IjoyLCJob3N0IjoiIiwidGxzIjoidGxzIiwiaWQiOiJlZjdlMjc0Yy04ZWVkLTQ3YTg\
+					tYjNkYi04ODY1N2Q0ZmViM2UiLCJuZXQiOiJ3cyJ9",
+				"测试ws+tls",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
+					headers: Default::default(),
+					path: Default::default(),
+					host: Default::default(),
+					tls: Some(transport::tls::OutboundBuilder::default()),
+				}),
+			);
+		}
+
+		#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
+		#[test]
+		fn test_parse_url_v2rayn_h2() {
+			// With path
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlWgyIiwic2N5IjoiYXV0\
+					byIsInR5cGUiOiIiLCJzbmkiOiIiLCJwYXRoIjoiL3Rlc3RwYXRoIiwicG9ydCI6MTAwM\
+					DAsInYiOjIsImhvc3QiOiIiLCJ0bHMiOiIiLCJpZCI6ImVmN2UyNzRjLThlZWQtNDdhOC\
+					1iM2RiLTg4NjU3ZDRmZWIzZSIsIm5ldCI6Imh0dHAifQ==",
+				"测试h2",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					path: "/testpath".into(),
+					tls: None,
+				}),
+			);
+			// Without host and path
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlWgyIiwic2N5IjoiYXV0\
+					byIsInR5cGUiOiIiLCJzbmkiOiIiLCJwYXRoIjoiIiwicG9ydCI6MTAwMDAsInYiOjIsI\
+					mhvc3QiOiIiLCJ0bHMiOiIiLCJpZCI6ImVmN2UyNzRjLThlZWQtNDdhOC1iM2RiLTg4Nj\
+					U3ZDRmZWIzZSIsIm5ldCI6Imh0dHAifQ==",
+				"测试h2",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					path: Default::default(),
+					tls: None,
+				}),
+			);
+		}
+
+		#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
+		#[test]
+		fn test_parse_url_v2rayn_h2_tls() {
+			// With path
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlWgyK3RscyIsInNjeSI6\
+					ImF1dG8iLCJ0eXBlIjoiIiwic25pIjoiIiwicGF0aCI6Ii90ZXN0cGF0aCIsInBvcnQiO\
+					jEwMDAwLCJ2IjoyLCJob3N0IjoiIiwidGxzIjoidGxzIiwiaWQiOiJlZjdlMjc0Yy04ZW\
+					VkLTQ3YTgtYjNkYi04ODY1N2Q0ZmViM2UiLCJuZXQiOiJodHRwIn0=",
+				"测试h2+tls",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					path: "/testpath".into(),
+					tls: Some(transport::tls::OutboundBuilder::default()),
+				}),
+			);
+			// Without host and path
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlWgyK3RscyIs\
+					InNjeSI6ImF1dG8iLCJ0eXBlIjoiIiwic25pIjoiIiwicGF0aCI6IiIsInBvcnQiOjEwM\
+					DAwLCJ2IjoyLCJob3N0IjoiIiwidGxzIjoidGxzIiwiaWQiOiJlZjdlMjc0Yy04ZWVkLT\
+					Q3YTgtYjNkYi04ODY1N2Q0ZmViM2UiLCJuZXQiOiJodHRwIn0=",
+				"测试h2+tls",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					path: Default::default(),
+					tls: Some(transport::tls::OutboundBuilder::default()),
+				}),
+			);
+		}
+
+		fn check_mixed(
+			input: &str,
+			expected_tag: Option<&str>,
+			expected_settings: &SettingsBuilder,
+			expected_transport: &TransportBuilder,
+		) {
+			let input = Url::from_str(input).unwrap();
+			let expected_tag = expected_tag.map(Into::into);
+			let (tag, settings, transport) = SettingsBuilder::parse_url(&input).unwrap();
+			assert_eq!(&tag, &expected_tag);
+			assert_eq!(&settings, expected_settings);
+			assert_eq!(&transport, expected_transport);
+		}
+
+		#[test]
+		fn test_parse_url_mixed() {
+			let expected_settings = SettingsBuilder {
+				addr: "test.server.com:10000".parse().unwrap(),
+				id: "ef7e274c-8eed-47a8-b3db-88657d4feb3e".parse().unwrap(),
+				sec: SecurityType::Auto,
+				use_legacy_header: false,
+			};
+			check_mixed(
+				"vmess://tcp:ef7e274c-8eed-47a8-b3db-88657d4feb3e@test.server.com:10000?\
+						encryption=auto#%E6%B5%8B%E8%AF%95",
+				None,
+				&expected_settings,
+				&Default::default(),
+			);
+			check_mixed(
+				"vmess://eyJhZGQiOiJ0ZXN0LnNlcnZlci5jb20iLCJwcyI6Iua1i+ivlSIsInNjeSI\
+				6ImF1dG8iLCJ0eXBlIjoibm9uZSIsInNuaSI6IiIsInBhdGgiOiIiLCJwb3J0IjoxMDAwMCwid\
+				iI6MiwiaG9zdCI6IiIsInRscyI6IiIsImlkIjoiZWY3ZTI3NGMtOGVlZC00N2E4LWIzZGItODg\
+				2NTdkNGZlYjNlIiwibmV0IjoidGNwIn0=",
+				Some("测试"),
+				&expected_settings,
+				&Default::default(),
+			);
+		}
+	}
+}
+#[cfg(feature = "parse-url-v2rayn")]
+use parse_v2rayn_impl::parse_url_v2rayn;

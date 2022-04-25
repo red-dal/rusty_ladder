@@ -104,6 +104,7 @@ impl Outbound {
 
 		let uri = {
 			let scheme = if self.tls.is_some() { "https" } else { "http" };
+			// TODO: Fis this and add host options
 			let uri = format!("{}://www.example.com{}", scheme, self.path);
 			uri.parse::<Uri>().map_err(|err| {
 				io::Error::new(

@@ -245,7 +245,12 @@ impl Builder {
 	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
 		use crate::{proxy, transport};
 		type ParseFunc = Box<
-			dyn Fn(&url::Url) -> Result<(DetailsBuilder, transport::outbound::Builder), BoxStdErr>,
+			dyn Fn(
+				&url::Url,
+			) -> Result<
+				(Option<Tag>, DetailsBuilder, transport::outbound::Builder),
+				BoxStdErr,
+			>,
 		>;
 
 		let tag: Tag = url.fragment().map(Into::into).unwrap_or_default();
@@ -253,7 +258,8 @@ impl Builder {
 		parse_url_map.insert(
 			proxy::freedom::PROTOCOL_NAME,
 			Box::new(|url| {
-				proxy::freedom::Settings::parse_url(url).map(|b| (b.into(), Default::default()))
+				proxy::freedom::Settings::parse_url(url)
+					.map(|b| (None, b.into(), Default::default()))
 			}),
 		);
 		#[cfg(feature = "socks5-outbound")]
@@ -262,7 +268,7 @@ impl Builder {
 			parse_url_map.insert(
 				PROTOCOL_NAME,
 				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|b| (b.into(), Default::default()))
+					SettingsBuilder::parse_url(url).map(|b| (None, b.into(), Default::default()))
 				}),
 			);
 		}
@@ -272,7 +278,7 @@ impl Builder {
 			parse_url_map.insert(
 				PROTOCOL_NAME,
 				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|b| (b.into(), Default::default()))
+					SettingsBuilder::parse_url(url).map(|b| (None, b.into(), Default::default()))
 				}),
 			);
 		}
@@ -285,7 +291,7 @@ impl Builder {
 			parse_url_map.insert(
 				PROTOCOL_NAME,
 				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|b| (b.into(), Default::default()))
+					SettingsBuilder::parse_url(url).map(|b| (None, b.into(), Default::default()))
 				}),
 			);
 		}
@@ -295,7 +301,7 @@ impl Builder {
 			parse_url_map.insert(
 				PROTOCOL_NAME,
 				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|b| (b.into(), Default::default()))
+					SettingsBuilder::parse_url(url).map(|b| (None, b.into(), Default::default()))
 				}),
 			);
 		}
@@ -305,7 +311,8 @@ impl Builder {
 			parse_url_map.insert(
 				PROTOCOL_NAME,
 				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|(b, transport)| (b.into(), transport))
+					SettingsBuilder::parse_url(url)
+						.map(|(tag, b, transport)| (tag, b.into(), transport))
 				}),
 			);
 		}
@@ -318,10 +325,9 @@ impl Builder {
 				crate::utils::ListDisplay(valid_options.as_slice())
 			)
 		})?;
-		let (settings, transport) = parse_url(url)?;
-
+		let (new_tag, settings, transport) = parse_url(url)?;
 		Ok(Builder {
-			tag,
+			tag: new_tag.unwrap_or(tag),
 			settings,
 			transport,
 		})
