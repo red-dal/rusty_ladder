@@ -20,13 +20,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::tls;
 use crate::{
 	prelude::*,
-	protocol::{AsyncReadWrite, CompositeBytesStream, ProxyContext},
+	protocol::{socks_addr::DomainName, AsyncReadWrite, CompositeBytesStream, ProxyContext},
 };
 use bytes::{Buf, Bytes};
 use futures::{ready, Future};
 use h2::{client, server, RecvStream, SendStream};
 use http::{Request, Response, Uri};
 use std::{
+	collections::HashSet,
 	io,
 	pin::Pin,
 	sync::{
@@ -42,14 +43,20 @@ const NOT_CLOSED: bool = !CLOSED;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
+	#[error("domain '{0}' is invalid ({1})")]
+	InvalidHost(String, BoxStdErr),
 	#[error("non-empty path '{0}' does not start with '/'")]
 	PathNotStartsWithSlash(String),
 	#[error("tls ({0})")]
 	Tls(#[from] crate::utils::tls::ConfigError),
 }
 
+// -------------------------------------------------------------
+//                          Outbound
+// -------------------------------------------------------------
+
 pub struct Outbound {
-	path: String,
+	req_url: Uri,
 	tls: Option<tls::Outbound>,
 }
 
@@ -102,22 +109,10 @@ impl Outbound {
 		});
 		let mut send_request = send_request.ready().await.map_err(h2_to_io_err)?;
 
-		let uri = {
-			let scheme = if self.tls.is_some() { "https" } else { "http" };
-			// TODO: Fis this and add host options
-			let uri = format!("{}://www.example.com{}", scheme, self.path);
-			uri.parse::<Uri>().map_err(|err| {
-				io::Error::new(
-					io::ErrorKind::Other,
-					format!("Incorrect URI '{}' ({})", uri, err),
-				)
-			})?
-		};
-
-		let request = Request::put(uri)
+		let request = Request::put(self.req_url.clone())
 			.version(http::Version::HTTP_2)
 			.body(())
-			.unwrap();
+			.expect("Building HTTP request should not failed");
 
 		trace!("HTTP2 request: {:?}", request);
 
@@ -150,6 +145,8 @@ impl Outbound {
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 pub struct OutboundBuilder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub host: String,
+	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub path: String,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub tls: Option<tls::OutboundBuilder>,
@@ -165,14 +162,60 @@ impl OutboundBuilder {
 	///
 	/// Returns [`BuildError::Tls`] if there are any errors in TLS configuration.
 	pub fn build(self) -> Result<Outbound, BuildError> {
-		let path = check_path(self.path)?;
 		let tls = self.tls.map(tls::OutboundBuilder::build).transpose()?;
-		Ok(Outbound { path, tls })
+		let req_url = make_request_url(&self.path, &self.host, tls.is_some())?;
+		Ok(Outbound { req_url, tls })
 	}
 }
 
+const DEFAULT_HOST: &str = "www.example.com";
+
+fn make_request_url(path: &str, host: &str, use_tls: bool) -> Result<Uri, BuildError> {
+	const HTTPS: &str = "https";
+	const HTTP: &str = "http";
+
+	let host = if host.is_empty() { DEFAULT_HOST } else { host };
+	let scheme = if use_tls { HTTPS } else { HTTP };
+	Uri::builder()
+		.scheme(scheme)
+		.authority(host)
+		.path_and_query(path)
+		.build()
+		.map_err(|e| BuildError::InvalidHost(host.into(), e.into()))
+}
+
+#[cfg(test)]
+mod outbound_tests {
+	use super::*;
+
+	#[test]
+	fn test_make_request_url() {
+		fn check(expected: &str, host: &str, path: &str, use_tls: bool) {
+			let expected = Uri::from_str(expected).unwrap();
+			let output = make_request_url(path, host, use_tls).unwrap();
+			assert_eq!(expected, output);
+		}
+
+		check("http://www.example.com", "", "/", false);
+		check("https://www.example.com", "", "/", true);
+
+		check("http://www.example.com/testpath", "", "/testpath", false);
+		check("https://www.example.com/testpath", "", "/testpath", true);
+
+		check("http://aaa.bbb", "aaa.bbb", "/", false);
+		check("http://aaa.bbb/testpath", "aaa.bbb", "/testpath", false);
+
+		check("http://aaa.bbb", "aaa.bbb", "", false);
+		check("http://aaa.bbb/testpath", "aaa.bbb", "/testpath", false);
+	}
+}
+
+// -------------------------------------------------------------
+//                          Inbound
+// -------------------------------------------------------------
 pub struct Inbound {
-	path: String,
+	allowed_hosts: HashSet<DomainName>,
+	allowed_path: String,
 	tls: Option<tls::Inbound>,
 }
 
@@ -227,32 +270,16 @@ impl Inbound {
 				};
 			});
 		}
-
-		let required_path = if self.path.is_empty() {
-			"/"
-		} else {
-			&self.path
-		};
-
-		trace!("HTTP2 request: {:?}", request);
-
-		if request.uri().path() != required_path {
-			// send response
+		if let Err(e) = self.check_request(&request) {
+			// Send response to client first
 			let response = Response::builder()
 				.status(http::StatusCode::NOT_FOUND)
 				.body(())
 				.unwrap();
-
 			if let Err(err) = send_response.send_response(response, true) {
 				error!("Error when sending h2 response {}", err);
 			};
-
-			let msg = format!(
-				"invalid h2 path '{}', '{}' required",
-				request.uri().path(),
-				required_path
-			);
-			return Err(io::Error::new(io::ErrorKind::Other, msg));
+			return Err(e);
 		}
 
 		trace!("Sending response");
@@ -279,6 +306,34 @@ impl Inbound {
 
 		Ok(Box::new(CompositeBytesStream { r, w }))
 	}
+
+	fn check_request<B: std::fmt::Debug>(&self, req: &http::Request<B>) -> io::Result<()> {
+		debug_assert!(!self.allowed_hosts.is_empty());
+		// Verifying client
+		trace!("Verifying client's request: {:?}", req);
+		// Check if URL path match self.allowed_path
+		let allowed_path = if self.allowed_path.is_empty() {
+			"/"
+		} else {
+			&self.allowed_path
+		};
+		if req.uri().path() != allowed_path {
+			// send response
+			let msg = format!("invalid path '{}'", req.uri().path());
+			return Err(io::Error::new(io::ErrorKind::Other, msg));
+		}
+		// Check if URL host is in self.allowed_hosts
+		let url_host = req.uri().host().ok_or_else(|| {
+			io::Error::new(io::ErrorKind::InvalidData, "HTTP request URL missing host")
+		})?;
+		if !self.allowed_hosts.contains(url_host) {
+			return Err(io::Error::new(
+				io::ErrorKind::InvalidData,
+				format!("invalid host '{}'", url_host),
+			));
+		}
+		Ok(())
+	}
 }
 
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -289,6 +344,8 @@ impl Inbound {
 	serde(deny_unknown_fields)
 )]
 pub struct InboundBuilder {
+	#[cfg_attr(feature = "use_serde", serde(default))]
+	pub hosts: Vec<String>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub path: String,
 	#[cfg_attr(feature = "use_serde", serde(default))]
@@ -305,11 +362,90 @@ impl InboundBuilder {
 	///
 	/// Returns [`BuildError::Tls`] if there are any errors in TLS configuration.
 	pub fn build(self) -> Result<Inbound, BuildError> {
-		let path = check_path(self.path)?;
+		let default_hosts = [String::from(DEFAULT_HOST)];
+		let path = check_path(&self.path)?;
 		let tls = self.tls.map(tls::InboundBuilder::build).transpose()?;
-		Ok(Inbound { path, tls })
+		let hosts = {
+			// Use a default host if self.hosts is empty
+			let old_hosts = if self.hosts.is_empty() {
+				default_hosts.as_slice()
+			} else {
+				self.hosts.as_slice()
+			};
+			// Fill hosts
+			let mut hosts = HashSet::with_capacity(old_hosts.len());
+			for host in old_hosts {
+				hosts.insert(
+					DomainName::from_str(&host)
+						.map_err(|e| BuildError::InvalidHost(host.clone(), e.into()))?,
+				);
+			}
+			hosts
+		};
+		Ok(Inbound {
+			allowed_hosts: hosts,
+			allowed_path: path.into(),
+			tls,
+		})
 	}
 }
+
+#[cfg(test)]
+mod inbound_tests {
+	use super::*;
+
+	#[test]
+	fn test_inbound_check_request() {
+		fn check(
+			allowed_hosts: &[&str],
+			allowed_path: &str,
+			host: &str,
+			path: &str,
+		) -> io::Result<()> {
+			Inbound {
+				allowed_hosts: allowed_hosts
+					.iter()
+					.map(|h| DomainName::from_str(h).unwrap())
+					.collect(),
+				allowed_path: allowed_path.into(),
+				tls: None,
+			}
+			.check_request(
+				&http::Request::builder()
+					.uri(
+						http::Uri::builder()
+							.scheme("http")
+							.authority(host)
+							.path_and_query(path)
+							.build()
+							.unwrap(),
+					)
+					.body(())
+					.unwrap(),
+			)
+		}
+		check(&["a.b", "c.d"], "", "a.b", "").unwrap();
+		check(&["a.b", "c.d"], "/examplepath", "a.b", "/examplepath").unwrap();
+		// Wrong host
+		check(&["a.b", "c.d"], "", "wrong.host", "").unwrap_err();
+		check(
+			&["a.b", "c.d"],
+			"/examplepath",
+			"wrong.host",
+			"/examplepath",
+		)
+		.unwrap_err();
+		// Wrong path
+		check(&["a.b", "c.d"], "", "a.b", "/wrongpath").unwrap_err();
+		check(&["a.b", "c.d"], "/examplepath", "a.b", "").unwrap_err();
+		// Wrong host and path
+		check(&["a.b", "c.d"], "", "wrong.host", "/wrongpath").unwrap_err();
+	}
+}
+
+// -------------------------------------------------------------
+//                               IO
+// -------------------------------------------------------------
 
 pub enum ReadState {
 	Reading,
@@ -478,10 +614,12 @@ where
 }
 
 #[inline]
-fn check_path(path: String) -> Result<String, BuildError> {
-	if !path.is_empty() && !path.starts_with('/') {
-		Err(BuildError::PathNotStartsWithSlash(path))
-	} else {
-		Ok(path)
+fn check_path(path: &str) -> Result<&str, BuildError> {
+	if path.is_empty() {
+		return Ok("/");
 	}
+	if !path.starts_with('/') {
+		return Err(BuildError::PathNotStartsWithSlash(path.into()));
+	}
+	Ok(path)
 }

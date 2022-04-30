@@ -173,6 +173,7 @@ mod parse_v2rayn_impl {
 		Kcp,
 		Ws,
 		Http,
+		H2,
 		Quic,
 	}
 
@@ -282,7 +283,8 @@ mod parse_v2rayn_impl {
 					}
 					.into(),
 					#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-					Net::Http => transport::h2::OutboundBuilder {
+					Net::Http | Net::H2 => transport::h2::OutboundBuilder {
+						host: obj.host,
 						path: obj.path,
 						tls: tls_transport,
 					}
@@ -494,7 +496,27 @@ mod parse_v2rayn_impl {
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					host: Default::default(),
 					path: "/testpath".into(),
+					tls: None,
+				}),
+			);
+			// With host
+			check_v2rayn(
+				"vmess://eyJhZGQiOiJ0ZXN0LnRlc3QiLCJwcyI6Iua1i+ivlWgyIiwic2N5IjoiY\
+					XV0byIsInR5cGUiOiIiLCJzbmkiOiIiLCJwYXRoIjoiIiwicG9ydCI6MTAwMDAsInYiOjIsI\
+					mhvc3QiOiJ0ZXN0Lmhvc3QiLCJ0bHMiOiIiLCJpZCI6ImVmN2UyNzRjLThlZWQtNDdhOC1iM\
+					2RiLTg4NjU3ZDRmZWIzZSIsIm5ldCI6Imh0dHAifQ==",
+				"测试h2",
+				&SettingsBuilder {
+					addr: SocksAddr::from_str("test.test:10000").unwrap(),
+					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
+					sec: SecurityType::Auto,
+					use_legacy_header: false,
+				},
+				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					host: "test.host".into(),
+					path: Default::default(),
 					tls: None,
 				}),
 			);
@@ -512,6 +534,7 @@ mod parse_v2rayn_impl {
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					host: Default::default(),
 					path: Default::default(),
 					tls: None,
 				}),
@@ -535,6 +558,7 @@ mod parse_v2rayn_impl {
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					host: Default::default(),
 					path: "/testpath".into(),
 					tls: Some(transport::tls::OutboundBuilder::default()),
 				}),
@@ -553,6 +577,7 @@ mod parse_v2rayn_impl {
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
+					host: Default::default(),
 					path: Default::default(),
 					tls: Some(transport::tls::OutboundBuilder::default()),
 				}),
