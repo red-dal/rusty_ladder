@@ -376,7 +376,7 @@ impl InboundBuilder {
 			let mut hosts = HashSet::with_capacity(old_hosts.len());
 			for host in old_hosts {
 				hosts.insert(
-					DomainName::from_str(&host)
+					DomainName::from_str(host)
 						.map_err(|e| BuildError::InvalidHost(host.clone(), e.into()))?,
 				);
 			}

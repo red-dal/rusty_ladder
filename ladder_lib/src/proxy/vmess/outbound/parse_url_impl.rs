@@ -235,7 +235,7 @@ mod parse_v2rayn_impl {
 		if obj.aid != 0 {
 			return Err("aid other than 0 (legacy header) is not supported".into());
 		}
-		if !(obj.type_ == "" || obj.type_ == "none") {
+		if !(obj.type_.is_empty() || obj.type_ == "none") {
 			return Err("only 'none` type is supported".into());
 		}
 		let ps = if obj.ps.is_empty() {
@@ -269,10 +269,9 @@ mod parse_v2rayn_impl {
 					"" => None,
 					_ => return Err("invalid tls value, can only be 'tls' or empty".into()),
 				};
-
-				let transport = match obj.net {
+				match obj.net {
 					Net::Tcp => {
-						tls_transport.map_or_else(|| TransportBuilder::default(), |tls| tls.into())
+						tls_transport.map_or_else(TransportBuilder::default, Into::into)
 					}
 					#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
 					Net::Ws => transport::ws::OutboundBuilder {
@@ -290,8 +289,7 @@ mod parse_v2rayn_impl {
 					}
 					.into(),
 					_ => return Err("net not supported".into()),
-				};
-				transport
+				}
 			}
 			#[cfg(not(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls")))]
 			{
