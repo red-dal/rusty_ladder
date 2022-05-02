@@ -17,10 +17,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{http_utils, tls};
+use http::Uri;
+
+use super::tls;
 use crate::{
 	prelude::*,
-	protocol::{AsyncReadWrite, ProxyContext},
+	protocol::{
+		socks_addr::{DomainName, ReadError},
+		AsyncReadWrite, ProxyContext,
+	},
 	utils::websocket::{self, Stream as WsStream},
 };
 use std::{collections::HashMap, io};
@@ -31,6 +36,12 @@ pub type SecureServerStream<IO> = WsStream<tls::ServerStream<IO>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
+	#[error("header name '{0}' is invalid ({1})")]
+	InvalidHeaderName(String, http::header::InvalidHeaderName),
+	#[error("header value '{0}' is invalid ({1})")]
+	InvalidHeaderValue(String, http::header::InvalidHeaderValue),
+	#[error("invalid host ({0})")]
+	InvalidHost(ReadError),
 	#[error("tls ({0})")]
 	Tls(#[from] crate::utils::tls::ConfigError),
 	#[error("non-empty path '{0}' does not start with '/'")]
@@ -220,9 +231,9 @@ where
 
 /// Settings for websocket connection.
 pub struct Outbound {
-	headers: HashMap<String, String>,
+	headers: http::HeaderMap<http::HeaderValue>,
 	path: String,
-	host: String,
+	host: Option<DomainName>,
 	tls: Option<tls::Outbound>,
 }
 
@@ -267,28 +278,45 @@ impl Outbound {
 	where
 		IO: 'static + AsyncRead + AsyncWrite + Unpin,
 	{
-		// make request object
-		let uri = {
-			let domain = if self.host.is_empty() {
-				addr.to_string().into()
-			} else {
-				Cow::Borrowed(self.host.as_str())
-			};
-			http_utils::make_ws_uri(self.tls.is_some(), &domain, &self.path)
-				.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
+		let request = {
+			let url = self.make_url(addr)?;
+			// Make request for websocket connection
+			let mut req = http::Request::builder();
+			// Make headers
+			for (key, value) in &self.headers {
+				req = req.header(key, value);
+			}
+			// Finish
+			req.uri(url).body(()).map_err(|e| {
+				io::Error::new(
+					io::ErrorKind::InvalidInput,
+					format!("failed to make HTTP request ({})", e),
+				)
+			})?
 		};
-		trace!("Websocket URI: {}", uri);
-		let mut request = http::Request::builder().uri(uri);
-		// fill request headers
-		for (key, value) in &self.headers {
-			request = request.header(key, value);
-		}
-
-		let request = request.body(()).expect("cannot construct HTTP request");
 		trace!("Websocket request: {:?}", request);
-
 		let stream = websocket::connect_stream(stream, request).await?;
 		Ok(stream)
+	}
+
+	fn make_url(&self, addr: &SocksAddr) -> io::Result<Uri> {
+		let scheme = if self.tls.is_some() { "wss" } else { "ws" };
+		let host = if let Some(host) = &self.host {
+			SocksAddr::new(host.clone().into(), addr.port).to_string()
+		} else {
+			addr.to_string()
+		};
+		Uri::builder()
+			.scheme(scheme)
+			.authority(host.as_str())
+			.path_and_query(&self.path)
+			.build()
+			.map_err(|e| {
+				io::Error::new(
+					io::ErrorKind::InvalidInput,
+					format!("failed to make URL ({})", e),
+				)
+			})
 	}
 }
 
@@ -321,10 +349,26 @@ impl OutboundBuilder {
 	/// Returns [`BuildError::Tls`] if there are any errors in TLS configuration.
 	pub fn build(self) -> Result<Outbound, BuildError> {
 		let tls = self.tls.map(tls::OutboundBuilder::build).transpose()?;
+		let headers = {
+			let mut headers = http::HeaderMap::new();
+			for (key, value) in self.headers {
+				let key = http::header::HeaderName::from_str(&key)
+					.map_err(|e| BuildError::InvalidHeaderName(key, e))?;
+				let value = http::header::HeaderValue::from_str(&value)
+					.map_err(|e| BuildError::InvalidHeaderValue(value, e))?;
+				headers.append(key, value);
+			}
+			headers
+		};
+		let host = if self.host.is_empty() {
+			None
+		} else {
+			Some(DomainName::from_str(&self.host).map_err(BuildError::InvalidHost)?)
+		};
 		Ok(Outbound {
-			headers: self.headers,
+			headers,
 			path: self.path,
-			host: self.host,
+			host,
 			tls,
 		})
 	}

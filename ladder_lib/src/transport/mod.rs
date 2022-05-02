@@ -35,9 +35,5 @@ pub use inbound::Inbound;
 pub mod outbound;
 pub use outbound::Outbound;
 
-#[cfg(any(
-	feature = "browser-transport",
-	feature = "ws-transport-openssl",
-	feature = "ws-transport-rustls"
-))]
+#[cfg(feature = "browser-transport")]
 mod http_utils;
