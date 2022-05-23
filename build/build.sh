@@ -29,8 +29,8 @@ NO_OPENSSL_TARGET_LIST=(
     x86_64-pc-windows-gnu
 )
 
-FEATURES="parse-config parse-url use-tui all-transports-openssl all-proxies-openssl use-udp"
-WIN_FEATURES="parse-config parse-url use-tui all-transports-rustls all-proxies-ring use-udp"
+FEATURES="parse-config parse-url-v2rayn use-tui all-transports-openssl all-proxies-openssl use-udp"
+WIN_FEATURES="parse-config parse-url-v2rayn use-tui all-transports-rustls all-proxies-ring use-udp"
 
 # Make docker images
 cd $BUILD_DIR

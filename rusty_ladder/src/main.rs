@@ -40,8 +40,40 @@ macro_rules! make_feature_str {
 
 const FEATURES: &[&str] = &[
 	make_feature_str!("parse-url"),
+	make_feature_str!("parse-url-v2rayn"),
 	make_feature_str!("parse-config"),
 	make_feature_str!("use-tui"),
+	make_feature_str!("use-udp"),
+	make_feature_str!("use-webapi"),
+	make_feature_str!("use-protobuf"),
+	make_feature_str!("use-router-regex"),
+	// DNS
+	make_feature_str!("local-dns"),
+	make_feature_str!("local-dns-over-openssl"),
+	make_feature_str!("local-dns-over-rustls"),
+	// Transport
+	make_feature_str!("ws-transport-openssl"),
+	make_feature_str!("tls-transport-openssl"),
+	make_feature_str!("h2-transport-openssl"),
+	make_feature_str!("ws-transport-rustls"),
+	make_feature_str!("tls-transport-rustls"),
+	make_feature_str!("h2-transport-rustls"),
+	// Proxy
+	make_feature_str!("socks5-inbound"),
+	make_feature_str!("socks5-outbound"),
+	make_feature_str!("http-inbound"),
+	make_feature_str!("http-outbound"),
+	make_feature_str!("shadowsocks-inbound-openssl"),
+	make_feature_str!("shadowsocks-outbound-openssl"),
+	make_feature_str!("shadowsocks-inbound-ring"),
+	make_feature_str!("shadowsocks-outbound-ring"),
+	make_feature_str!("vmess-legacy-auth"),
+	make_feature_str!("vmess-inbound-openssl"),
+	make_feature_str!("vmess-outbound-openssl"),
+	make_feature_str!("vmess-inbound-ring"),
+	make_feature_str!("vmess-outbound-ring"),
+	make_feature_str!("chain-outbound"),
+	make_feature_str!("trojan-outbound"),
 ];
 
 #[cfg(all(not(feature = "parse-url"), not(feature = "parse-config")))]
@@ -325,7 +357,7 @@ fn main() {
 	let opts = AppOptions::from_args();
 	if opts.version {
 		let mut features_msg = String::new();
-		for (index, feature) in FEATURES.iter().chain(ladder_lib::FEATURES).enumerate() {
+		for (index, feature) in FEATURES.iter().enumerate() {
 			if index != 0 {
 				features_msg.push(',');
 			}

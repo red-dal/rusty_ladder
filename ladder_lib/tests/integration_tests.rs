@@ -5,10 +5,6 @@ mod router;
 
 use common::{setup_logger, Tester};
 
-#[cfg(any(
-	all(feature = "all-proxies-ring", feature = "all-transports-rustls"),
-	all(feature = "all-proxies-openssl", feature = "all-transports-openssl")
-))]
 #[test]
 fn test_integration_tcp() {
 	println!(
@@ -19,18 +15,36 @@ fn test_integration_tcp() {
 	setup_logger();
 
 	let tester = Tester::new();
+	// #[cfg(all(feature = "socks5-inbound", feature = "socks5-outbound"))]
 	tester.test_socks5();
+	#[cfg(all(feature = "http-inbound", feature = "http-outbound"))]
 	tester.test_http();
+	#[cfg(any(
+		all(
+			feature = "shadowsocks-inbound-openssl",
+			feature = "shadowsocks-outbound-openssl"
+		),
+		all(
+			feature = "shadowsocks-inbound-ring",
+			feature = "shadowsocks-outbound-ring"
+		)
+	))]
 	tester.test_shadowsocks();
+	#[cfg(any(
+		all(feature = "vmess-inbound-openssl", feature = "vmess-outbound-openssl"),
+		all(feature = "vmess-inbound-ring", feature = "vmess-outbound-ring")
+	))]
 	tester.test_vmess();
+	#[cfg(feature = "chain-outbound")]
 	tester.test_chain();
+	#[cfg(all(
+		any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"),
+		any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"),
+		any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"),
+	))]
 	tester.test_transport();
 }
 
-#[cfg(any(
-	all(feature = "all-proxies-ring", feature = "all-transports-rustls"),
-	all(feature = "all-proxies-openssl", feature = "all-transports-openssl")
-))]
 #[cfg(feature = "use-udp")]
 #[test]
 fn test_integration_udp() {
@@ -44,10 +58,8 @@ fn test_integration_udp() {
 	let tester = Tester::new();
 	tester.test_udp_tunnel();
 	#[cfg(any(
-		feature = "vmess-inbound-openssl",
-		feature = "vmess-inbound-ring",
-		feature = "vmess-outbound-openssl",
-		feature = "vmess-outbound-ring"
+		all(feature = "vmess-inbound-openssl", feature = "vmess-outbound-openssl"),
+		all(feature = "vmess-inbound-ring", feature = "vmess-outbound-ring")
 	))]
 	tester.test_udp_vmess();
 	#[cfg(feature = "socks5-inbound")]

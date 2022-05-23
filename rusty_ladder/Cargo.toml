@@ -19,7 +19,7 @@ default = [
 parse-url = ["ladder_lib/parse-url"]
 # Enable commandline options to parse URL using v2rayn format if possible.
 # This feature only works on VMess proxy.
-parse-url-v2rayn = ["ladder_lib/parse-url-v2rayn"]
+parse-url-v2rayn = ["parse-url", "ladder_lib/parse-url-v2rayn"]
 
 # Enable commandline options that parses JSON or TOML config.
 parse-config = ["ladder_lib/use_serde", "serde", "serde_json", "toml"]
@@ -40,8 +40,18 @@ use-protobuf = ["ladder_lib/use-protobuf"]
 use-router-regex = ["ladder_lib/use-router-regex"]
 
 ############## Transport ##############
-all-transports-openssl = ["ladder_lib/all-transports-openssl"]
-all-transports-rustls = ["ladder_lib/all-transports-rustls"]
+
+all-transports-openssl = [
+	"h2-transport-openssl",
+	"ws-transport-openssl",
+	"tls-transport-openssl",
+]
+
+all-transports-rustls = [
+	"h2-transport-rustls",
+	"ws-transport-rustls",
+	"tls-transport-rustls",
+]
 
 ws-transport-openssl = ["ladder_lib/ws-transport-openssl"]
 tls-transport-openssl = ["ladder_lib/tls-transport-openssl"]
@@ -52,36 +62,53 @@ tls-transport-rustls = ["ladder_lib/tls-transport-rustls"]
 h2-transport-rustls = ["ladder_lib/h2-transport-rustls"]
 
 ############## Proxies ##############
-all-proxies-openssl = ["ladder_lib/all-proxies-openssl"]
-all-proxies-ring = ["ladder_lib/all-proxies-ring"]
+all-proxies-openssl = [
+	"socks5",
+	"http-proxy",
+	"shadowsocks-openssl",
+	"chain-outbound",
+	"trojan-outbound",
+	"vmess-openssl",
+]
+all-proxies-ring = [
+	"socks5",
+	"http-proxy",
+	"shadowsocks-ring",
+	"chain-outbound",
+	"trojan-outbound",
+	"vmess-ring",
+]
 
 # ------------ SOCKS5 ------------
-socks5 = ["ladder_lib/socks5"]
+socks5 = ["socks5-inbound", "socks5-outbound"]
 socks5-inbound = ["ladder_lib/socks5-inbound"]
 socks5-outbound = ["ladder_lib/socks5-outbound"]
 
 # ------------ HTTP ------------
-http-proxy = ["ladder_lib/http-proxy"]
+http-proxy = ["http-inbound", "http-outbound"]
 http-inbound = ["ladder_lib/http-inbound"]
 http-outbound = ["ladder_lib/http-outbound"]
 
 # ------------ Shadowsocks ------------
-shadowsocks-openssl = ["ladder_lib/shadowsocks-openssl"]
+shadowsocks-openssl = [
+	"shadowsocks-inbound-openssl",
+	"shadowsocks-outbound-openssl",
+]
 shadowsocks-inbound-openssl = ["ladder_lib/shadowsocks-inbound-openssl"]
 shadowsocks-outbound-openssl = ["ladder_lib/shadowsocks-outbound-openssl"]
 
-shadowsocks-ring = ["ladder_lib/shadowsocks-ring"]
+shadowsocks-ring = ["shadowsocks-inbound-ring", "shadowsocks-outbound-ring"]
 shadowsocks-inbound-ring = ["ladder_lib/shadowsocks-inbound-ring"]
 shadowsocks-outbound-ring = ["ladder_lib/shadowsocks-outbound-ring"]
 
 # ------------ VMess ------------
 vmess-legacy-auth = ["ladder_lib/vmess-legacy-auth"]
 
-vmess-openssl = ["ladder_lib/vmess-openssl"]
+vmess-openssl = ["vmess-inbound-openssl", "vmess-outbound-openssl"]
 vmess-inbound-openssl = ["ladder_lib/vmess-inbound-openssl"]
 vmess-outbound-openssl = ["ladder_lib/vmess-outbound-openssl"]
 
-vmess-ring = ["ladder_lib/vmess-ring"]
+vmess-ring = ["vmess-inbound-ring", "vmess-outbound-ring"]
 vmess-inbound-ring = ["ladder_lib/vmess-inbound-ring"]
 vmess-outbound-ring = ["ladder_lib/vmess-outbound-ring"]
 

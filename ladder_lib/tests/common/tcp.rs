@@ -116,6 +116,16 @@ impl Tester {
 		);
 	}
 
+	#[cfg(any(
+		all(
+			feature = "shadowsocks-inbound-openssl",
+			feature = "shadowsocks-outbound-openssl"
+		),
+		all(
+			feature = "shadowsocks-inbound-ring",
+			feature = "shadowsocks-outbound-ring"
+		)
+	))]
 	pub fn test_shadowsocks(&self) {
 		let ss_dir = self.test_config_dir.clone_push("shadowsocks");
 
@@ -157,6 +167,10 @@ impl Tester {
 		}
 	}
 
+	#[cfg(any(
+		all(feature = "vmess-inbound-openssl", feature = "vmess-outbound-openssl"),
+		all(feature = "vmess-inbound-ring", feature = "vmess-outbound-ring")
+	))]
 	pub fn test_vmess(&self) {
 		let vmess_dir = self.test_config_dir.clone_push("vmess");
 
@@ -216,6 +230,7 @@ impl Tester {
 		}
 	}
 
+	#[cfg(feature = "chain-outbound")]
 	pub fn test_chain(&self) {
 		let transport_dir = self.test_config_dir.clone_push("chain");
 
@@ -233,6 +248,11 @@ impl Tester {
 		}
 	}
 	
+	#[cfg(all(
+		any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"),
+		any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"),
+		any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"),
+	))]
 	pub fn test_transport(&self) {
 		let transport_dir = self.test_config_dir.clone_push("transport");
 
