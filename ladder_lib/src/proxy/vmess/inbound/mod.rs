@@ -283,13 +283,7 @@ impl TcpAcceptor for Settings {
 		let dst = req.dest_addr.clone();
 
 		let algo = match req.sec {
-			SecurityType::Aes128Cfb => {
-				// This can be IO error
-				return AcceptError::new_protocol_err(stream, Error::StreamEncryptionNotSupported);
-			}
-			SecurityType::Auto | SecurityType::Chacha20Poly1305 => {
-				Some(Algorithm::ChaCha20Poly1305)
-			}
+			SecurityType::Chacha20Poly1305 => Some(Algorithm::ChaCha20Poly1305),
 			SecurityType::Aes128Gcm => Some(Algorithm::Aes128Gcm),
 			SecurityType::None => None,
 			SecurityType::Zero => {

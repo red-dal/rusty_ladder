@@ -1,4 +1,4 @@
-use super::{SecurityType, SettingsBuilder, PROTOCOL_NAME};
+use super::{SecurityTypeBuilder, SettingsBuilder, PROTOCOL_NAME};
 use crate::{
 	prelude::{BoxStdErr, Tag},
 	transport::outbound::Builder as TransportBuilder,
@@ -96,7 +96,7 @@ fn parse_url_std(url: &url::Url) -> Result<(SettingsBuilder, TransportBuilder), 
 		SettingsBuilder {
 			addr,
 			id,
-			sec: SecurityType::Auto,
+			sec: SecurityTypeBuilder::Auto,
 			use_legacy_header: false,
 		},
 		transport,
@@ -105,8 +105,8 @@ fn parse_url_std(url: &url::Url) -> Result<(SettingsBuilder, TransportBuilder), 
 
 #[cfg(test)]
 mod tests {
-	use super::{parse_url_std, SecurityType, SettingsBuilder};
-	use crate::transport;
+	use super::{parse_url_std, SettingsBuilder};
+	use crate::{proxy::vmess::utils::SecurityTypeBuilder, transport};
 	use std::str::FromStr;
 	use url::Url;
 
@@ -118,7 +118,7 @@ mod tests {
 				(SettingsBuilder {
 					addr: "google.com:4433".parse().unwrap(),
 					id: "2e09f64c-c967-4ce3-9498-fdcd8e39e04e".parse().unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				}, Default::default()),
 			),
@@ -129,7 +129,7 @@ mod tests {
 					SettingsBuilder {
 						addr: "myServer.com:12345".parse().unwrap(),
 						id: "7db04e8f-7cfc-46e0-9e18-d329c22ec353".parse().unwrap(),
-						sec: SecurityType::Auto,
+						sec: SecurityTypeBuilder::Auto,
 						use_legacy_header: false,
 					},
 					transport::outbound::Builder::Ws(transport::ws::OutboundBuilder {
@@ -154,10 +154,11 @@ mod tests {
 
 #[cfg(feature = "parse-url-v2rayn")]
 mod parse_v2rayn_impl {
-	use super::{SecurityType, SettingsBuilder, TransportBuilder};
+	use super::{SettingsBuilder, TransportBuilder};
 	use crate::{
 		prelude::{BoxStdErr, Tag},
 		protocol::{SocksAddr, SocksDestination},
+		proxy::vmess::utils::SecurityTypeBuilder,
 		transport,
 	};
 	use serde::Deserialize;
@@ -194,7 +195,7 @@ mod parse_v2rayn_impl {
 		#[serde(default)]
 		aid: u16,
 		#[serde(default)]
-		scy: SecurityType,
+		scy: SecurityTypeBuilder,
 		#[serde(default)]
 		net: Net,
 		#[serde(default, rename = "type")]
@@ -270,9 +271,7 @@ mod parse_v2rayn_impl {
 					_ => return Err("invalid tls value, can only be 'tls' or empty".into()),
 				};
 				match obj.net {
-					Net::Tcp => {
-						tls_transport.map_or_else(TransportBuilder::default, Into::into)
-					}
+					Net::Tcp => tls_transport.map_or_else(TransportBuilder::default, Into::into),
 					#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
 					Net::Ws => transport::ws::OutboundBuilder {
 						headers: Default::default(),
@@ -322,7 +321,7 @@ mod parse_v2rayn_impl {
 				port: 10000,
 				id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
 				aid: 0,
-				scy: SecurityType::Auto,
+				scy: SecurityTypeBuilder::Auto,
 				net: Net::Ws,
 				type_: "".into(),
 				host: "".into(),
@@ -361,7 +360,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::default(),
@@ -380,7 +379,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::Tls(transport::tls::OutboundBuilder::default()),
@@ -400,7 +399,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
@@ -420,7 +419,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
@@ -445,7 +444,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
@@ -465,7 +464,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
@@ -490,7 +489,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
@@ -509,7 +508,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
@@ -528,7 +527,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
@@ -552,7 +551,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
@@ -571,7 +570,7 @@ mod parse_v2rayn_impl {
 				&SettingsBuilder {
 					addr: SocksAddr::from_str("test.test:10000").unwrap(),
 					id: Uuid::from_str("ef7e274c-8eed-47a8-b3db-88657d4feb3e").unwrap(),
-					sec: SecurityType::Auto,
+					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
 				&TransportBuilder::from(transport::h2::OutboundBuilder {
@@ -601,7 +600,7 @@ mod parse_v2rayn_impl {
 			let expected_settings = SettingsBuilder {
 				addr: "test.server.com:10000".parse().unwrap(),
 				id: "ef7e274c-8eed-47a8-b3db-88657d4feb3e".parse().unwrap(),
-				sec: SecurityType::Auto,
+				sec: SecurityTypeBuilder::Auto,
 				use_legacy_header: false,
 			};
 			check_mixed(

@@ -26,6 +26,12 @@
             "listen": "127.0.0.1",
             "port": 10003,
             "protocol": "socks"
+        },
+        {
+            "tag": "to-vmess-aead-auto",
+            "listen": "127.0.0.1",
+            "port": 10004,
+            "protocol": "socks"
         }
     ],
     "outbounds": [
@@ -104,6 +110,25 @@
                     }
                 ]
             }
+        },
+        {
+            "tag": "vmess-aead-auto",
+            "protocol": "vmess",
+            "settings": {
+                "vnext": [
+                    {
+                        "address": "127.0.0.1",
+                        "port": 11000,
+                        "users": [
+                            {
+                                "id": "27848739-7e62-4138-9fd3-098a63964b6b",
+                                "alterId": 0,
+                                "security": "auto"
+                            }
+                        ]
+                    }
+                ]
+            }
         }
     ],
     "routing": {
@@ -136,6 +161,13 @@
                     "to-vmess-aead-zero"
                 ],
                 "outboundTag": "vmess-aead-zero"
+            },
+            {
+                "type": "field",
+                "inboundTag": [
+                    "to-vmess-aead-auto"
+                ],
+                "outboundTag": "vmess-aead-auto"
             }
         ]
     }

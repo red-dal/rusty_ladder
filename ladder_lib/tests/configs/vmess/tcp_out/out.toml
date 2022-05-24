@@ -19,6 +19,11 @@ tag = "to-zero"
 protocol = "socks5"
 addr = "127.0.0.1:10003"
 
+[[inbounds]]
+tag = "to-auto"
+protocol = "socks5"
+addr = "127.0.0.1:10004"
+
 # ----- Outbounds -----
 [[outbounds]]
 tag = "aes-128"
@@ -48,6 +53,13 @@ addr = "127.0.0.1:11000"
 id = "27848739-7e62-4138-9fd3-098a63964b6b"
 sec = "zero"
 
+[[outbounds]]
+tag = "auto"
+protocol = "vmess"
+addr = "127.0.0.1:11000"
+id = "27848739-7e62-4138-9fd3-098a63964b6b"
+sec = "auto"
+
 # ----- Router -----
 [[router.rules]]
 inbound_tags = ["to-aes-128"]
@@ -64,3 +76,7 @@ outbound_tag = "chacha20"
 [[router.rules]]
 inbound_tags = ["to-zero"]
 outbound_tag = "zero"
+
+[[router.rules]]
+inbound_tags = ["to-auto"]
+outbound_tag = "auto"

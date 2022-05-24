@@ -21,7 +21,7 @@ mod tcp;
 #[cfg(feature = "use-udp")]
 mod udp;
 
-use super::utils::{Error, SecurityType};
+use super::utils::{SecurityType, SecurityTypeBuilder};
 use super::{Command, HeaderMode, Request, PROTOCOL_NAME};
 use crate::protocol::{AsyncReadWrite, BufBytesStream};
 use crate::{
@@ -45,10 +45,10 @@ use uuid::Uuid;
 pub struct SettingsBuilder {
 	pub addr: SocksAddr,
 	pub id: Uuid,
-	pub sec: SecurityType,
+	pub sec: SecurityTypeBuilder,
 	/// Use legacy request header instead of AEAD header.
-	/// 
-	/// This has been deprecated and feature `vmess-legacy-auth` 
+	///
+	/// This has been deprecated and feature `vmess-legacy-auth`
 	/// must be enabled in order to use it.
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub use_legacy_header: bool,
@@ -60,13 +60,13 @@ impl SettingsBuilder {
 		Self {
 			addr,
 			id,
-			sec: SecurityType::default(),
+			sec: SecurityTypeBuilder::default(),
 			use_legacy_header: false,
 		}
 	}
 
 	#[must_use]
-	pub fn sec(mut self, sec: SecurityType) -> Self {
+	pub fn sec(mut self, sec: SecurityTypeBuilder) -> Self {
 		self.sec = sec;
 		self
 	}
@@ -81,24 +81,36 @@ impl SettingsBuilder {
 	///
 	/// # Errors
 	///
-	/// Return an error if `use_legacy_header` is true but 
+	/// Return an error if `use_legacy_header` is true but
 	/// feature `vmess-legacy-auth` is not enabled.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		let mode = if self.use_legacy_header {
-			#[cfg(feature = "vmess-legacy-auth")]
-			{
-				HeaderMode::Legacy
+		let mode =
+			if self.use_legacy_header {
+				#[cfg(feature = "vmess-legacy-auth")]
+				{
+					HeaderMode::Legacy
+				}
+				#[cfg(not(feature = "vmess-legacy-auth"))]
+				{
+					return Err("'use_legacy_header' is true but feature 'vmess-legacy-auth' is not enabled".into());
+				}
+			} else {
+				HeaderMode::Aead
+			};
+		let sec = match self.sec {
+			SecurityTypeBuilder::Aes128Cfb => {
+				return Err("stream encryption is not supported".into())
 			}
-			#[cfg(not(feature = "vmess-legacy-auth"))] {
-				return Err("'use_legacy_header' is true but feature 'vmess-legacy-auth' is not enabled".into());
-			}
-		} else {
-			HeaderMode::Aead
+			SecurityTypeBuilder::Auto => SecurityType::auto(),
+			SecurityTypeBuilder::Aes128Gcm => SecurityType::Aes128Gcm,
+			SecurityTypeBuilder::Chacha20Poly1305 => SecurityType::Chacha20Poly1305,
+			SecurityTypeBuilder::None => SecurityType::None,
+			SecurityTypeBuilder::Zero => SecurityType::Zero,
 		};
 		Ok(Settings {
 			addr: self.addr,
 			id: self.id,
-			sec: self.sec,
+			sec,
 			header_mode: mode,
 		})
 	}
@@ -162,9 +174,6 @@ impl Settings {
 
 		let (rh, wh) = stream.split();
 		let algo = match self.sec {
-			SecurityType::Aes128Cfb => {
-				return Err(Error::StreamEncryptionNotSupported.into());
-			}
 			SecurityType::Zero => {
 				req.sec = SecurityType::None;
 				req.opt.clear_chunk_stream();
@@ -178,13 +187,6 @@ impl Settings {
 			}
 			SecurityType::Aes128Gcm => Algorithm::Aes128Gcm,
 			SecurityType::Chacha20Poly1305 => Algorithm::ChaCha20Poly1305,
-			SecurityType::Auto => {
-				if cfg!(target_arch = "x86") || cfg!(target_arch = "x86_64") {
-					Algorithm::Aes128Gcm
-				} else {
-					Algorithm::ChaCha20Poly1305
-				}
-			}
 		};
 
 		// always enable chunk masking
@@ -297,7 +299,6 @@ mod udp_impl {
 			let mode = self.settings.header_mode;
 
 			let algo = match self.settings.sec {
-				SecurityType::Aes128Cfb => return Err(Error::StreamEncryptionNotSupported.into()),
 				SecurityType::Zero => return Err(Error::ZeroSecInUdp.into()),
 				SecurityType::None => {
 					let (read_half, write_half) = stream.split();
@@ -318,7 +319,7 @@ mod udp_impl {
 					return Ok(SocketOrTunnelStream::Tunnel(stream));
 				}
 				SecurityType::Aes128Gcm => Algorithm::Aes128Gcm,
-				SecurityType::Chacha20Poly1305 | SecurityType::Auto => Algorithm::ChaCha20Poly1305,
+				SecurityType::Chacha20Poly1305 => Algorithm::ChaCha20Poly1305,
 			};
 
 			// always enable chunk masking

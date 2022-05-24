@@ -187,12 +187,10 @@ impl Request {
 
 	pub async fn decode<R>(
 		stream: &mut R,
-		#[allow(unused_variables)]
-		id: &Uuid,
+		#[allow(unused_variables)] id: &Uuid,
 		cmd_key: &[u8; 16],
 		auth_id: &[u8; 16],
-		#[allow(unused_variables)]
-		time: i64,
+		#[allow(unused_variables)] time: i64,
 		mode: HeaderMode,
 	) -> Result<Request, ReadRequestError>
 	where
@@ -456,12 +454,7 @@ fn write_request_to(request: &Request, request_buf: &mut Vec<u8>) -> usize {
 	// insert p bytes of random bytes before the actual verification
 	let p: u8 = request.p % 16;
 	// security settings
-	let sec = if request.sec == SecurityType::Auto {
-		SecurityType::Chacha20Poly1305
-	} else {
-		request.sec
-	};
-	let sec = sec as u8;
+	let sec = request.sec as u8;
 	request_buf.put_u8((p << 4) | sec);
 
 	// 1 byte reserve
@@ -709,7 +702,7 @@ mod tests {
 
 		let mut request = Request::new(&payload_iv, &payload_key, target_addr, Command::Tcp);
 
-		request.sec = SecurityType::Auto;
+		request.sec = SecurityType::auto();
 		request.p = rng.next_u32() as u8 % 16;
 		request.v = rng.next_u32() as u8;
 

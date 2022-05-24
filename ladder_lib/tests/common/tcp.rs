@@ -187,6 +187,7 @@ impl Tester {
 				("socks5://127.0.0.1:10001", None),
 				("socks5://127.0.0.1:10002", None),
 				("socks5://127.0.0.1:10003", None),
+				("socks5://127.0.0.1:10004", None),
 			]);
 
 			self.test_tcp_with_v2ray("vmess_in", &v2_conf_file, &conf_file, &proxies);
@@ -225,6 +226,7 @@ impl Tester {
 					("socks5://127.0.0.1:10001", None),
 					("socks5://127.0.0.1:10002", None),
 					("socks5://127.0.0.1:10003", None),
+					("socks5://127.0.0.1:10004", None),
 				],
 			);
 		}

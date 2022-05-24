@@ -50,22 +50,38 @@ pub enum AddrType {
 	Ipv6 = 3,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
+pub enum SecurityTypeBuilder {
+	#[cfg_attr(feature = "use_serde", serde(rename = "aes-128-cfb"))]
+	Aes128Cfb,
+	#[cfg_attr(feature = "use_serde", serde(rename = "auto"))]
+	Auto,
+	#[cfg_attr(feature = "use_serde", serde(rename = "aes-128-gcm"))]
+	Aes128Gcm,
+	#[cfg_attr(feature = "use_serde", serde(rename = "chacha20-poly1305"))]
+	Chacha20Poly1305,
+	#[cfg_attr(feature = "use_serde", serde(rename = "none"))]
+	None,
+	#[cfg_attr(feature = "use_serde", serde(rename = "zero"))]
+	Zero,
+}
+
+impl Default for SecurityTypeBuilder {
+	#[inline]
+	fn default() -> Self {
+		Self::Auto
+	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive)]
+#[repr(u8)]
 pub enum SecurityType {
 	// Documentation is wrong about these numbers
-	#[cfg_attr(feature = "use_serde", serde(rename = "aes-128-cfb"))]
-	Aes128Cfb = 1,
-	#[cfg_attr(feature = "use_serde", serde(rename = "auto"))]
-	Auto = 2,
-	#[cfg_attr(feature = "use_serde", serde(rename = "aes-128-gcm"))]
 	Aes128Gcm = 3,
-	#[cfg_attr(feature = "use_serde", serde(rename = "chacha20-poly1305"))]
 	Chacha20Poly1305 = 4,
-	#[cfg_attr(feature = "use_serde", serde(rename = "none"))]
 	None = 5,
-	#[cfg_attr(feature = "use_serde", serde(rename = "zero"))]
 	Zero = 6,
 }
 
