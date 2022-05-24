@@ -130,6 +130,9 @@ pub struct AppOptions {
 	/// - "$localloop": local loop like 127.0.0.0/8
 	///
 	/// "$lan,$localloop" will be used if not set.
+	///
+	/// Set to "" to use an empty block list.
+	///
 	/// This only works if '--inbound' and '--outbound' is set.
 	#[cfg(feature = "parse-url")]
 	#[structopt(long, verbatim_doc_comment, name = "BLOCK_LIST")]
@@ -226,83 +229,98 @@ enum Error {
 	Runtime(BoxStdErr),
 }
 
-/// Make [`Config`] with arguments like `--inbound`, `--outbound`.
 #[cfg(feature = "parse-url")]
-fn make_config_from_args(opts: &AppOptions) -> Result<Config, Error> {
+mod parse_url_impl {
+	use super::*;
 	use ladder_lib::router;
 
-	const LAN_STR: &str = "$lan";
-	const LOCALLOOP_STR: &str = "localloop";
+	/// Make [`Config`] with arguments like `--inbound`, `--outbound`.
+	pub(super) fn make_config_from_args(opts: &AppOptions) -> Result<Config, Error> {
+		let inbound = {
+			let s = opts.inbound.as_ref().ok_or_else(|| {
+				Error::Input("`inbound` cannot be empty while `outbound` is not".into())
+			})?;
+			let url = url::Url::from_str(s).map_err(|e| {
+				Error::Input(format!("`inbound` is not a valid URL ({})", e).into())
+			})?;
+			ladder_lib::server::inbound::Builder::parse_url(&url)
+				.map_err(|e| Error::Input(format!("invalid inbound ({})", e).into()))?
+		};
+		let outbound = {
+			let s = opts.outbound.as_ref().ok_or_else(|| {
+				Error::Input("`outbound` cannot be empty while `inbound` is not".into())
+			})?;
+			let url = url::Url::from_str(s).map_err(|e| {
+				Error::Input(format!("`outbound` is not a valid URL ({})", e).into())
+			})?;
+			ladder_lib::server::outbound::Builder::parse_url(&url)
+				.map_err(|e| Error::Input(format!("invalid outbound ({})", e).into()))?
+		};
 
-	let inbound = {
-		let s = opts.inbound.as_ref().ok_or_else(|| {
-			Error::Input("`inbound` cannot be empty while `outbound` is not".into())
-		})?;
-		let url = url::Url::from_str(s)
-			.map_err(|e| Error::Input(format!("`inbound` is not a valid URL ({})", e).into()))?;
-		ladder_lib::server::inbound::Builder::parse_url(&url)
-			.map_err(|e| Error::Input(format!("invalid inbound ({})", e).into()))?
-	};
-	let outbound = {
-		let s = opts.outbound.as_ref().ok_or_else(|| {
-			Error::Input("`outbound` cannot be empty while `inbound` is not".into())
-		})?;
-		let url = url::Url::from_str(s)
-			.map_err(|e| Error::Input(format!("`outbound` is not a valid URL ({})", e).into()))?;
-		ladder_lib::server::outbound::Builder::parse_url(&url)
-			.map_err(|e| Error::Input(format!("invalid outbound ({})", e).into()))?
-	};
+		let rules = make_blocklist(opts.block.as_deref())?;
+		let level_filter = opts.log.unwrap_or(log::LevelFilter::Warn);
+		Ok(Config {
+			log: config::Log {
+				level: level_filter,
+				log_file: opts.log_file.clone().map(Into::into),
+			},
+			server: ladder_lib::server::Builder {
+				inbounds: vec![inbound],
+				outbounds: vec![outbound],
+				router: router::Builder { rules },
+				..Default::default()
+			},
+		})
+	}
 
-	let rules: Vec<router::PlainRule> = {
-		let mut srcs: Vec<router::Source> = Vec::new();
-		let block = opts.block.as_deref().map_or_else(
+	fn make_blocklist(block_str: Option<&str>) -> Result<Vec<router::PlainRule>, Error> {
+		const LAN_STR: &str = "$lan";
+		const LOCALLOOP_STR: &str = "$localloop";
+
+		let mut dsts: Vec<router::Destination> = Vec::new();
+		let block = block_str.map_or_else(
 			|| Cow::Owned(format!("{},{}", LAN_STR, LOCALLOOP_STR)),
 			Cow::Borrowed,
 		);
+		
+		// Empty blocklist for ""
+		if block.is_empty() {
+			return Ok(Vec::new());
+		}
 
 		for part in block.split(',') {
 			match part {
-				LAN_STR => srcs.extend(
+				LAN_STR => dsts.extend(
 					Vec::from(router::Cidr::private_networks())
 						.into_iter()
-						.map(router::Source::Cidr),
+						.map(router::Destination::Cidr),
 				),
 				LOCALLOOP_STR => {
-					srcs.push(router::Source::Cidr(router::Cidr4::LOCALLOOP.into()));
-					srcs.push(router::Source::Cidr(router::Cidr6::LOCALLOOP.into()));
+					dsts.push(router::Destination::Cidr(router::Cidr4::LOCALLOOP.into()));
+					dsts.push(router::Destination::Cidr(router::Cidr6::LOCALLOOP.into()));
 				}
 				_ => {
 					let ip = std::net::IpAddr::from_str(part).map_err(|_| {
 						Error::Input(format!("'{}' is not a valid IP address", part).into())
 					})?;
-					srcs.push(router::Source::Ip(ip));
+					dsts.push(router::Destination::Ip(ip));
 				}
 			}
 		}
-		if srcs.is_empty() {
+		Ok(if dsts.is_empty() {
 			Vec::new()
 		} else {
 			vec![router::PlainRule {
-				srcs,
+				dsts,
 				outbound_tag: None,
 				..Default::default()
 			}]
-		}
-	};
-	let level_filter = opts.log.unwrap_or(log::LevelFilter::Warn);
-	Ok(Config {
-		log: config::Log {
-			level: level_filter,
-			log_file: opts.log_file.clone().map(Into::into),
-		},
-		server: ladder_lib::server::Builder {
-			inbounds: vec![inbound],
-			outbounds: vec![outbound],
-			router: router::Builder { rules },
-			..Default::default()
-		},
-	})
+		})
+	}
 }
+
+#[cfg(feature = "parse-url")]
+use parse_url_impl::make_config_from_args;
 
 fn serve(opts: &AppOptions) -> Result<(), Error> {
 	let conf = {

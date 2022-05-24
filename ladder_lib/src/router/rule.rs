@@ -160,7 +160,7 @@ pub struct Plain {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub src_ports: Vec<u16>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub dst: Vec<Destination>,
+	pub dsts: Vec<Destination>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub dst_ports: Vec<u16>,
 }
@@ -231,7 +231,7 @@ impl Plain {
 
 			src_hosts
 		};
-		let dst_hosts = DestinationContainer::new(self.dst)?;
+		let dst_hosts = DestinationContainer::new(self.dsts)?;
 		let dst_ports = self.dst_ports;
 		let rule = Rule {
 			inbound_inds,
