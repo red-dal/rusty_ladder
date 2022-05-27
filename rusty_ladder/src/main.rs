@@ -231,7 +231,7 @@ enum Error {
 
 #[cfg(feature = "parse-url")]
 mod parse_url_impl {
-	use super::*;
+	use super::{AppOptions, Config, Cow, Error, FromStr, config};
 	use ladder_lib::router;
 
 	/// Make [`Config`] with arguments like `--inbound`, `--outbound`.

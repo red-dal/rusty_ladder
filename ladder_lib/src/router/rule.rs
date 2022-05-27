@@ -156,10 +156,12 @@ pub struct Plain {
 	pub inbound_tags: Vec<Tag>,
 	pub outbound_tag: Option<Tag>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
+	#[cfg_attr(feature = "use_serde", serde(alias = "src"))]
 	pub srcs: Vec<Source>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub src_ports: Vec<u16>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
+	#[cfg_attr(feature = "use_serde", serde(alias = "dst"))]
 	pub dsts: Vec<Destination>,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub dst_ports: Vec<u16>,
