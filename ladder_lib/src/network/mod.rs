@@ -50,6 +50,7 @@ impl NetConfig {
 	pub async fn bind(&self) -> io::Result<TcpAcceptor> {
 		let mut combined_streams = SelectAll::new();
 		for a in self.addr.as_slice() {
+			log::warn!("Listening TCP on {}", a);
 			let listener = TcpListener::bind(a).await.map_err(|e| {
 				io::Error::new(
 					e.kind(),
@@ -76,6 +77,22 @@ impl NetConfig {
 			result.push(socket);
 		}
 		Ok(result)
+	}
+}
+
+impl std::fmt::Display for NetConfig {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "TCP {{ ")?;
+		let mut first = true;
+		for a in &self.addr {
+			if first {
+				first = false;
+			} else {
+				write!(f, ", ")?;
+			}
+			write!(f, "{}", a)?;
+		}
+		write!(f, " }}")
 	}
 }
 
@@ -127,6 +144,11 @@ mod config {
 		#[allow(clippy::missing_errors_doc)]
 		#[implement(map_into)]
 		pub async fn bind(&self) -> io::Result<Acceptor> {}
+	}
+
+	impl std::fmt::Display for Config {
+		#[implement(map_into)]
+		fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {}
 	}
 }
 pub use config::Config;

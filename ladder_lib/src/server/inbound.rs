@@ -185,6 +185,19 @@ impl Inbound {
 		monitor: Option<Monitor>,
 		callback: impl 'static + Callback,
 	) -> Result<(), Error> {
+		{
+			let tag_str = if self.tag.is_empty() {
+				String::new()
+			} else {
+				format!(" '{}'", self.tag)
+			};
+			log::warn!(
+				"Serving {} inbound{} on {}",
+				self.protocol_name(),
+				tag_str,
+				self.network
+			);
+		}
 		let callback = Arc::new(callback);
 		let mut acceptor = self.network.bind().await?;
 		loop {
