@@ -139,14 +139,16 @@ Router:
     Enable regex support for router.
 
 Transport: 
-- `all-transports-openssl` (*Enabled by default*)
+- `all-transports-rustls` (*Enabled by default*)
+
+    Enable all transports with rustls as TLS library.
+
+- `all-transports-openssl`
 
     Enable all transport with OpenSSL as TLS library.
     You can only use either `-openssl` or `-rustls`/`-ring`.
-
-- `all-transports-rustls`
-
-    Enable all transports with rustls as TLS library.
+    
+    Requires OpenSSL.
 
 - `ws-transport-rustls` | `ws-transport-openssl`
 
@@ -161,15 +163,17 @@ Transport:
     Enable h2 transport layer.
 
 Proxy: 
-- `all-proxies-openssl` (*Enabled by default*)
-
-    Enable all proxies with OpenSSL as crypto library.
-    You can only use either `-openssl` or `-rustls`/`-ring`.
-
-- `all-proxies-ring`
+- `all-proxies-ring` (*Enabled by default*)
 
     Enable all proxies with ring/RustCrypto as crypto library.
     This enabled for windows target in `build/build.sh` instead of OpenSSL.
+
+- `all-proxies-openssl` 
+
+    Enable all proxies with OpenSSL as crypto library.
+    You can only use either `-openssl` or `-rustls`/`-ring`.
+    
+    Requires OpenSSL.
 
 - `use-udp` (*Enabled by default*)
 
