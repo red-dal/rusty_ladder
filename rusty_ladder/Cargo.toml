@@ -8,8 +8,8 @@ license = "GPL-3.0"
 [features]
 default = [
     "use-tui",
-    "all-transports-openssl",
-    "all-proxies-openssl",
+    "all-transports-rustls",
+    "all-proxies-ring",
     "use-udp",
     "parse-url-v2rayn",
     "parse-config",
