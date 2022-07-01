@@ -38,7 +38,9 @@ pub enum ConfigError {
 	AlpnTooLong(Vec<u8>),
 	#[error("TLS error({0})")]
 	SslError(#[from] SslError),
-	#[error("{0}")]
+    #[error("failed to read cert from file '{0}' ({1})")]
+	CannotReadCertFile(String, io::Error),
+    #[error("{0}")]
 	Other(Cow<'static, str>),
 }
 

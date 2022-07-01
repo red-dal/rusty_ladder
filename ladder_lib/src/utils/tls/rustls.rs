@@ -18,26 +18,28 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::ConfigError;
-use crate::protocol::{AsyncReadWrite, SocksAddr, SocksDestination};
-use std::{io, sync::Arc};
+use crate::protocol::{AsyncReadWrite, SocksAddr, SocksDestination, self};
+use std::{convert::TryFrom, io, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_rustls::rustls;
+use tokio_rustls::rustls::{self, ServerName};
 
 pub type ClientStream<RW> = tokio_rustls::client::TlsStream<RW>;
 pub type ServerStream<RW> = tokio_rustls::server::TlsStream<RW>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SslError {
-	#[error("Cannot read file {1} ({0})")]
-	CannotReadFile(io::Error, String),
-	#[error("Cannot parse certificate file")]
-	CannotParseCertificateFile,
-	#[error("Cannot parse private key file")]
-	CannotParsePrivateKeyFile,
-	#[error("Webpki error ({0})")]
-	WebPkiError(webpki::Error),
-	#[error("TLSError ({0})")]
-	Other(rustls::TLSError),
+	#[error("IO error {1} ({0})")]
+	Io(io::Error, String),
+	#[error("file '{0}' contains no cert")]
+	MissingCert(String),
+	#[error("file '{0}' contains no key")]
+	MissingKey(String),
+	#[error("cannot read native certs ({0})")]
+	NativeCerts(io::Error),
+	#[error("{0}")]
+	RootCert(webpki::Error),
+	#[error("TLS error ({0})")]
+	Rustls(rustls::Error),
 }
 
 pub struct Acceptor {
@@ -50,31 +52,40 @@ impl Acceptor {
 		key_file: &str,
 		alpns: impl IntoIterator<Item = &'a [u8]>,
 	) -> Result<Self, ConfigError> {
-		let mut config = rustls::ServerConfig::new(rustls::NoClientAuth::new());
-		{
-			let cert_file = std::fs::File::open(cert_file)
-				.map_err(|e| SslError::CannotReadFile(e, cert_file.to_string()))?;
-			let key_file = std::fs::File::open(key_file)
-				.map_err(|e| SslError::CannotReadFile(e, key_file.to_string()))?;
-			let cert = rustls::internal::pemfile::certs(&mut io::BufReader::new(cert_file))
-				.map_err(|_| SslError::CannotParseCertificateFile)?;
-			let key =
-				rustls::internal::pemfile::pkcs8_private_keys(&mut io::BufReader::new(key_file))
-					.map_err(|_| SslError::CannotParsePrivateKeyFile)?;
-			let key = key
+		let certs = {
+			let f = std::fs::File::open(cert_file)
+				.map_err(|e| SslError::Io(e, cert_file.to_string()))?;
+			rustls_pemfile::certs(&mut io::BufReader::new(f))
+				.map_err(|e| SslError::Io(e, cert_file.into()))?
 				.into_iter()
-				.next()
-				.ok_or_else(|| ConfigError::Other("empty key file".into()))?;
-			config.set_single_cert(cert, key).map_err(SslError::Other)?;
-			// config
-			// 	.set_single_cert_with_ocsp_and_sct(cert, key, vec![], vec![])
-			// 	.map_err(SslError::Other)?;
+				.map(rustls::Certificate)
+				.collect::<Vec<_>>()
+		};
+		if certs.is_empty() {
+			return Err(SslError::MissingCert(cert_file.into()).into());
 		}
-		let alpns = alpns.into_iter().map(<[u8]>::to_vec).collect::<Vec<_>>();
-		config.alpn_protocols = alpns;
-		let config = Arc::new(config);
+		let key = {
+			let f =
+				std::fs::File::open(key_file).map_err(|e| SslError::Io(e, key_file.to_string()))?;
+			rustls_pemfile::pkcs8_private_keys(&mut io::BufReader::new(f))
+				.map_err(|e| SslError::Io(e, key_file.into()))?
+				.into_iter()
+				.map(rustls::PrivateKey)
+				.next()
+				.ok_or_else(|| SslError::MissingKey(key_file.into()))?
+		};
+		let mut config = rustls::ServerConfig::builder()
+			.with_safe_defaults()
+			.with_no_client_auth()
+			.with_single_cert(certs, key)
+			.map_err(SslError::Rustls)?;
+		let alpns: Vec<Vec<u8>> = alpns.into_iter().map(Vec::from).collect();
+		if !alpns.is_empty() {
+			config.alpn_protocols = alpns;
+		}
+
 		Ok(Acceptor {
-			inner: config.into(),
+			inner: Arc::new(config).into(),
 		})
 	}
 
@@ -95,21 +106,38 @@ impl Connector {
 		alpns: impl IntoIterator<Item = &'a [u8]>,
 		ca_file: Option<&str>,
 	) -> Result<Self, ConfigError> {
-		let mut config = rustls::ClientConfig::new();
-		if let Some(ca_file) = ca_file {
-			let ca_file = std::fs::File::open(ca_file)
-				.map_err(|e| SslError::CannotReadFile(e, ca_file.to_string()))?;
-			let (_added, _unsuitable) = config
-				.root_store
-				.add_pem_file(&mut std::io::BufReader::new(ca_file))
-				.map_err(|_| SslError::CannotParseCertificateFile)?;
+		let mut roots = rustls::RootCertStore::empty();
+		let roots = if let Some(ca_file) = ca_file {
+			let f = std::fs::File::open(ca_file).map_err(|e| SslError::Io(e, ca_file.into()))?;
+			let certs = rustls_pemfile::certs(&mut io::BufReader::new(f))
+				.map_err(|e| ConfigError::CannotReadCertFile(ca_file.into(), e))?;
+			for item in certs {
+				roots
+					.add(&rustls::Certificate(item))
+					.map_err(SslError::RootCert)?;
+			}
+			roots
 		} else {
-			config
-				.root_store
-				.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+			let native_certs =
+				rustls_native_certs::load_native_certs().map_err(SslError::NativeCerts)?;
+			for cert in native_certs {
+				roots
+					.add(&rustls::Certificate(cert.0))
+					.map_err(SslError::RootCert)?;
+			}
+			roots
+		};
+
+		let roots = roots;
+		// Make config
+		let mut config = rustls::ClientConfig::builder()
+			.with_safe_defaults()
+			.with_root_certificates(roots)
+			.with_no_client_auth();
+		let alpns: Vec<Vec<u8>> = alpns.into_iter().map(Into::into).collect();
+		if !alpns.is_empty() {
+			config.alpn_protocols = alpns;
 		}
-		let alpns = alpns.into_iter().map(<[u8]>::to_vec).collect::<Vec<_>>();
-		config.alpn_protocols = alpns;
 		Ok(Self {
 			inner: Arc::new(config).into(),
 		})
@@ -120,14 +148,13 @@ impl Connector {
 		RW: AsyncRead + AsyncWrite + Unpin,
 	{
 		let name = match &addr.dest {
-			SocksDestination::Name(name) => webpki::DNSNameRef::try_from_ascii(name.as_bytes())
-				.map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?,
-			SocksDestination::Ip(_) => {
-				return Err(io::Error::new(
+			SocksDestination::Name(name) => ServerName::try_from(name.as_str()).map_err(|e| {
+				io::Error::new(
 					io::ErrorKind::InvalidInput,
-					"Rustls does not support IP as target",
-				))
-			}
+					format!("invalid server name '{}' ({})", name, e),
+				)
+			})?,
+			SocksDestination::Ip(ip) => ServerName::IpAddress(*ip),
 		};
 		self.inner.connect(name, stream).await
 	}
@@ -136,7 +163,7 @@ impl Connector {
 impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite
 	for ClientStream<IO>
 {
-	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
+	fn split(self: Box<Self>) -> (protocol::BoxRead, protocol::BoxWrite) {
 		let (r, w) = tokio::io::split(*self);
 		(Box::new(r), Box::new(w))
 	}
@@ -145,7 +172,7 @@ impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite
 impl<IO: 'static + AsyncRead + AsyncWrite + Unpin + Send + Sync> AsyncReadWrite
 	for ServerStream<IO>
 {
-	fn split(self: Box<Self>) -> (crate::protocol::BoxRead, crate::protocol::BoxWrite) {
+	fn split(self: Box<Self>) -> (protocol::BoxRead, protocol::BoxWrite) {
 		let (r, w) = tokio::io::split(*self);
 		(Box::new(r), Box::new(w))
 	}

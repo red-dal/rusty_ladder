@@ -148,7 +148,7 @@ use_serde = ["serde"]
 __crypto_openssl = ["openssl"]
 __crypto_crypto_ring = ["ring", "aes", "cfb-mode"]
 __tls_openssl = ["openssl", "tokio-openssl"]
-__tls_rustls = ["tokio-rustls", "webpki", "webpki-roots"]
+__tls_rustls = ["tokio-rustls", "webpki", "rustls-native-certs", "rustls-pemfile"]
 
 # **Private feature, do not enable manually.
 # Use transport.
@@ -203,10 +203,11 @@ h2 = { version = "0.3", features = ["stream"], optional = true }
 
 # TLS
 tokio-openssl = { version = "0.6", optional = true }
-tokio-rustls = { version = "0.22", optional = true }
-webpki = { version = "0.21", optional = true }
-webpki-roots = { version = "0.21", optional = true }
-
+tokio-rustls = { version = "0.23", optional = true }
+webpki = { version = "0.22", optional = true }
+rustls-native-certs = { version = "0.6", optional = true }
+rustls-pemfile = { version = "1.0", optional = true }
+ 
 # browser
 serde_json = { version = "1.0", optional = true }
 
