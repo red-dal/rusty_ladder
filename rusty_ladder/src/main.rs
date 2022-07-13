@@ -229,32 +229,39 @@ enum Error {
 	Runtime(BoxStdErr),
 }
 
+impl Error {
+	#[inline]
+	pub fn new_input(s: impl Into<Cow<'static, str>>) -> Self {
+		Self::Input(s.into())
+	}
+}
+
 #[cfg(feature = "parse-url")]
 mod parse_url_impl {
-	use super::{AppOptions, Config, Cow, Error, FromStr, config};
+	use super::{config, AppOptions, Config, Cow, Error, FromStr};
 	use ladder_lib::router;
 
 	/// Make [`Config`] with arguments like `--inbound`, `--outbound`.
 	pub(super) fn make_config_from_args(opts: &AppOptions) -> Result<Config, Error> {
 		let inbound = {
-			let s = opts.inbound.as_ref().ok_or_else(|| {
-				Error::Input("`inbound` cannot be empty while `outbound` is not".into())
-			})?;
-			let url = url::Url::from_str(s).map_err(|e| {
-				Error::Input(format!("`inbound` is not a valid URL ({})", e).into())
-			})?;
+			let s = opts
+				.inbound
+				.as_ref()
+				.ok_or_else(|| Error::new_input("--inbound not specified"))?;
+			let url = url::Url::from_str(s)
+				.map_err(|e| Error::new_input(format!("invalid inbound URL ({})", e)))?;
 			ladder_lib::server::inbound::Builder::parse_url(&url)
-				.map_err(|e| Error::Input(format!("invalid inbound ({})", e).into()))?
+				.map_err(|e| Error::new_input(format!("invalid inbound ({})", e)))?
 		};
 		let outbound = {
-			let s = opts.outbound.as_ref().ok_or_else(|| {
-				Error::Input("`outbound` cannot be empty while `inbound` is not".into())
-			})?;
-			let url = url::Url::from_str(s).map_err(|e| {
-				Error::Input(format!("`outbound` is not a valid URL ({})", e).into())
-			})?;
+			let s = opts
+				.outbound
+				.as_ref()
+				.ok_or_else(|| Error::new_input("--outbound not specified"))?;
+			let url = url::Url::from_str(s)
+				.map_err(|e| Error::new_input(format!("invalid outbound URL ({})", e)))?;
 			ladder_lib::server::outbound::Builder::parse_url(&url)
-				.map_err(|e| Error::Input(format!("invalid outbound ({})", e).into()))?
+				.map_err(|e| Error::new_input(format!("invalid outbound ({})", e)))?
 		};
 
 		let rules = make_blocklist(opts.block.as_deref())?;
@@ -282,7 +289,7 @@ mod parse_url_impl {
 			|| Cow::Owned(format!("{},{}", LAN_STR, LOCALLOOP_STR)),
 			Cow::Borrowed,
 		);
-		
+
 		// Empty blocklist for ""
 		if block.is_empty() {
 			return Ok(Vec::new());

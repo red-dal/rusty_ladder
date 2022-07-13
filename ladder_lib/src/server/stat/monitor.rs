@@ -23,10 +23,7 @@ use super::{
 };
 use crate::{
 	prelude::*,
-	server::{
-		stat::data::{OutboundInfo, SessionCounter},
-		Error as ServerError,
-	},
+	server::stat::data::{OutboundInfo, SessionCounter},
 	utils::relay::Counter,
 };
 use futures::Future;
@@ -43,22 +40,22 @@ const DEAD_CONNS_BUFFER_SIZE: usize = 8;
 const UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 const SEC_TO_MS: u64 = 1000;
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-	#[error("connection {0:x} already exists, could be coding error.")]
-	AlreadyExist(Id),
-	#[error("connection {0:x} cannot be found, could be coding error.")]
-	NotFound(Id),
-	#[error("connection '{0}' state error: {1}")]
-	WrongState(Id, Cow<'static, str>),
-}
-
-impl From<Error> for ServerError {
-	#[inline]
-	fn from(e: Error) -> Self {
-		Self::Other(e.into())
-	}
-}
+// #[derive(Debug, thiserror::Error)]
+// pub enum Error {
+// 	#[error("connection {0:x} already exists, could be coding error.")]
+// 	AlreadyExist(Id),
+// 	#[error("connection {0:x} cannot be found, could be coding error.")]
+// 	NotFound(Id),
+// 	#[error("connection '{0}' state error: {1}")]
+// 	WrongState(Id, Cow<'static, str>),
+// }
+//
+// impl From<Error> for ServerError {
+// 	#[inline]
+// 	fn from(e: Error) -> Self {
+// 		Self::Other(e.into())
+// 	}
+// }
 
 #[allow(clippy::module_name_repetitions)]
 type ArcInternal = Arc<Mutex<Internal>>;
@@ -151,7 +148,7 @@ impl Internal {
 
 		assert!(
 			!self.conns.contains_key(&conn_id),
-			"Connection with id {} already in the monitor",
+			"Connection[{:x}] already in the monitor",
 			conn_id
 		);
 
@@ -183,7 +180,7 @@ impl Internal {
 				panic!("invalid state transition {} -> connecting", c.state.name());
 			}
 		} else {
-			panic!("Connection with id {} is not registered", conn_id);
+			panic!("Connection[{:x}] is not registered", conn_id);
 		}
 	}
 
@@ -200,7 +197,7 @@ impl Internal {
 				panic!("invalid state transition {} -> proxying", c.state.name());
 			};
 		} else {
-			panic!("Connection with id {} is not registered", conn_id);
+			panic!("Connection[{:x}] is not registered", conn_id);
 		}
 	}
 
@@ -214,7 +211,7 @@ impl Internal {
 			let dead = c.into_dead(end_time);
 			self.dead_conns.push_back(dead);
 		} else {
-			panic!("Connection with id {} is not registered", conn_id);
+			log::error!("Connection[{}] is not registered or already dead", conn_id);
 		}
 	}
 

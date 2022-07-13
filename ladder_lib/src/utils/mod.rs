@@ -144,25 +144,16 @@ pub mod url {
 	use crate::{prelude::BoxStdErr, protocol::SocksAddr};
 	use url::Url;
 
-	pub fn check_empty_path(url: &Url, protocol_name: &str) -> Result<(), BoxStdErr> {
+	pub fn check_empty_path(url: &Url, _protocol_name: &str) -> Result<(), BoxStdErr> {
 		if !url.path().is_empty() && url.path() != "/" {
-			let msg = format!(
-				"{} URL must have an empty path, not '{}'",
-				protocol_name,
-				url.path()
-			);
-			return Err(msg.into());
+			return Err("path must be empty".into());
 		}
 		Ok(())
 	}
 
 	pub fn check_scheme(url: &Url, protocol_name: &str) -> Result<(), BoxStdErr> {
 		if url.scheme() != protocol_name {
-			let msg = format!(
-				"wrong scheme '{}', should be '{}'",
-				url.scheme(),
-				protocol_name
-			);
+			let msg = format!("expect scheme '{}', not '{}'", url.scheme(), protocol_name);
 			return Err(msg.into());
 		}
 		Ok(())
@@ -174,10 +165,10 @@ pub mod url {
 			if let Some((user, pass)) = url.password().map(|pass| (url.username(), pass)) {
 				let user = percent_encoding::percent_decode_str(user)
 					.decode_utf8()
-					.map_err(|e| format!("cannot percent decode `user` ({})", e))?;
+					.map_err(|_| "cannot percent decode user part")?;
 				let pass = percent_encoding::percent_decode_str(pass)
 					.decode_utf8()
-					.map_err(|e| format!("cannot percent decode `pass` ({})", e))?;
+					.map_err(|_| "cannot percent decode password part")?;
 				Some((user.into(), pass.into()))
 			} else {
 				None
@@ -187,13 +178,13 @@ pub mod url {
 
 	#[allow(dead_code)]
 	pub fn get_socks_addr(url: &Url, default_port: Option<u16>) -> Result<SocksAddr, BoxStdErr> {
-		let host = url.host().ok_or("URL must contains host")?;
+		let host = url.host().ok_or("missing host")?;
 		let port = if let Some(port) = url.port() {
 			port
 		} else if let Some(dp) = default_port {
 			dp
 		} else {
-			return Err("url contains no port".into());
+			return Err("missing port".into());
 		};
 		Ok(match host {
 			url::Host::Domain(name) => SocksAddr::new(name.parse()?, port),

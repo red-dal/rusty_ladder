@@ -188,8 +188,8 @@ mod tests {
 		let target_addr = SocketAddr::from_str("127.0.0.1:12345").unwrap().into();
 
 		let mut request = Request::new(&payload_iv, &payload_key, target_addr, Command::Tcp);
-		request.p = (rng.next_u32() % 16) as u8;
-		request.v = rng.next_u32() as u8;
+		request.p = rng.gen_range(0..16);
+		request.v = rng.gen();
 
 		let uuid = Uuid::from_str("1e562b2a-d1b3-41c0-8242-996e12b2a61a").unwrap();
 		let time = timestamp_now();

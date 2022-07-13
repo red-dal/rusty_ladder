@@ -163,10 +163,10 @@ impl Settings {
 		let mut rng = thread_rng();
 
 		req.sec = self.sec;
-		// padding, use a random number
-		req.p = rng.next_u32().to_ne_bytes()[0] % 16;
-		// verification code, use a random number
-		req.v = rng.next_u32().to_ne_bytes()[0];
+		// padding, use a random 4-bit number
+		req.p = rng.gen_range(0..16);
+		// verification code, use a random 1-byte number
+		req.v = rng.gen();
 
 		trace!("Vmess request: {:?}", req);
 
@@ -289,10 +289,10 @@ mod udp_impl {
 			let mut rng = thread_rng();
 
 			request.sec = self.settings.sec;
-			// Padding, use a random number
-			request.p = rng.next_u32().to_ne_bytes()[0] % 16;
-			// Verification code, use a random number
-			request.v = rng.next_u32().to_ne_bytes()[0];
+			// Padding, use a random 4-bit number
+			request.p = rng.gen_range(0..16);
+			// Verification code, use a random 1-byte number
+			request.v = rng.gen();
 
 			trace!("Vmess request: {:?}", request);
 

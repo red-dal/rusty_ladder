@@ -703,8 +703,8 @@ mod tests {
 		let mut request = Request::new(&payload_iv, &payload_key, target_addr, Command::Tcp);
 
 		request.sec = SecurityType::auto();
-		request.p = rng.next_u32() as u8 % 16;
-		request.v = rng.next_u32() as u8;
+		request.p = rng.gen_range(0..16);
+		request.v = rng.gen();
 
 		info!("{:#?}", request);
 
