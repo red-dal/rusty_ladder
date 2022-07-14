@@ -22,7 +22,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![warn(clippy::pedantic)]
 #![allow(clippy::default_trait_access)]
 
+// TODO: log to TUI
+// TOOD: log brief config during initialization
 use config::Config;
+use fern::colors::{Color, ColoredLevelConfig};
+use log::Level;
 use std::{borrow::Cow, io, str::FromStr, sync::Arc};
 use structopt::StructOpt;
 use tokio::runtime::Runtime;
@@ -126,10 +130,10 @@ pub struct AppOptions {
 	/// Each address can be either an IP (like "127.0.0.1") or a subnet (like "127.0.0.0/8").
 	///
 	/// Some special addresses are reserved:
-	/// - "$lan": private network like 192.168.0.0/16
-	/// - "$localloop": local loop like 127.0.0.0/8
+	/// - "@lan": private network like 192.168.0.0/16
+	/// - "@localloop": local loop like 127.0.0.0/8
 	///
-	/// "$lan,$localloop" will be used if not set.
+	/// "@lan,@localloop" will be used if not set.
 	///
 	/// Set to "" to use an empty block list.
 	///
@@ -141,23 +145,22 @@ pub struct AppOptions {
 	/// Set the log level. Must be one of ["debug", "info", "warn", "error"]
 	///
 	/// If not specified, "warn" will be used.
-	/// This only works if '--inbound' and '--outbound' is set.
 	#[cfg(feature = "parse-url")]
 	#[structopt(long, name = "LOG_LEVEL")]
 	log: Option<log::LevelFilter>,
 
-	/// Set the path for log file.
+	/// Set the output for log.
 	///
-	/// If not specified, STDOUT will be used as log output.
-	/// This only works if '--inbound' and '--outbound' is set.
+	/// If not specified, STDOUT will be used (if tui is not enabled).
 	#[cfg(feature = "parse-url")]
 	#[structopt(long, name = "LOG_FILE")]
-	log_file: Option<String>,
+	log_out: Option<String>,
 }
 
 #[cfg(feature = "parse-config")]
 mod parse_config_impl {
-	use super::{AppOptions, BoxStdErr, Config, Error, FromStr};
+	use super::{Config, Error, FromStr};
+	use log::LevelFilter;
 	use std::borrow::Cow;
 	use std::{fs::File, io::Read};
 
@@ -199,18 +202,36 @@ mod parse_config_impl {
 	}
 
 	#[cfg(feature = "parse-config")]
-	pub(super) fn make_config(opts: &AppOptions) -> Result<Config, Error> {
-		fn read_config(conf_str: &str, format: ConfigFormat) -> Result<Config, BoxStdErr> {
-			let conf: Config = match format {
-				ConfigFormat::Toml => toml::from_str(conf_str)?,
-				ConfigFormat::Json => serde_json::from_str(conf_str)?,
-			};
-			Ok(conf)
-		}
-		let format = opts.format.unwrap_or_default();
-		let conf_str = read_conf_str(opts.config.as_deref())
+	pub(super) fn make_config(
+		format: Option<ConfigFormat>,
+		use_tui: bool,
+		conf_path: Option<&str>,
+		log_level: Option<LevelFilter>,
+		log_output: Option<&str>,
+	) -> Result<Config, Error> {
+		let format = format.unwrap_or_default();
+		let conf_str = read_conf_str(conf_path)
 			.map_err(|e| Error::Input(format!("cannot read config: {}", e).into()))?;
-		read_config(&conf_str, format).map_err(Error::Config)
+		let mut conf: Config = match format {
+			ConfigFormat::Toml => toml::from_str(&conf_str).map_err(|e| Error::Config(e.into()))?,
+			ConfigFormat::Json => {
+				serde_json::from_str(&conf_str).map_err(|e| Error::Config(e.into()))?
+			}
+		};
+		if use_tui
+			&& matches!(&conf.log.output, Some(super::config::LogOutput::Stdout))
+			&& log_output.is_none()
+		{
+			conf.log.output = None;
+		} else {
+			if let Some(log_output) = log_output {
+				conf.log.output = super::config::LogOutput::from_str(log_output);
+			}
+			if let Some(log_level) = log_level {
+				conf.log.level = log_level;
+			}
+		}
+		Ok(conf)
 	}
 }
 #[cfg(feature = "parse-config")]
@@ -238,14 +259,25 @@ impl Error {
 
 #[cfg(feature = "parse-url")]
 mod parse_url_impl {
-	use super::{config, AppOptions, Config, Cow, Error, FromStr};
+	use crate::config::LogOutput;
+
+	use super::{config, Config, Cow, Error, FromStr};
 	use ladder_lib::router;
+	use log::LevelFilter;
+
+	const DEFAULT_LOG_LEVEL: LevelFilter = LevelFilter::Info;
 
 	/// Make [`Config`] with arguments like `--inbound`, `--outbound`.
-	pub(super) fn make_config_from_args(opts: &AppOptions) -> Result<Config, Error> {
+	pub(super) fn make_config_from_args(
+		inbound: Option<&str>,
+		outbound: Option<&str>,
+		block: Option<&str>,
+		level: Option<LevelFilter>,
+		log_out: Option<&str>,
+		use_tui: bool,
+	) -> Result<Config, Error> {
 		let inbound = {
-			let s = opts
-				.inbound
+			let s = inbound
 				.as_ref()
 				.ok_or_else(|| Error::new_input("--inbound not specified"))?;
 			let url = url::Url::from_str(s)
@@ -254,8 +286,7 @@ mod parse_url_impl {
 				.map_err(|e| Error::new_input(format!("invalid inbound ({})", e)))?
 		};
 		let outbound = {
-			let s = opts
-				.outbound
+			let s = outbound
 				.as_ref()
 				.ok_or_else(|| Error::new_input("--outbound not specified"))?;
 			let url = url::Url::from_str(s)
@@ -263,13 +294,21 @@ mod parse_url_impl {
 			ladder_lib::server::outbound::Builder::parse_url(&url)
 				.map_err(|e| Error::new_input(format!("invalid outbound ({})", e)))?
 		};
-
-		let rules = make_blocklist(opts.block.as_deref())?;
-		let level_filter = opts.log.unwrap_or(log::LevelFilter::Warn);
+		let rules = make_blocklist(block)?;
+		let level_filter = level.unwrap_or(DEFAULT_LOG_LEVEL);
+		// Disable log output if using TUI by default
+		// instead of using stdout
+		let output = if let Some(val) = &log_out {
+			LogOutput::from_str(val)
+		} else if use_tui {
+			None
+		} else {
+			Some(LogOutput::Stdout)
+		};
 		Ok(Config {
 			log: config::Log {
 				level: level_filter,
-				log_file: opts.log_file.clone().map(Into::into),
+				output,
 			},
 			server: ladder_lib::server::Builder {
 				inbounds: vec![inbound],
@@ -281,8 +320,8 @@ mod parse_url_impl {
 	}
 
 	fn make_blocklist(block_str: Option<&str>) -> Result<Vec<router::PlainRule>, Error> {
-		const LAN_STR: &str = "$lan";
-		const LOCALLOOP_STR: &str = "$localloop";
+		const LAN_STR: &str = "@lan";
+		const LOCALLOOP_STR: &str = "@localloop";
 
 		let mut dsts: Vec<router::Destination> = Vec::new();
 		let block = block_str.map_or_else(
@@ -334,18 +373,43 @@ fn serve(opts: &AppOptions) -> Result<(), Error> {
 		#[cfg(all(feature = "parse-config", feature = "parse-url"))]
 		{
 			if opts.inbound.is_some() || opts.outbound.is_some() {
-				make_config_from_args(opts)?
+				make_config_from_args(
+					opts.inbound.as_deref(),
+					opts.outbound.as_deref(),
+					opts.block.as_deref(),
+					opts.log,
+					opts.log_out.as_deref(),
+					opts.tui,
+				)?
 			} else {
-				make_config(opts)?
+				make_config(
+					opts.format,
+					opts.tui,
+					opts.config.as_deref(),
+					opts.log,
+					opts.log_out.as_deref(),
+				)?
 			}
 		}
 		#[cfg(all(feature = "parse-config", not(feature = "parse-url")))]
 		{
-			make_config(opts)?
+			make_config(
+				opts.format,
+				opts.tui,
+				opts.config.as_deref(),
+				opts.log,
+				opts.log_out.as_deref(),
+			)?
 		}
 		#[cfg(all(not(feature = "parse-config"), feature = "parse-url"))]
 		{
-			make_config_from_args(opts)?
+			make_config_from_args(
+				opts.inbound.as_deref(),
+				opts.outbound.as_deref(),
+				opts.block.as_deref(),
+				opts.log,
+				opts.log_file.as_deref(),
+			)?
 		}
 	};
 
@@ -393,11 +457,7 @@ fn main() {
 	}
 	if let Err(err) = serve(&opts) {
 		println!("Error happened during initialization:\n {}\n", err);
-		std::process::exit(match err {
-			Error::Io(_) => exitcode::IOERR,
-			Error::Input(_) | Error::Config(_) => exitcode::CONFIG,
-			Error::Runtime(_) => exitcode::SOFTWARE,
-		});
+		std::process::exit(255);
 	}
 }
 
@@ -410,8 +470,8 @@ mod tui_utils {
 	use std::{sync::mpsc, thread};
 
 	pub fn run_with_tui(use_tui: bool, conf: Config, rt: Runtime) -> Result<(), BoxStdErr> {
-		if use_tui && conf.log.log_file.is_none() {
-			return Err("cannot use TUI when log file is not set".into());
+		if use_tui && matches!(&conf.log.output, Some(super::config::LogOutput::Stdout)) {
+			return Err("cannot use stdout for log when using TUI".into());
 		}
 
 		// Initialize logger
@@ -474,69 +534,134 @@ mod tui_utils {
 	}
 }
 
+/// Initialize logger.
+///
+/// DO NOT call this funtion more than once!
 fn init_logger(conf: &config::Log) -> Result<(), BoxStdErr> {
-	let time_format =
-		time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]Z").unwrap();
-	let colors = fern::colors::ColoredLevelConfig::new().info(fern::colors::Color::Blue);
-	let is_log_file_none = conf.log_file.is_none();
-	let dispatch = fern::Dispatch::new()
-		.level(conf.level)
-		.format(move |out, message, record| {
-			let now_str = time::OffsetDateTime::now_utc()
-				.format(&time_format)
+	if let Some(output) = &conf.output {
+		let time_format =
+			time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]Z")
 				.unwrap();
-			let target = if record.level() <= log::Level::Info {
-				// For info, warn, error
-				""
+		let is_colorful = output.is_colorful();
+		let colors = ColoredLevelConfig::new()
+			.info(Color::Blue)
+			.trace(Color::Magenta);
+		let levels: &[String; 5] = {
+			let strs = if is_colorful {
+				[
+					colors.color(Level::Error).to_string(),
+					colors.color(Level::Warn).to_string(),
+					colors.color(Level::Info).to_string(),
+					colors.color(Level::Debug).to_string(),
+					colors.color(Level::Trace).to_string(),
+				]
 			} else {
-				record.target()
+				[
+					Level::Error.to_string(),
+					Level::Warn.to_string(),
+					Level::Info.to_string(),
+					Level::Debug.to_string(),
+					Level::Trace.to_string(),
+				]
 			};
-			if is_log_file_none {
-				out.finish(format_args!(
-					"[{} {} {}] {}",
-					now_str,
-					colors.color(record.level()),
-					target,
-					message
-				));
-			} else {
-				out.finish(format_args!(
-					"[{} {} {}] {}",
-					now_str,
-					record.level(),
-					target,
-					message
-				));
-			}
-		});
-	if let Some(log_file) = &conf.log_file {
-		dispatch.chain(fern::log_file(log_file.as_ref())?).apply()?;
-	} else {
-		dispatch.chain(std::io::stdout()).apply()?;
+			// This function should only be called once,
+			// so it is ok to leak.
+			Box::leak(Box::new(strs))
+		};
+		let dispatch =
+			fern::Dispatch::new()
+				.level(conf.level)
+				.format(move |out, message, record| {
+					let time = time::OffsetDateTime::now_utc()
+						.format(&time_format)
+						.unwrap();
+					let level = match record.level() {
+						Level::Error => levels[0].as_str(),
+						Level::Warn => levels[1].as_str(),
+						Level::Info => levels[2].as_str(),
+						Level::Debug => levels[3].as_str(),
+						Level::Trace => levels[4].as_str(),
+					};
+					// Ignore target for any level above DEBUG
+					// let target = if record.level() <= Level::Info {
+					// 	""
+					// } else {
+					// 	record.target()
+					// };
+					let target = record.target();
+					out.finish(format_args!("[{time} {level} {target}] {message}"));
+				});
+		match &output {
+			config::LogOutput::Stdout => dispatch.chain(std::io::stdout()),
+			config::LogOutput::Stderr => dispatch.chain(std::io::stderr()),
+			config::LogOutput::File(f) => dispatch.chain(fern::log_file(f)?),
+		}
+		.apply()?;
 	}
+	// Ignore empty output
 	Ok(())
 }
 
 mod config {
 	use ladder_lib::ServerBuilder;
 	use log::LevelFilter;
-	use std::borrow::Cow;
 
-	#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
-	#[cfg_attr(feature = "parse-config", serde(deny_unknown_fields))]
+	const STR_STDOUT: &str = "@stdout";
+	const STR_STDERR: &str = "@stderr";
+	const STR_NONE: &str = "@none";
+
+	pub enum LogOutput {
+		Stdout,
+		Stderr,
+		File(String),
+	}
+
+	impl LogOutput {
+		pub fn is_colorful(&self) -> bool {
+			matches!(self, Self::Stdout | Self::Stderr)
+		}
+
+		pub fn from_str(s: &str) -> Option<Self> {
+			match s {
+				STR_NONE => None,
+				STR_STDOUT | "" => Some(LogOutput::Stdout),
+				STR_STDERR => Some(LogOutput::Stderr),
+				_ => Some(LogOutput::File(s.to_string())),
+			}
+		}
+	}
+
+	#[cfg(feature = "parse-config")]
+	fn deserialize_output<'de, D>(deserializer: D) -> Result<Option<LogOutput>, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		let s = <&str as serde::Deserialize<'de>>::deserialize(deserializer)?;
+		Ok(LogOutput::from_str(s))
+	}
+
+	#[cfg_attr(
+		feature = "parse-config",
+		derive(serde::Deserialize),
+		serde(deny_unknown_fields)
+	)]
 	pub struct Log {
 		#[cfg_attr(feature = "parse-config", serde(default = "default_log_level"))]
 		pub level: LevelFilter,
-		#[cfg_attr(feature = "parse-config", serde(default))]
-		#[cfg_attr(feature = "parse-config", serde(rename = "output"))]
-		pub log_file: Option<Cow<'static, str>>,
+		#[cfg_attr(
+			feature = "parse-config",
+			serde(default = "default_output"),
+			serde(deserialize_with = "deserialize_output"),
+			serde(rename = "output")
+		)]
+		pub output: Option<LogOutput>,
 	}
 
 	impl Default for Log {
 		fn default() -> Self {
 			Log {
 				level: default_log_level(),
-				log_file: None,
+				output: Some(LogOutput::Stdout),
 			}
 		}
 	}
@@ -551,5 +676,10 @@ mod config {
 
 	fn default_log_level() -> LevelFilter {
 		LevelFilter::Info
+	}
+
+	#[allow(clippy::unnecessary_wraps)]
+	fn default_output() -> Option<LogOutput> {
+		Some(LogOutput::Stdout)
 	}
 }

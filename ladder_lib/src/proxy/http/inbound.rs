@@ -181,7 +181,7 @@ struct HandshakeFinisher {
 	leftover: Vec<u8>,
 }
 
-impl<'a> HandshakeFinisher {
+impl HandshakeFinisher {
 	fn new(stream: Box<dyn AsyncReadWrite>, req: http::Request<()>, leftover: Vec<u8>) -> Self {
 		Self {
 			stream,

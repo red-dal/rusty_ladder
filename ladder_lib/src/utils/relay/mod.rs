@@ -43,6 +43,14 @@ const NOT_ACTIVE: bool = !ACTIVE;
 const TICK_INTERVAL: Duration = Duration::from_secs(1);
 const DEFAULT_TIMEOUT_SECS: usize = 300;
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("{0}")]
+    Io(#[from] io::Error),
+    #[error("inactive for {0} secs")]
+    Inactive(usize),
+}
+
 pub struct Relay<'a> {
 	pub conn_id: &'a str,
 	pub recv: Option<Counter>,
@@ -76,7 +84,7 @@ impl Relay<'_> {
 		iw: IW,
 		or: OR,
 		ow: OW,
-	) -> io::Result<(IR, IW, OR, OW)>
+	) -> Result<(IR, IW, OR, OW), Error>
 	where
 		IR: AsyncBufRead + Unpin + Send + 'static,
 		OR: AsyncBufRead + Unpin + Send + 'static,
@@ -114,12 +122,9 @@ impl Relay<'_> {
 			is_active: is_active.clone(),
 		}
 		.run();
-
-		let guard_task = guard_is_active(is_active, self.timeout_secs).map(|_| {
-			Err::<(IR, IW, OR, OW), _>(io::Error::new(
-				io::ErrorKind::TimedOut,
-				"connection not active for too long",
-			))
+        let timeout_secs = self.timeout_secs;
+		let guard_task = guard_is_active(is_active, timeout_secs).map(|_| {
+			Err::<(IR, IW, OR, OW), _>(Error::Inactive(timeout_secs))
 		});
 
 		let relay_task = async move {

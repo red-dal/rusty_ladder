@@ -148,8 +148,8 @@ impl Settings {
 		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 	) -> Result<BufBytesStream, OutboundError> {
-		info!(
-			"Creating VMess TCP connection to '{}', target: '{}'",
+		debug!(
+			"Creating VMess TCP connection to server '{}', dst: '{}'",
 			&self.addr, dst
 		);
 		let time = timestamp_now();

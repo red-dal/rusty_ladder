@@ -132,7 +132,6 @@ tui = { version = "0.18", optional = true }
 crossterm = { version = "0.23", optional = true }
 futures = "0.3"
 lazy_static = "1.4"
-exitcode = "1.1"
 thiserror = "1.0"
 smol_str = "0.1"
 url = { version = "2" }

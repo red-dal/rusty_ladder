@@ -315,7 +315,7 @@ mod udp_impl {
 	impl<W: AsyncWrite + Unpin + Send + Sync> SendDatagram for UdpWriteHalf<W> {
 		async fn send_dst(&mut self, dst: &SocksAddr, payload: &[u8]) -> std::io::Result<usize> {
 			let payload_len = u16::try_from(payload.len()).unwrap_or_else(|_| {
-				info!(
+				warn!(
 					"UDP payload too large for trojan protocol: {}",
 					payload.len()
 				);

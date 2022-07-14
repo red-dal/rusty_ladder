@@ -22,7 +22,7 @@ use super::{
 	Error,
 };
 use crate::{
-	network::{self},
+	network,
 	prelude::*,
 	protocol::{
 		inbound::{AcceptError, AcceptResult, SessionInfo, TcpAcceptor},
@@ -228,12 +228,19 @@ impl Inbound {
 					inbound: inbound.clone(),
 				};
 				if let Err(e) = callback.run(args).await {
-					error!(
-						"Error occurred when serving {} inbound '{}': {} ",
-						inbound.protocol_name(),
-						inbound.tag,
-						e
-					);
+					let in_proto = inbound.protocol_name();
+					if let Error::Inactive(secs) = &e {
+						warn!(
+							"[{conn_id:x}] connection closed in \
+                            'in_tag'|{in_proto} session due to inactivity for {secs} secs."
+						);
+					} else {
+						error!(
+							"[{conn_id:x}] error occurred in \
+                            '{in_tag}'|{in_proto} session: {e} ",
+							in_tag = inbound.tag,
+						);
+					}
 				}
 				// kill connection in the monitor
 				let end_time = SystemTime::now();

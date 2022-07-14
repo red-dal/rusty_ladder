@@ -34,7 +34,7 @@ use crate::{
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 };
-use log::{info, trace};
+use log::trace;
 use std::{collections::HashMap, io};
 
 const HANDSHAKE_BUFFER_CAPACITY: usize = 512;
@@ -169,7 +169,7 @@ impl TcpAcceptor for Settings {
 		stream: Box<dyn AsyncReadWrite>,
 		info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
-		info!("Performing SOCKS5 handshake with client ({:?}).", info);
+		debug!("Performing SOCKS5 handshake with client ({info:?})...");
 		let mut stream = BufBytesStream::from(stream);
 		let mut buf = Vec::with_capacity(HANDSHAKE_BUFFER_CAPACITY);
 		{

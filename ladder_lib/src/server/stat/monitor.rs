@@ -202,7 +202,7 @@ impl Internal {
 	}
 
 	fn set_dead(&mut self, conn_id: Id, end_time: SystemTime) {
-		trace!("set dead for conn {:x}", conn_id);
+		log::trace!("set dead for conn {conn_id:x}");
 
 		if let Some(c) = self.conns.remove(&conn_id) {
 			if self.dead_conns.len() >= DEAD_CONNS_BUFFER_SIZE {
@@ -211,7 +211,7 @@ impl Internal {
 			let dead = c.into_dead(end_time);
 			self.dead_conns.push_back(dead);
 		} else {
-			log::error!("Connection[{}] is not registered or already dead", conn_id);
+			log::error!("Connection[{conn_id:x}] is not registered or already dead");
 		}
 	}
 

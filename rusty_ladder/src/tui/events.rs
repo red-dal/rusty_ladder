@@ -20,7 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crossterm::event::{self, Event as RawEvent, KeyCode, KeyModifiers};
 use event::KeyEvent;
 use lazy_static::lazy_static;
-use log::error;
 use std::{collections::HashMap, sync::mpsc, thread, time::Duration};
 
 const KEYS_QUIT: &[&KeyEvent] = &[
@@ -204,13 +203,14 @@ fn read_events(sender: &mpsc::Sender<Event>) -> crossterm::Result<()> {
 }
 
 fn wait_for_stop(stop_receiver: &mpsc::Receiver<()>, sender: &mpsc::Sender<Event>) {
-	if stop_receiver.recv().is_err() {
+	if let Err(e) = stop_receiver.recv() {
 		// This error is caused by sender thread panicking, so it's safe to ignore.
 		// The whole thing is going to stop anyway.
-		error!("");
+		log::debug!("Error when trying to send stop signal: {e}");
 	}
-	if sender.send(Event::Stop).is_err() {
+	if let Err(_e) = sender.send(Event::Stop) {
 		// Same as above.
+		log::debug!("Error when trying to send stop to events");
 	};
 }
 

@@ -363,8 +363,8 @@ where
 	let calculated_hash = utils::fnv1a(&buffer);
 
 	if hash != calculated_hash {
-		info!(
-			"Vmess request hash: {:x}, buf calculated hash: {:x}",
+		debug!(
+			"VMess request hash: {:x}, buf calculated hash: {:x}",
 			hash, calculated_hash
 		);
 		return Err("request fnv1a hash check failed".into());

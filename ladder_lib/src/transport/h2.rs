@@ -81,7 +81,7 @@ impl Outbound {
 	where
 		RW: 'static + AsyncRead + AsyncWrite + Send + Unpin,
 	{
-		info!("Establishing H2 connection to '{}'", addr);
+		debug!("Establishing H2 connection to '{addr}'");
 		let (r, w) = if let Some(tls) = &self.tls {
 			let stream = tls.connect_stream(stream, addr).await?;
 			self.priv_connect(stream, addr).await?
@@ -104,7 +104,7 @@ impl Outbound {
 		let is_closed = Arc::new(AtomicBool::new(NOT_CLOSED));
 		tokio::spawn(async move {
 			if let Err(err) = conn.await {
-				error!("H2 connection error: {}", err);
+				error!("H2 connection error: {err}");
 			};
 		});
 		let mut send_request = send_request.ready().await.map_err(h2_to_io_err)?;

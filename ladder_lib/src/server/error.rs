@@ -33,6 +33,8 @@ pub enum Server {
 	Inbound(#[from] inbound::HandshakeError),
 	#[error("proxy IO error ({0})")]
 	Io(#[from] io::Error),
+    #[error("inactive for {0} secs")]
+    Inactive(usize),
 	#[error("proxy error ({0})")]
 	Other(BoxStdErr),
 }

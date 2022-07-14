@@ -567,7 +567,7 @@ mod serde_internal {
 		}
 	}
 
-	impl<'de> Serialize for SocksAddr {
+	impl Serialize for SocksAddr {
 		fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 		where
 			S: serde::Serializer,

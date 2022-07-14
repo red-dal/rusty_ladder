@@ -50,7 +50,7 @@ impl NetConfig {
 	pub async fn bind(&self) -> io::Result<TcpAcceptor> {
 		let mut combined_streams = SelectAll::new();
 		for a in self.addr.as_slice() {
-			log::warn!("Listening TCP on {}", a);
+			log::info!("Listening TCP on {}", a);
 			let listener = TcpListener::bind(a).await.map_err(|e| {
 				io::Error::new(
 					e.kind(),

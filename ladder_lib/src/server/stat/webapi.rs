@@ -116,7 +116,7 @@ pub async fn serve_web_api(
 	addr: &SocketAddr,
 	secret: SmolStr,
 ) -> Result<(), BoxStdErr> {
-	warn!("Serving Web API on {}", addr);
+	info!("Serving Web API on {}", addr);
 	let cors = warp::cors()
 		.allow_any_origin()
 		.allow_method(http::Method::GET);

@@ -161,14 +161,12 @@ struct ServerCallback {
 
 impl ServerCallback {
 	fn priv_run(&self, args: CallbackArgs) -> impl Future<Output = Result<(), Error>> {
-		let conn_id_str = format_conn_id(args.conn_id, &args.inbound.tag);
+		let id = format!("[{:x}]", args.conn_id);
 		// ------ handshake ------
 		let src = args.addr.get_peer();
-		warn!(
-			"{} Making {} handshake with incoming connection from {}.",
-			conn_id_str,
-			args.inbound.protocol_name(),
-			src,
+		info!(
+			"{id} making {proto} inbound handshake with '{src}'.",
+			proto = args.inbound.protocol_name(),
 		);
 
 		let info = SessionInfo {
@@ -215,7 +213,7 @@ impl ServerCallback {
 						server: &server,
 						inbound: &inbound,
 						inbound_ind,
-						conn_id_str,
+						id,
 						stat_handle: args.sh,
 						src: &src,
 						handshake_handler,
@@ -273,11 +271,11 @@ where
 	});
 }
 
-pub struct StreamSession<'a> {
+struct StreamSession<'a> {
 	server: &'a Server,
 	inbound: &'a Inbound,
 	inbound_ind: usize,
-	conn_id_str: String,
+	id: String,
 	stat_handle: Option<SessionHandle>,
 	src: &'a SocketAddr,
 	handshake_handler: Box<dyn FinishHandshake + 'a>,
@@ -287,8 +285,8 @@ pub struct StreamSession<'a> {
 impl<'a> StreamSession<'a> {
 	async fn run(self) -> Result<(), Error> {
 		let dst = self.dst;
+		let id = self.id;
 		let handshake_handler = self.handshake_handler;
-		debug!("{} Making outbound to '{}'.", self.conn_id_str, dst);
 		let (outbound, outbound_ind) = if let Some(ind) =
 			self.server
 				.router
@@ -296,15 +294,17 @@ impl<'a> StreamSession<'a> {
 		{
 			(&self.server.outbounds[ind], ind)
 		} else {
+			warn!("{id} connecting to '{dst}' is not allowed, replying to inbound...");
 			let err = OutboundError::NotAllowed;
 			handshake_handler.finish_err(&err).await?;
 			return Err(err.into());
 		};
 
-		let route_str = new_route_name(self.src, dst, self.inbound, outbound);
+		let route = new_route_name(self.src, dst, self.inbound, outbound);
 		info!(
-			"{} Proxy route found: {}. Trying to make connection with outbound...",
-			self.conn_id_str, route_str
+			"{id} route: {route}, now connecting to {out_proto} outbound '{out_tag}'...",
+			out_proto = outbound.protocol_name(),
+			out_tag = outbound.tag
 		);
 
 		let out_stream = {
@@ -321,20 +321,19 @@ impl<'a> StreamSession<'a> {
 		let out_stream = match out_stream {
 			Ok(out_stream) => out_stream,
 			Err(err) => {
-				debug!("Error occurred when making outbound connection ({}). Finishing inbound connection.", err);
+				info!("{id} error during outbound connection ({err}), replying to inbound...");
 				handshake_handler.finish_err(&err).await?;
 				return Err(err.into());
 			}
 		};
-		debug!(
-			"{} Connection to outbound established. Finishing handshake with inbound...",
-			self.conn_id_str
+		info!(
+			"{id} connected to outbound '{out_tag}', replying to inbound...",
+			out_tag = outbound.tag
 		);
 		let in_stream = handshake_handler.finish().await?;
-		debug!("{} Handshake with inbound finished. Start relaying traffic between inbound and outbound...", self.conn_id_str);
+		info!("{id} inbound handshake finished, relaying...");
 		return ProxyStreamHandler {
-			conn_id_str: &self.conn_id_str,
-			route_str: &route_str,
+			id: &id,
 			stat_handle: &self.stat_handle,
 			in_ps: in_stream,
 			out_ps: out_stream,
@@ -346,8 +345,7 @@ impl<'a> StreamSession<'a> {
 }
 
 struct ProxyStreamHandler<'a> {
-	conn_id_str: &'a str,
-	route_str: &'a str,
+	id: &'a str,
 	stat_handle: &'a Option<SessionHandle>,
 	in_ps: BufBytesStream,
 	out_ps: BufBytesStream,
@@ -356,6 +354,7 @@ struct ProxyStreamHandler<'a> {
 
 impl<'a> ProxyStreamHandler<'a> {
 	async fn run(self) -> Result<(), Error> {
+		let id = self.id;
 		let start_time = Instant::now();
 		let recv = Counter::new(0);
 		let send = Counter::new(0);
@@ -365,7 +364,7 @@ impl<'a> ProxyStreamHandler<'a> {
 		}
 
 		let relay_result = Relay {
-			conn_id: self.conn_id_str,
+			conn_id: id,
 			recv: Some(recv.clone()),
 			send: Some(send.clone()),
 			timeout_secs: self.relay_timeout_secs,
@@ -375,23 +374,27 @@ impl<'a> ProxyStreamHandler<'a> {
 
 		let end_time = Instant::now();
 
-		let recv_count = recv.get();
-		let send_count = send.get();
+		let recv_count = BytesCount(recv.get());
+		let send_count = BytesCount(send.get());
+		let lasted_secs = (end_time - start_time).as_secs();
 		// print result
 		let msg = format!(
-			"{} {} finished with {} received, {} sent and lasted {} secs.",
-			self.conn_id_str,
-			self.route_str,
-			BytesCount(recv_count),
-			BytesCount(send_count),
-			(end_time - start_time).as_secs(),
+			"{id} relay finished with {recv_count} received, {send_count} sent and lasted {lasted_secs} secs",
 		);
 
 		if let Err(e) = relay_result {
-			warn!("{} But an error occurred ({}).", msg, e);
-			return Err(e.into());
+			match e {
+				crate::utils::relay::Error::Io(e) => {
+					info!("{msg}, but an error occurred during relay: {e}.");
+					return Err(Error::Io(e));
+				}
+				crate::utils::relay::Error::Inactive(secs) => {
+					info!("{msg}, but is closed due to inactivity for {secs} secs.");
+					return Err(Error::Inactive(secs));
+				}
+			}
 		}
-		info!("{}", msg);
+		info!("{msg}.");
 
 		Ok(())
 	}
@@ -399,24 +402,17 @@ impl<'a> ProxyStreamHandler<'a> {
 
 #[inline]
 fn new_route_name(
-	src_addr: &SocketAddr,
-	dst_addr: &SocksAddr,
+	src: &SocketAddr,
+	dst: &SocksAddr,
 	inbound: &Inbound,
 	outbound: &Outbound,
 ) -> Cow<'static, str> {
 	format!(
-		"['{}'--{}({})--{}({})--'{}']",
-		src_addr,
-		inbound.tag,
-		inbound.protocol_name(),
-		outbound.tag,
-		outbound.protocol_name(),
-		dst_addr,
+		"['{src}', '{in_tag}'|{in_proto}, '{out_tag}'|{out_proto}, '{dst}']",
+		in_tag = inbound.tag,
+		in_proto = inbound.protocol_name(),
+		out_tag = outbound.tag,
+		out_proto = outbound.protocol_name(),
 	)
 	.into()
-}
-
-#[inline]
-fn format_conn_id(conn_id: u64, inbound_tag: &str) -> String {
-	format!("[{:#06x} {}]", conn_id, inbound_tag)
 }
