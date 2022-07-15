@@ -139,7 +139,6 @@ where
 {
 	impl_inner_read!();
 }
-
 impl<R, W> AsyncBufRead for CompositeBytesStream<R, W>
 where
 	R: AsyncBufRead + Unpin,
@@ -258,5 +257,44 @@ pub trait GetProtocolName {
 	fn protocol_name(&self) -> &'static str;
 	fn network(&self) -> Network {
 		Network::Tcp
+	}
+}
+
+// --------------------------------------------
+//                    Info
+// --------------------------------------------
+
+pub struct BriefHelper<'a, T: ?Sized + DisplayInfo>(&'a T);
+
+impl<T: DisplayInfo> std::fmt::Display for BriefHelper<'_, T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		self.0.fmt_brief(f)
+	}
+}
+
+pub struct DetailHelper<'a, T: ?Sized + DisplayInfo>(&'a T);
+
+impl<T: DisplayInfo> std::fmt::Display for DetailHelper<'_, T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		self.0.fmt_detail(f)
+	}
+}
+
+pub trait DisplayInfo {
+	/// Format some brief info.
+	///
+	/// # Errors
+	/// See more at [`std::fmt::Display`]
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+	/// Format some detail info.
+	///
+	/// # Errors
+	/// See more at [`std::fmt::Display`]
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+	fn brief(&self) -> BriefHelper<'_, Self> {
+		BriefHelper(self)
+	}
+	fn detail(&self) -> DetailHelper<'_, Self> {
+		DetailHelper(self)
 	}
 }
