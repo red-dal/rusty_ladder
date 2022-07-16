@@ -43,6 +43,10 @@ const METHODS_NO_AUTH: &[u8] = &[AcceptableMethod::NoAuthentication as u8];
 // Both are 0xff.
 const NO_ACCEPTABLE_METHOD: u8 = AUTH_FAILED;
 
+// --------------------------------------------------------------
+//                         Builder
+// --------------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -93,6 +97,30 @@ impl SettingsBuilder {
 		Ok(SettingsBuilder { user, pass, addr })
 	}
 }
+
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.user.is_empty() {
+			f.write_str("{PROTOCOL_NAME}-out")
+		} else {
+			f.write_str("{PROTOCOL_NAME}-out(auth)")
+		}
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let addr = &self.addr;
+		let username = &self.user;
+		if username.is_empty() {
+			write!(f, "{PROTOCOL_NAME}-out({addr})")
+		} else {
+			write!(f, "{PROTOCOL_NAME}-out(user:'{username}',addr:'{addr}')")
+		}
+	}
+}
+
+// --------------------------------------------------------------
+//                         Settings
+// --------------------------------------------------------------
 
 pub struct Settings {
 	user_pass: Option<(String, String)>,
@@ -158,7 +186,7 @@ impl Settings {
 			Some(AcceptableMethod::UsernamePassword) => {
 				if let Some((user, pass)) = &self.user_pass {
 					let auth = Authentication {
-						user: user.as_bytes().into(),
+						user: user.as_str().into(),
 						pass: pass.as_bytes().into(),
 					};
 
@@ -252,7 +280,7 @@ impl Authentication<'_> {
 		let pass_len = self.pass.len() as u8;
 		buf.put_u8(SUB_VERS);
 		buf.put_u8(user_len);
-		buf.put_slice(&self.user);
+		buf.put_slice(self.user.as_bytes());
 		buf.put_u8(pass_len);
 		buf.put_slice(&self.pass);
 	}
@@ -300,10 +328,11 @@ async fn read_auth_reply<R: AsyncRead + Unpin>(reader: &mut R) -> Result<u8, Soc
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+
 	#[cfg(feature = "parse-url")]
 	#[test]
 	fn test_parse_url() {
-		use super::SettingsBuilder;
 		use std::str::FromStr;
 		use url::Url;
 
@@ -331,5 +360,25 @@ mod tests {
 			let output = SettingsBuilder::parse_url(&url).unwrap();
 			assert_eq!(expected, output);
 		}
+	}
+
+	#[test]
+	fn test_display_info() {
+		use crate::protocol::DisplayInfo;
+		let mut s = SettingsBuilder {
+			user: String::new(),
+			pass: String::new(),
+			addr: "localhost:12345".parse().unwrap(),
+		};
+		assert_eq!(s.brief().to_string(), "socks5-out");
+		assert_eq!(s.detail().to_string(), "socks5-out(localhost:12345)");
+		// With auth
+		s.user = String::from("alice");
+		s.pass = String::from("alice_password");
+		assert_eq!(s.brief().to_string(), "socks5-out(auth)");
+		assert_eq!(
+			s.detail().to_string(),
+			"socks5-out(user:'alice',addr:'localhost:12345')"
+		);
 	}
 }

@@ -109,7 +109,7 @@ impl Display for ReplyCode {
 }
 
 pub struct Authentication<'a> {
-	pub user: Cow<'a, [u8]>,
+	pub user: Cow<'a, str>,
 	pub pass: Cow<'a, [u8]>,
 }
 

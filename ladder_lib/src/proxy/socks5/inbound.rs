@@ -39,6 +39,10 @@ use std::{collections::HashMap, io};
 
 const HANDSHAKE_BUFFER_CAPACITY: usize = 512;
 
+// --------------------------------------------------------------
+//                         Builder
+// --------------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(
@@ -95,9 +99,69 @@ impl SettingsBuilder {
 	}
 }
 
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("socks5-in")?;
+		let mut empty = true;
+		if self.is_udp_enabled {
+			if empty {
+				f.write_str("(")?;
+			}
+			empty = false;
+			f.write_str("udp")?;
+		}
+		if !self.users.is_empty() {
+			if empty {
+				f.write_str("(")?;
+			} else {
+				f.write_str(",")?;
+			}
+			empty = false;
+			f.write_str("auth")?;
+		}
+		if !empty {
+			f.write_str(")")?;
+		}
+		Ok(())
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("socks5-in")?;
+		let mut empty = true;
+		if self.is_udp_enabled {
+			if empty {
+				f.write_str("(")?;
+			}
+			empty = false;
+			f.write_str("udp")?;
+		}
+		if !self.users.is_empty() {
+			if empty {
+				f.write_str("(")?;
+			} else {
+				f.write_str(",")?;
+			}
+			empty = false;
+			f.write_str("users:[")?;
+			let mut users: Vec<&String> = self.users.iter().map(|(user, _pass)| user).collect();
+			users.sort_unstable();
+			crate::utils::fmt_iter(f, users.iter())?;
+			f.write_str("]")?;
+		}
+		if !empty {
+			f.write_str(")")?;
+		}
+		Ok(())
+	}
+}
+
+// --------------------------------------------------------------
+//                         Settings
+// --------------------------------------------------------------
+
 #[derive(Default)]
 pub struct Settings {
-	users: HashMap<Vec<u8>, Vec<u8>>,
+	users: HashMap<String, String>,
 	#[cfg(feature = "use-udp")]
 	pub is_udp_enabled: bool,
 }
@@ -105,10 +169,7 @@ pub struct Settings {
 impl Settings {
 	#[inline]
 	pub fn new(users: impl IntoIterator<Item = (String, String)>) -> Self {
-		let users = users
-			.into_iter()
-			.map(|(name, pass)| (name.into(), pass.into()))
-			.collect();
+		let users = users.into_iter().collect();
 		Self {
 			users,
 			#[cfg(feature = "use-udp")]
@@ -132,7 +193,7 @@ impl Settings {
 		let auth = Authentication::read(stream).await?;
 		let mut success = false;
 		if let Some(correct_pass) = self.users.get(auth.user.as_ref()) {
-			if &auth.pass == correct_pass {
+			if auth.pass.as_ref() == correct_pass.as_bytes() {
 				success = true;
 			}
 		}
@@ -311,14 +372,14 @@ mod udp {
 	const MIN_DATAGRAM_BUF_SIZE: usize = 512;
 
 	impl Settings {
-		pub(super) async fn handle_udp(
-			&self,
+		pub(super) async fn handle_udp<'a>(
+			&'a self,
 			mut stream: BufBytesStream,
 			request: Request,
 			buf: &mut Vec<u8>,
 			local_addr: &SocketAddr,
 			is_transport_empty: bool,
-		) -> Result<AcceptResult<'_>, AcceptError> {
+		) -> Result<AcceptResult<'a>, AcceptError> {
 			if is_transport_empty {
 				// Do nothing
 			} else {
@@ -673,7 +734,9 @@ impl Authentication<'_> {
 		// username
 		let mut buf = Vec::with_capacity(128);
 		read_block(reader, &mut buf).await?;
-		let user = buf.clone().into();
+		let user = String::from_utf8(buf.clone())
+			.map_err(|_e| SocksOrIoError::Socks(Error::Custom("username is not utf8".into())))?
+			.into();
 		// password
 		read_block(reader, &mut buf).await?;
 		let pass = buf.into();
@@ -752,10 +815,11 @@ where
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+
 	#[cfg(feature = "parse-url")]
 	#[test]
 	fn test_parse_url() {
-		use super::SettingsBuilder;
 		use std::{collections::HashMap, str::FromStr};
 		use url::Url;
 
@@ -784,5 +848,42 @@ mod tests {
 			let output = SettingsBuilder::parse_url(&url).unwrap();
 			assert_eq!(expected, output);
 		}
+	}
+
+	#[test]
+	fn test_display_info() {
+		use crate::protocol::DisplayInfo;
+		use std::collections::HashMap;
+
+		let auth: HashMap<String, String> = [
+			("alice".into(), "password".into()),
+			("bob".into(), "password".into()),
+		]
+		.into();
+		let mut s = SettingsBuilder {
+			users: HashMap::new(),
+			is_udp_enabled: false,
+		};
+		// Empty
+		assert_eq!(s.brief().to_string(), "socks5-in");
+		assert_eq!(s.detail().to_string(), "socks5-in");
+		// Only auth
+		s.users = auth.clone();
+		s.is_udp_enabled = false;
+		assert_eq!(s.brief().to_string(), "socks5-in(auth)");
+		assert_eq!(s.detail().to_string(), "socks5-in(users:['alice','bob'])");
+		// Only UDP
+		s.users = HashMap::new();
+		s.is_udp_enabled = true;
+		assert_eq!(s.brief().to_string(), "socks5-in(udp)");
+		assert_eq!(s.detail().to_string(), "socks5-in(udp)");
+		// Auth and UDP
+		s.users = auth.clone();
+		s.is_udp_enabled = true;
+		assert_eq!(s.brief().to_string(), "socks5-in(udp,auth)");
+		assert_eq!(
+			s.detail().to_string(),
+			"socks5-in(udp,users:['alice','bob'])"
+		);
 	}
 }
