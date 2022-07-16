@@ -101,9 +101,9 @@ impl SettingsBuilder {
 impl crate::protocol::DisplayInfo for SettingsBuilder {
 	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		if self.user.is_empty() {
-			f.write_str("{PROTOCOL_NAME}-out")
+			write!(f, "{PROTOCOL_NAME}-out")
 		} else {
-			f.write_str("{PROTOCOL_NAME}-out(auth)")
+			write!(f, "{PROTOCOL_NAME}-out(auth)")
 		}
 	}
 
