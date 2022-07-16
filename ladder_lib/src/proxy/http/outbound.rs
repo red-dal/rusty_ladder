@@ -30,6 +30,10 @@ use crate::{
 };
 use http::{header, Request, StatusCode};
 
+// ------------------------------------------------------------------
+//                               Builder
+// ------------------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(
@@ -78,6 +82,10 @@ impl SettingsBuilder {
 		Ok(Self { user, pass, addr })
 	}
 }
+
+// ------------------------------------------------------------------
+//                               Settings
+// ------------------------------------------------------------------
 
 pub struct Settings {
 	auth: Option<String>,
@@ -220,6 +228,26 @@ impl Settings {
 	}
 }
 
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.user.is_empty() && self.pass.is_empty() {
+			f.write_str("http-out")
+		} else {
+			f.write_str("http-out-auth")
+		}
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let addr = &self.addr;
+		let username = &self.user;
+		if username.is_empty() {
+			write!(f, "http-out({addr})")
+		} else {
+			write!(f, "http-out(user:'{username}',addr:'{addr}')")
+		}
+	}
+}
+
 async fn read_response<IO: AsyncRead + Unpin>(
 	stream: &mut IO,
 ) -> Result<(http::Response<()>, Vec<u8>), ReadError> {
@@ -268,6 +296,7 @@ fn parse_response(buf: &[u8]) -> Result<(http::Response<()>, usize), ReadError> 
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	#[cfg(feature = "parse-url")]
 	#[test]
 	fn test_parse_url() {
@@ -299,5 +328,32 @@ mod tests {
 			let output = SettingsBuilder::parse_url(&url).unwrap();
 			assert_eq!(expected, output);
 		}
+	}
+
+	#[test]
+	fn test_display_info_auth() {
+		use crate::protocol::DisplayInfo;
+		let s = SettingsBuilder {
+			user: "test_user".into(),
+			pass: "password".into(),
+			addr: "localhost:1234".parse().unwrap(),
+		};
+		assert_eq!(format!("{}", s.brief()), "http-out-auth");
+		assert_eq!(
+			format!("{}", s.detail()),
+			"http-out(user:'test_user',addr:'localhost:1234')"
+		);
+	}
+
+	#[test]
+	fn test_display_info_no_auth() {
+		use crate::protocol::DisplayInfo;
+		let s = SettingsBuilder {
+			user: String::new(),
+			pass: String::new(),
+			addr: "localhost:1234".parse().unwrap(),
+		};
+		assert_eq!(format!("{}", s.brief()), "http-out");
+		assert_eq!(format!("{}", s.detail()), "http-out(localhost:1234)");
 	}
 }

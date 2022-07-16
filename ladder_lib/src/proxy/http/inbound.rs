@@ -40,6 +40,10 @@ use std::{
 	io,
 };
 
+// ------------------------------------------------------------------
+//                               Builder
+// ------------------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(
@@ -63,7 +67,7 @@ impl SettingsBuilder {
 		let users = self
 			.users
 			.iter()
-			.map(|(name, pass)| (name.as_str(), pass.as_str()));
+			.map(|(user, pass)| (user.as_str(), pass.as_str()));
 		Ok(Settings::new(users))
 	}
 
@@ -85,6 +89,39 @@ impl SettingsBuilder {
 		Ok(SettingsBuilder { users })
 	}
 }
+
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.users.is_empty() {
+			f.write_str("http-in")
+		} else {
+			f.write_str("http-in-auth")
+		}
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.users.is_empty() {
+			// With authentication:
+			f.write_str("http-in")
+		} else {
+			// With authentication:
+			// http-in('alice','bob',...)
+			f.write_str("http-in(")?;
+			let mut sorted_names: Vec<&str> = self
+				.users
+				.iter()
+				.map(|(user, _pass)| user.as_str())
+				.collect();
+			sorted_names.sort_unstable();
+			crate::utils::fmt_iter(f, sorted_names.iter())?;
+			f.write_str(")")
+		}
+	}
+}
+
+// ------------------------------------------------------------------
+//                               Settings
+// ------------------------------------------------------------------
 
 pub struct Settings {
 	auths: HashSet<String>,
@@ -421,10 +458,12 @@ fn parse_request(buf: &[u8]) -> Result<(http::Request<()>, usize), ReadError> {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+	use crate::protocol::DisplayInfo;
+
 	#[cfg(feature = "parse-url")]
 	#[test]
 	fn test_parse_url() {
-		use super::SettingsBuilder;
 		use std::{collections::HashMap, str::FromStr};
 		use url::Url;
 
@@ -451,5 +490,27 @@ mod tests {
 			let output = SettingsBuilder::parse_url(&url).unwrap();
 			assert_eq!(expected, output);
 		}
+	}
+
+	#[test]
+	fn test_display_info_no_auth() {
+		let s = SettingsBuilder {
+			users: HashMap::new(),
+		};
+		assert_eq!(format!("{}", s.brief()), "http-in");
+		assert_eq!(format!("{}", s.detail()), "http-in");
+	}
+
+	#[test]
+	fn test_display_info_auth() {
+		let s = SettingsBuilder {
+			users: [
+				("test_user".into(), "test_password".into()),
+				("user2".into(), "test".into()),
+			]
+			.into(),
+		};
+		assert_eq!(format!("{}", s.brief()), "http-in-auth");
+		assert_eq!(format!("{}", s.detail()), "http-in('test_user','user2')");
 	}
 }
