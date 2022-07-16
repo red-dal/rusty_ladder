@@ -102,6 +102,17 @@ impl Method {
 			_ => return None,
 		})
 	}
+
+	#[inline]
+	#[must_use]
+	pub fn as_str(&self) -> &'static str {
+		match self {
+			Method::None => "none",
+			Method::Aes128Gcm => "aes128gcm",
+			Method::Aes256Gcm => "aes256gcm",
+			Method::Chacha20Poly1305 => "chacha20poly1305",
+		}
+	}
 }
 
 pub fn method_to_algo(method: Method) -> Option<Algorithm> {
@@ -161,7 +172,8 @@ pub(super) fn get_method_password(url: &url::Url) -> Result<(Method, String), Bo
 	let userinfo = url.username();
 	let userinfo_str = String::from_utf8(base64::decode(userinfo)?)?;
 	let (method_str, password) = userinfo_str.split_once(':').ok_or("invalid userinfo")?;
-	let method =
-		Method::new_from_str(method_str).ok_or_else(|| format!("unknown method '{}'", method_str))?;
+	let method = Method::new_from_str(method_str)
+		.ok_or_else(|| format!("unknown method '{}'", method_str))?;
 	Ok((method, password.into()))
 }
+

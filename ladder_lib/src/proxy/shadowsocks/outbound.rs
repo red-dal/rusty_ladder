@@ -29,6 +29,10 @@ use crate::{
 use bytes::Bytes;
 use rand::rngs::OsRng;
 
+// -------------------------------------------------------------------------
+//                              Builder
+// -------------------------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -74,6 +78,26 @@ impl SettingsBuilder {
 		})
 	}
 }
+
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("ss-out")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let addr = &self.addr;
+		if Method::None == self.method {
+			write!(f, "ss-out-none({addr})")
+		} else {
+			let method = self.method.as_str();
+			write!(f, "ss-out-{method}({addr})")
+		}
+	}
+}
+
+// -------------------------------------------------------------------------
+//                              Settings
+// -------------------------------------------------------------------------
 
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 struct EncryptionSettings {
@@ -252,6 +276,8 @@ mod udp_impl {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+
 	#[cfg(feature = "parse-url")]
 	#[test]
 	fn test_parse_url() {
@@ -273,5 +299,34 @@ mod tests {
 			let output = SettingsBuilder::parse_url(&url).unwrap();
 			assert_eq!(expected, output);
 		}
+	}
+
+	#[test]
+	fn test_display_info() {
+		use crate::protocol::DisplayInfo;
+
+		let mut s = SettingsBuilder {
+			addr: "localhost:12345".parse().unwrap(),
+			method: Method::None,
+			password: "password".into(),
+		};
+		// Method::None
+		assert_eq!(s.brief().to_string(), "ss-out");
+		assert_eq!(s.detail().to_string(), "ss-out-none(localhost:12345)");
+		// Method::Aes128Gcm
+		s.method = Method::Aes128Gcm;
+		assert_eq!(s.brief().to_string(), "ss-out");
+		assert_eq!(s.detail().to_string(), "ss-out-aes128gcm(localhost:12345)");
+		// Method::Aes256Gcm
+		s.method = Method::Aes256Gcm;
+		assert_eq!(s.brief().to_string(), "ss-out");
+		assert_eq!(s.detail().to_string(), "ss-out-aes256gcm(localhost:12345)");
+		// Method::Chacha20Poly1305
+		s.method = Method::Chacha20Poly1305;
+		assert_eq!(s.brief().to_string(), "ss-out");
+		assert_eq!(
+			s.detail().to_string(),
+			"ss-out-chacha20poly1305(localhost:12345)"
+		);
 	}
 }

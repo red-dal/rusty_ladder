@@ -30,6 +30,10 @@ use crate::{
 use bytes::Bytes;
 use rand::thread_rng;
 
+// -------------------------------------------------------------------------
+//                                    Builder
+// -------------------------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -69,6 +73,21 @@ impl SettingsBuilder {
 		Ok(Self { method, password })
 	}
 }
+
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("ss-in")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let method = self.method.as_str();
+		write!(f, "ss-in-{method}")
+	}
+}
+
+// -------------------------------------------------------------------------
+//                              Settings
+// -------------------------------------------------------------------------
 
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 struct CryptoSettings {
@@ -187,6 +206,8 @@ fn invalid_request<T>(
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+
 	#[cfg(feature = "parse-url")]
 	#[test]
 	fn test_parse_url() {
@@ -207,5 +228,30 @@ mod tests {
 			let output = SettingsBuilder::parse_url(&url).unwrap();
 			assert_eq!(expected, output);
 		}
+	}
+
+	#[test]
+	fn test_display_info() {
+		use crate::protocol::DisplayInfo;
+
+		let mut s = SettingsBuilder {
+			method: Method::None,
+			password: "password".into(),
+		};
+		// Method::None
+		assert_eq!(s.brief().to_string(), "ss-in");
+		assert_eq!(s.detail().to_string(), "ss-in-none");
+		// Method::Aes128Gcm
+		s.method = Method::Aes128Gcm;
+		assert_eq!(s.brief().to_string(), "ss-in");
+		assert_eq!(s.detail().to_string(), "ss-in-aes128gcm");
+		// Method::Aes256Gcm
+		s.method = Method::Aes256Gcm;
+		assert_eq!(s.brief().to_string(), "ss-in");
+		assert_eq!(s.detail().to_string(), "ss-in-aes256gcm");
+		// Method::Chacha20Poly1305
+		s.method = Method::Chacha20Poly1305;
+		assert_eq!(s.brief().to_string(), "ss-in");
+		assert_eq!(s.detail().to_string(), "ss-in-chacha20poly1305");
 	}
 }
