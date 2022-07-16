@@ -135,6 +135,22 @@ impl GetConnector for Settings {
 	}
 }
 
+impl crate::protocol::DisplayInfo for Settings {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("chain")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("chain(")?;
+		crate::utils::fmt_iter(f, self.chain.iter().map(Tag::as_str))?;
+		f.write_str(")")
+	}
+}
+
+// -----------------------------------------------
+//                      Error
+// -----------------------------------------------
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
 	#[error("invalid chain node (tag: '{tag}', protocol: {proto_name})")]
@@ -167,5 +183,24 @@ impl From<GetConnectorError> for Error {
 				proto_name: type_name,
 			},
 		}
+	}
+}
+
+// -----------------------------------------------
+//                    Tests
+// -----------------------------------------------
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::protocol::DisplayInfo;
+
+	#[test]
+	fn test_display_info() {
+		let s = Settings {
+			chain: vec!["in".into(), "middle".into(), "out".into()],
+		};
+		assert_eq!(format!("{}", s.brief()), "chain");
+		assert_eq!(format!("{}", s.detail()), "chain('in','middle','out')");
 	}
 }

@@ -193,3 +193,17 @@ pub mod url {
 		})
 	}
 }
+
+/// Format all items in "'first','second','third'...,'final'"
+pub fn fmt_iter<T: std::fmt::Display>(
+	f: &mut std::fmt::Formatter<'_>,
+	mut items: impl Iterator<Item = T>,
+) -> std::fmt::Result {
+	if let Some(first) = items.next() {
+		write!(f, "'{first}'")?;
+		for item in items {
+			write!(f, ",'{item}'")?;
+		}
+	}
+	Ok(())
+}
