@@ -335,3 +335,13 @@ pub fn to_arr_16<T: AsRef<[u8]>>(value: T) -> [u8; 16] {
 	result.copy_from_slice(&value.as_ref()[..16]);
 	result
 }
+
+pub(super) struct PartialId<'a>(pub &'a Uuid);
+
+impl std::fmt::Display for PartialId<'_> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let mut buf = [0u8; 32];
+		let data = self.0.to_simple_ref().encode_lower(&mut buf);
+		f.write_str(&data[..4])
+	}
+}

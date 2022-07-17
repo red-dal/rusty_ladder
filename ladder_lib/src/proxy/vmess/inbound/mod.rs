@@ -25,7 +25,7 @@ mod udp;
 use super::{
 	aead_header::auth_id,
 	request::ReadRequestError,
-	utils::{new_cmd_key, new_response_key_and_iv, AuthId, Error},
+	utils::{new_cmd_key, new_response_key_and_iv, AuthId, Error, PartialId},
 	Command, HeaderMode, Request, Response, SecurityType,
 };
 use crate::{
@@ -52,6 +52,10 @@ type ArcValidator = Arc<AsyncMutex<UserValidator>>;
 
 #[cfg(feature = "vmess-legacy-auth")]
 use user_validator::spawn_update_task;
+
+// -----------------------------------------------------------
+//                         Builder
+// -----------------------------------------------------------
 
 #[derive(Debug, Default)]
 #[cfg_attr(
@@ -114,6 +118,30 @@ impl SettingsBuilder {
 	}
 }
 
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("vmess-in")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("vmess-in(")?;
+		let mut first = true;
+		for u in &self.users {
+			if first {
+				first = false;
+			} else {
+				f.write_str(",")?;
+			}
+			let id = PartialId(&u.id);
+			write!(f, "'{id}*'")?;
+		}
+		if !first {
+			f.write_str(")")?;
+		}
+		Ok(())
+	}
+}
+
 #[cfg(feature = "vmess-legacy-auth")]
 enum LegacyAuthenticator {
 	Enabled {
@@ -121,6 +149,10 @@ enum LegacyAuthenticator {
 	},
 	Disabled,
 }
+
+// -----------------------------------------------------------
+//                         Settings
+// -----------------------------------------------------------
 
 pub struct Settings {
 	users: Vec<User>,
@@ -352,6 +384,11 @@ impl User {
 			alter_ids,
 		}
 	}
+
+	#[must_use]
+	pub fn uuid(&self) -> &Uuid {
+		&self.id
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -419,5 +456,41 @@ mod serde_internals {
 			let s = SerdeUser::deserialize(deserializer)?;
 			Ok(User::new(s.id, s.num_alter_ids))
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_partial_fmt_id() {
+		let id = Uuid::from_str("a8963692-90e0-4897-8d71-dc1ce2d7fea6").unwrap();
+		let output = PartialId(&id).to_string();
+		assert_eq!(output.as_bytes(), b"a896");
+	}
+
+	#[test]
+	fn test_display_info() {
+		use crate::protocol::DisplayInfo;
+
+		let s = SettingsBuilder {
+			users: vec![
+				User::new(
+					Uuid::from_str("a8963692-90e0-4897-8d71-dc1ce2d7fea6").unwrap(),
+					0,
+				),
+				User::new(
+					Uuid::from_str("39c2f893-f167-4b09-abd4-f475dbb41e4f").unwrap(),
+					0,
+				),
+				User::new(
+					Uuid::from_str("f9d3ce5e-6014-4708-a882-7d4dd878e7a1").unwrap(),
+					0,
+				),
+			],
+		};
+		assert_eq!(s.brief().to_string(), "vmess-in");
+		assert_eq!(s.detail().to_string(), "vmess-in('a896*','39c2*','f9d3*')");
 	}
 }

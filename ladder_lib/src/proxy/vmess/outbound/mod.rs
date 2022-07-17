@@ -35,6 +35,10 @@ use crate::{
 use rand::{rngs::OsRng, thread_rng};
 use uuid::Uuid;
 
+// -----------------------------------------------------------
+//                         Builder
+// -----------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
 #[cfg_attr(
@@ -116,8 +120,54 @@ impl SettingsBuilder {
 	}
 }
 
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("vmess-out")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let addr = &self.addr;
+		let id = super::utils::PartialId(&self.id);
+		let sec = match self.sec {
+			SecurityTypeBuilder::Aes128Cfb => "aes128cfb",
+			SecurityTypeBuilder::Auto => "auto",
+			SecurityTypeBuilder::Aes128Gcm => "aes128gcm",
+			SecurityTypeBuilder::Chacha20Poly1305 => "chacha20poly1305",
+			SecurityTypeBuilder::None => "none",
+			SecurityTypeBuilder::Zero => "zero",
+		};
+		write!(f, "vmess-out(add:'{addr}',id:{id}*,sec:{sec})")
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	#[test]
+	fn test_display_info() {
+		use crate::protocol::DisplayInfo;
+
+		let s = SettingsBuilder {
+			addr: "not.localhost:12345".parse().unwrap(),
+			id: "87b35ca4-ff27-4c28-9a8d-01a0148ec4b6".parse().unwrap(),
+			sec: SecurityTypeBuilder::None,
+			use_legacy_header: false,
+		};
+
+		assert_eq!(s.brief().to_string(), "vmess-out");
+		assert_eq!(
+			s.detail().to_string(),
+			"vmess-out(add:'not.localhost:12345',id:87b3*,sec:none)"
+		);
+	}
+}
+
 #[cfg(feature = "parse-url")]
 mod parse_url_impl;
+
+// -----------------------------------------------------------
+//                         Settings
+// -----------------------------------------------------------
 
 pub struct Settings {
 	addr: SocksAddr,
