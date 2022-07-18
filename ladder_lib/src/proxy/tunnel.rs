@@ -104,6 +104,27 @@ impl TcpAcceptor for Settings {
 	}
 }
 
+fn get_network_name(net: Network) -> &'static str {
+	match net {
+		Network::Tcp => "tcp",
+		Network::Udp => "udp",
+		Network::TcpAndUdp => "tcp-udp",
+	}
+}
+
+impl crate::protocol::DisplayInfo for Settings {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let net = get_network_name(self.network);
+		write!(f, "tunnel-{net}")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let net = get_network_name(self.network);
+		let dst = &self.dst;
+		write!(f, "tunnel({net},add:'{dst}')")
+	}
+}
+
 #[cfg(feature = "use-udp")]
 mod udp_impl {
 	use super::Settings;
@@ -164,10 +185,11 @@ mod udp_impl {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+
 	#[cfg(feature = "parse-url")]
 	#[test]
 	fn test_parse_url() {
-		use super::{Network, Settings};
 		use std::str::FromStr;
 		use url::Url;
 
@@ -193,5 +215,34 @@ mod tests {
 			let output = Settings::parse_url(&url).unwrap();
 			assert_eq!(expected, output);
 		}
+	}
+
+	#[test]
+	fn test_display_info() {
+		use crate::protocol::DisplayInfo;
+
+		let mut s = Settings {
+			dst: "not.localhost:12345".parse().unwrap(),
+			network: Network::Tcp,
+		};
+		assert_eq!(s.brief().to_string(), "tunnel-tcp");
+		assert_eq!(
+			s.detail().to_string(),
+			"tunnel(tcp,add:'not.localhost:12345')"
+		);
+
+		s.network = Network::Udp;
+		assert_eq!(s.brief().to_string(), "tunnel-udp");
+		assert_eq!(
+			s.detail().to_string(),
+			"tunnel(udp,add:'not.localhost:12345')"
+		);
+
+		s.network = Network::TcpAndUdp;
+		assert_eq!(s.brief().to_string(), "tunnel-tcp-udp");
+		assert_eq!(
+			s.detail().to_string(),
+			"tunnel(tcp-udp,add:'not.localhost:12345')"
+		);
 	}
 }
