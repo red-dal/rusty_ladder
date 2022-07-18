@@ -93,6 +93,16 @@ impl TcpStreamConnector for Settings {
 	}
 }
 
+impl crate::protocol::DisplayInfo for Settings {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("freedom")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("freedom")
+	}
+}
+
 #[cfg(feature = "use-udp")]
 mod udp_impl {
 	use super::Settings;
