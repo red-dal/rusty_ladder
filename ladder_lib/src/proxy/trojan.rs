@@ -48,10 +48,9 @@ See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
+		outbound::{Error as OutboundError, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
-	transport,
 	utils::LazyWriteHalf,
 };
 use async_trait::async_trait;
@@ -65,8 +64,6 @@ pub const PROTOCOL_NAME: &str = "trojan";
 pub struct SettingsBuilder {
 	pub password: String,
 	pub addr: SocksAddr,
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: transport::outbound::Builder,
 }
 
 impl SettingsBuilder {
@@ -79,7 +76,6 @@ impl SettingsBuilder {
 		Ok(Settings {
 			password: self.password,
 			addr: self.addr,
-			transport: self.transport.build()?,
 		})
 	}
 
@@ -107,15 +103,9 @@ impl SettingsBuilder {
 				return Err("Trojan password cannot be empty".into());
 			}
 			let addr = crate::utils::url::get_socks_addr(url, Some(DEFAULT_PORT))?;
-			let transport = crate::transport::tls::OutboundBuilder {
-				alpns: Vec::new(),
-				ca_file: None,
-			};
-
 			Ok(SettingsBuilder {
 				password: password.to_owned(),
 				addr,
-				transport: transport.into(),
 			})
 		}
 		#[cfg(not(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls")))]
@@ -125,10 +115,19 @@ impl SettingsBuilder {
 	}
 }
 
+impl crate::protocol::DisplayInfo for SettingsBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("trojan-out")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "trojan-out({addr})", addr = &self.addr)
+	}
+}
+
 pub struct Settings {
 	password: String,
 	addr: SocksAddr,
-	transport: transport::Outbound,
 }
 
 impl Settings {
@@ -181,25 +180,12 @@ impl TcpStreamConnector for Settings {
 		dst: &'a SocksAddr,
 		_context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect_stream(stream, &self.addr).await?;
 		Ok(self.priv_connect(stream, dst).await?)
 	}
 
 	#[inline]
 	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
 		Ok(Some(self.addr.clone()))
-	}
-}
-
-#[async_trait]
-impl TcpConnector for Settings {
-	async fn connect(
-		&self,
-		dst: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> Result<BufBytesStream, OutboundError> {
-		let stream = self.transport.connect(&self.addr, context).await?;
-		Ok(self.priv_connect(stream, dst).await?)
 	}
 }
 
@@ -361,12 +347,6 @@ mod udp_impl {
 			stream: Box<dyn AsyncReadWrite>,
 			_context: &'a dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
-			let stream = self
-				.settings
-				.transport
-				.connect_stream(stream, &self.settings.addr)
-				.await?;
-
 			let mut req_buf = Vec::with_capacity(512);
 			password_to_hex(self.settings.password.as_bytes(), &mut req_buf);
 			req_buf.put_slice(CRLF);
@@ -407,10 +387,11 @@ fn password_to_hex(password: &[u8], buf: &mut impl BufMut) {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+
 	#[cfg(feature = "parse-url")]
 	#[test]
 	fn test_parse_url() {
-		use super::SettingsBuilder;
 		use std::str::FromStr;
 		use url::Url;
 
@@ -418,7 +399,6 @@ mod tests {
 			"trojan://password@127.0.0.1:22222",
 			SettingsBuilder {
 				addr: "127.0.0.1:22222".parse().unwrap(),
-				transport: crate::transport::tls::OutboundBuilder::default().into(),
 				password: "password".into(),
 			},
 		)];
@@ -428,5 +408,16 @@ mod tests {
 			let output = SettingsBuilder::parse_url(&url).unwrap();
 			assert_eq!(expected, output);
 		}
+	}
+
+	#[test]
+	fn test_display_info() {
+		use crate::protocol::DisplayInfo;
+		let s = SettingsBuilder {
+			password: "password".into(),
+			addr: "localhost:12345".parse().unwrap(),
+		};
+		assert_eq!(s.brief().to_string(), "trojan-out");
+		assert_eq!(s.detail().to_string(), "trojan-out(localhost:12345)");
 	}
 }
