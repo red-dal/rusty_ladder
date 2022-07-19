@@ -20,7 +20,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::tls;
 use crate::{
 	prelude::*,
-	protocol::{socks_addr::DomainName, AsyncReadWrite, CompositeBytesStream, ProxyContext},
+	protocol::{
+		socks_addr::DomainName, AsyncReadWrite, CompositeBytesStream, DisplayInfo, ProxyContext,
+	},
 };
 use bytes::{Buf, Bytes};
 use futures::{ready, Future};
@@ -140,6 +142,10 @@ impl Outbound {
 	}
 }
 
+// -------------------------------------------------------------
+//                      OutboundBuilder
+// -------------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -165,6 +171,46 @@ impl OutboundBuilder {
 		let tls = self.tls.map(tls::OutboundBuilder::build).transpose()?;
 		let req_url = make_request_url(&self.path, &self.host, tls.is_some())?;
 		Ok(Outbound { req_url, tls })
+	}
+}
+
+impl DisplayInfo for OutboundBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.tls.is_none() {
+			f.write_str("h2-out")
+		} else {
+			f.write_str("h2-tls-out")
+		}
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.tls.is_none() {
+			f.write_str("h2-out")
+		} else {
+			f.write_str("h2-tls-out")
+		}?;
+		let val = {
+			let mut val = String::new();
+			if !self.host.is_empty() {
+				val.push_str("host:'");
+				val.push_str(&self.host);
+				val.push('\'');
+			}
+			if !self.path.is_empty() {
+				if !val.is_empty() {
+					val.push(',');
+				}
+				val.push_str("path:'");
+				val.push_str(&self.path);
+				val.push('\'');
+			}
+			val
+		};
+		if val.is_empty() {
+			Ok(())
+		} else {
+			write!(f, "({val})")
+		}
 	}
 }
 
@@ -208,11 +254,47 @@ mod outbound_tests {
 		check("http://aaa.bbb", "aaa.bbb", "", false);
 		check("http://aaa.bbb/testpath", "aaa.bbb", "/testpath", false);
 	}
+
+	#[test]
+	fn test_display_info() {
+		let mut s = OutboundBuilder {
+			host: String::new(),
+			path: String::new(),
+			tls: None,
+		};
+		assert_eq!(s.brief().to_string(), "h2-out");
+		assert_eq!(s.detail().to_string(), "h2-out");
+
+		s.tls = Some(super::tls::OutboundBuilder {
+			alpns: Vec::new(),
+			ca_file: None,
+		});
+		assert_eq!(s.brief().to_string(), "h2-tls-out");
+		assert_eq!(s.detail().to_string(), "h2-tls-out");
+
+		s.host = "localhost".into();
+		assert_eq!(s.brief().to_string(), "h2-tls-out");
+		assert_eq!(s.detail().to_string(), "h2-tls-out(host:'localhost')");
+
+		s.host = String::new();
+		s.path = "/some_path".into();
+		assert_eq!(s.brief().to_string(), "h2-tls-out");
+		assert_eq!(s.detail().to_string(), "h2-tls-out(path:'/some_path')");
+
+		s.host = "localhost".into();
+		s.path = "/some_path".into();
+		assert_eq!(s.brief().to_string(), "h2-tls-out");
+		assert_eq!(
+			s.detail().to_string(),
+			"h2-tls-out(host:'localhost',path:'/some_path')"
+		);
+	}
 }
 
 // -------------------------------------------------------------
 //                          Inbound
 // -------------------------------------------------------------
+
 pub struct Inbound {
 	allowed_hosts: HashSet<DomainName>,
 	allowed_path: String,
@@ -336,6 +418,10 @@ impl Inbound {
 	}
 }
 
+// -------------------------------------------------------------
+//                      InboundBuilder
+// -------------------------------------------------------------
+
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug, Clone)]
 #[cfg_attr(
@@ -390,6 +476,47 @@ impl InboundBuilder {
 	}
 }
 
+impl DisplayInfo for InboundBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.tls.is_none() {
+			f.write_str("h2-in")
+		} else {
+			f.write_str("h2-tls-in")
+		}
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.tls.is_none() {
+			f.write_str("h2-in")
+		} else {
+			f.write_str("h2-tls-in")
+		}?;
+		let val = {
+			let mut val = String::new();
+			if !self.hosts.is_empty() {
+				let mut hosts: Vec<&String> = self.hosts.iter().collect();
+				hosts.sort_unstable();
+				val.push_str("hosts:[");
+				crate::utils::fmt_iter(&mut val, hosts.iter())?;
+				val.push(']');
+			}
+			if !self.path.is_empty() {
+				if !val.is_empty() {
+					val.push(',');
+				}
+				val.push_str("path:'");
+				val.push_str(&self.path);
+				val.push('\'');
+			}
+			val
+		};
+		if !val.is_empty() {
+			write!(f, "({val})")?;
+		}
+		Ok(())
+	}
+}
+
 #[cfg(test)]
 mod inbound_tests {
 	use super::*;
@@ -440,6 +567,43 @@ mod inbound_tests {
 		check(&["a.b", "c.d"], "/examplepath", "a.b", "").unwrap_err();
 		// Wrong host and path
 		check(&["a.b", "c.d"], "", "wrong.host", "/wrongpath").unwrap_err();
+	}
+
+	#[test]
+	fn test_display_info() {
+		let mut s = InboundBuilder {
+			hosts: Vec::new(),
+			path: String::new(),
+			tls: None,
+		};
+		assert_eq!(s.brief().to_string(), "h2-in");
+		assert_eq!(s.detail().to_string(), "h2-in");
+
+		s.tls = Some(super::tls::InboundBuilder {
+			alpns: Vec::new(),
+			cert_file: "cert_file".into(),
+			key_file: "key_file".into(),
+		});
+		assert_eq!(s.brief().to_string(), "h2-tls-in");
+		assert_eq!(s.detail().to_string(), "h2-tls-in");
+
+		s.hosts = Vec::new();
+		s.path = "/some_path".into();
+		assert_eq!(s.brief().to_string(), "h2-tls-in");
+		assert_eq!(s.detail().to_string(), "h2-tls-in(path:'/some_path')");
+
+		s.hosts = vec!["bob".into(), "alice".into()];
+		s.path = "/some_path".into();
+		assert_eq!(s.brief().to_string(), "h2-tls-in");
+		assert_eq!(
+			s.detail().to_string(),
+			"h2-tls-in(hosts:['alice','bob'],path:'/some_path')"
+		);
+
+		s.hosts = vec!["bob".into(), "alice".into()];
+		s.path = String::new();
+		assert_eq!(s.brief().to_string(), "h2-tls-in");
+		assert_eq!(s.detail().to_string(), "h2-tls-in(hosts:['alice','bob'])");
 	}
 }
 
