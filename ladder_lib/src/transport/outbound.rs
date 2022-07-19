@@ -19,21 +19,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #[allow(unused_imports)]
 use crate::protocol::ProxyContext;
-use crate::{
-	prelude::*,
-	protocol::{AsyncReadWrite, DisplayInfo},
-};
-use std::io;
 
 #[ladder_lib_macro::impl_variants(Outbound)]
 mod settings {
-	use super::Empty;
 	use crate::protocol::{AsyncReadWrite, ProxyContext, SocksAddr};
 	use std::io;
 	use tokio::io::{AsyncRead, AsyncWrite};
 
 	pub enum Outbound {
-		None(Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(super::super::tls::Outbound),
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -61,7 +54,6 @@ mod settings {
 				+ Into<Box<dyn AsyncReadWrite>>,
 		{
 		}
-
 		#[implement(map_into)]
 		pub async fn connect(
 			&self,
@@ -74,15 +66,9 @@ mod settings {
 
 pub use settings::Outbound;
 
-impl Default for Outbound {
-	fn default() -> Self {
-		Self::None(Empty)
-	}
-}
-
 #[ladder_lib_macro::impl_variants(Builder)]
 mod builder {
-	use super::{Empty, Outbound};
+	use super::Outbound;
 	use crate::prelude::BoxStdErr;
 
 	#[cfg_attr(test, derive(PartialEq, Eq))]
@@ -93,7 +79,6 @@ mod builder {
 		serde(rename_all = "lowercase", tag = "type")
 	)]
 	pub enum Builder {
-		None(Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(super::super::tls::OutboundBuilder),
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -117,53 +102,3 @@ mod builder {
 	}
 }
 pub use builder::Builder;
-
-impl Default for Builder {
-	fn default() -> Self {
-		Builder::None(Empty)
-	}
-}
-
-#[cfg_attr(test, derive(PartialEq, Eq))]
-#[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
-#[derive(Debug, Clone, Copy)]
-pub struct Empty;
-
-impl DisplayInfo for Empty {
-	fn fmt_brief(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		// Do nothing
-		Ok(())
-	}
-
-	fn fmt_detail(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		Ok(())
-	}
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-#[allow(clippy::unnecessary_wraps)]
-impl Empty {
-	#[inline]
-	pub async fn connect(
-		&self,
-		addr: &SocksAddr,
-		context: &dyn ProxyContext,
-	) -> io::Result<Box<dyn AsyncReadWrite>> {
-		self.connect_stream(context.dial_tcp(addr).await?, addr)
-			.await
-			.map(Into::into)
-	}
-
-	#[inline]
-	pub async fn connect_stream<IO>(&self, stream: IO, _addr: &SocksAddr) -> io::Result<IO>
-	where
-		IO: AsyncRead + AsyncWrite + Unpin,
-	{
-		Ok(stream)
-	}
-
-	#[inline]
-	fn build(self) -> Result<Self, BoxStdErr> {
-		Ok(self)
-	}
-}

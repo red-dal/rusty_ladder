@@ -18,7 +18,9 @@ impl SettingsBuilder {
 	///
 	/// # Errors
 	/// Return an error if `url` does not match the above format.
-	pub fn parse_url(url: &url::Url) -> Result<(Option<Tag>, Self, TransportBuilder), BoxStdErr> {
+	pub fn parse_url(
+		url: &url::Url,
+	) -> Result<(Option<Tag>, Self, Option<TransportBuilder>), BoxStdErr> {
 		#[cfg(feature = "parse-url-v2rayn")]
 		{
 			if let Ok(result) = parse_url_v2rayn(url) {
@@ -31,7 +33,7 @@ impl SettingsBuilder {
 
 /// Parse a URL with the format stated in
 /// <https://github.com/v2fly/v2fly-github-io/issues/26>
-fn parse_url_std(url: &url::Url) -> Result<(SettingsBuilder, TransportBuilder), BoxStdErr> {
+fn parse_url_std(url: &url::Url) -> Result<(SettingsBuilder, Option<TransportBuilder>), BoxStdErr> {
 	use crate::transport;
 
 	#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -57,17 +59,17 @@ fn parse_url_std(url: &url::Url) -> Result<(SettingsBuilder, TransportBuilder), 
 
 	crate::utils::url::check_scheme(url, PROTOCOL_NAME)?;
 	let transport_str = url.username();
-	let transport: transport::outbound::Builder = match transport_str {
-		"tcp" => transport::outbound::Builder::default(),
+	let transport: Option<TransportBuilder> = match transport_str {
+		"tcp" => None,
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
-		"tls" => transport::tls::OutboundBuilder::default().into(),
+		"tls" => Some(transport::tls::OutboundBuilder::default().into()),
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-		"ws" => make_ws_builder(url).into(),
+		"ws" => Some(make_ws_builder(url).into()),
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
 		"ws+tls" => {
 			let mut builder = make_ws_builder(url);
 			builder.tls = Some(transport::tls::OutboundBuilder::default());
-			builder.into()
+			Some(builder.into())
 		}
 		_ => return Err(format!("invalid transport string '{}'", transport_str).into()),
 	};
@@ -120,7 +122,7 @@ mod tests {
 					id: "2e09f64c-c967-4ce3-9498-fdcd8e39e04e".parse().unwrap(),
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
-				}, Default::default()),
+				}, None),
 			),
 			(
 				"vmess://ws+tls:7db04e8f-7cfc-46e0-9e18-d329c22ec353-0@myServer.com:12345\
@@ -132,7 +134,7 @@ mod tests {
 						sec: SecurityTypeBuilder::Auto,
 						use_legacy_header: false,
 					},
-					transport::outbound::Builder::Ws(transport::ws::OutboundBuilder {
+					Some(transport::outbound::Builder::Ws(transport::ws::OutboundBuilder {
 						headers: Default::default(),
 						path: "/myServerAddressPath/中文路径/".into(),
 						host: "www.myServer.com".into(),
@@ -140,7 +142,7 @@ mod tests {
 							alpns: Vec::new(),
 							ca_file: None,
 						}),
-					}),
+					})),
 				),
 			),
 		];
@@ -223,7 +225,7 @@ mod parse_v2rayn_impl {
 	/// .
 	pub(super) fn parse_url_v2rayn(
 		url: &Url,
-	) -> Result<(Option<Tag>, SettingsBuilder, TransportBuilder), BoxStdErr> {
+	) -> Result<(Option<Tag>, SettingsBuilder, Option<TransportBuilder>), BoxStdErr> {
 		if !(url.username().is_empty() && url.password().is_none()) {
 			return Err("v2rayn format URL should not have username and password".into());
 		}
@@ -255,7 +257,7 @@ mod parse_v2rayn_impl {
 			sec: obj.scy,
 			use_legacy_header: false,
 		};
-		let transport = {
+		let transport: Option<TransportBuilder> = {
 			#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 			{
 				let tls_transport = match obj.tls.as_str() {
@@ -271,22 +273,26 @@ mod parse_v2rayn_impl {
 					_ => return Err("invalid tls value, can only be 'tls' or empty".into()),
 				};
 				match obj.net {
-					Net::Tcp => tls_transport.map_or_else(TransportBuilder::default, Into::into),
+					Net::Tcp => tls_transport.map(Into::into),
 					#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
-					Net::Ws => transport::ws::OutboundBuilder {
-						headers: Default::default(),
-						path: obj.path,
-						host: obj.host,
-						tls: tls_transport,
-					}
-					.into(),
+					Net::Ws => Some(
+						transport::ws::OutboundBuilder {
+							headers: Default::default(),
+							path: obj.path,
+							host: obj.host,
+							tls: tls_transport,
+						}
+						.into(),
+					),
 					#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
-					Net::Http | Net::H2 => transport::h2::OutboundBuilder {
-						host: obj.host,
-						path: obj.path,
-						tls: tls_transport,
-					}
-					.into(),
+					Net::Http | Net::H2 => Some(
+						transport::h2::OutboundBuilder {
+							host: obj.host,
+							path: obj.path,
+							tls: tls_transport,
+						}
+						.into(),
+					),
 					_ => return Err("net not supported".into()),
 				}
 			}
@@ -295,7 +301,7 @@ mod parse_v2rayn_impl {
 				if !obj.tls.is_empty() {
 					return Err("TLS not supported".into());
 				}
-				TransportBuilder::default()
+				None	
 			}
 		};
 		Ok((ps, settings, transport))
@@ -339,14 +345,14 @@ mod parse_v2rayn_impl {
 			input: &str,
 			expected_tag: impl Into<Tag>,
 			expected_settings: &SettingsBuilder,
-			expected_transport: &TransportBuilder,
+			expected_transport: Option<TransportBuilder>,
 		) {
 			let input = Url::from_str(input).unwrap();
 			let expected_tag = Some(expected_tag.into());
 			let (tag, settings, transport) = parse_url_v2rayn(&input).unwrap();
 			assert_eq!(&tag, &expected_tag);
 			assert_eq!(&settings, expected_settings);
-			assert_eq!(&transport, expected_transport);
+			assert_eq!(transport, expected_transport);
 		}
 
 		#[test]
@@ -363,7 +369,7 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::default(),
+				None,
 			);
 		}
 
@@ -382,7 +388,9 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::Tls(transport::tls::OutboundBuilder::default()),
+				Some(TransportBuilder::Tls(
+					transport::tls::OutboundBuilder::default(),
+				)),
 			);
 		}
 
@@ -402,12 +410,12 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
+				Some(TransportBuilder::Ws(transport::ws::OutboundBuilder {
 					headers: Default::default(),
 					path: "/testpath".into(),
 					host: "test.host".into(),
 					tls: None,
-				}),
+				})),
 			);
 			// Without host and path
 			check_v2rayn(
@@ -422,12 +430,12 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
+				Some(TransportBuilder::Ws(transport::ws::OutboundBuilder {
 					headers: Default::default(),
 					path: Default::default(),
 					host: Default::default(),
 					tls: None,
-				}),
+				})),
 			);
 		}
 
@@ -447,12 +455,12 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
+				Some(TransportBuilder::Ws(transport::ws::OutboundBuilder {
 					headers: Default::default(),
 					host: "test.host".into(),
 					path: "/testpath".into(),
 					tls: Some(transport::tls::OutboundBuilder::default()),
-				}),
+				})),
 			);
 			// Without host and path
 			check_v2rayn(
@@ -467,12 +475,12 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::Ws(transport::ws::OutboundBuilder {
+				Some(TransportBuilder::Ws(transport::ws::OutboundBuilder {
 					headers: Default::default(),
 					path: Default::default(),
 					host: Default::default(),
 					tls: Some(transport::tls::OutboundBuilder::default()),
-				}),
+				})),
 			);
 		}
 
@@ -492,11 +500,11 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::from(transport::h2::OutboundBuilder {
+				Some(TransportBuilder::from(transport::h2::OutboundBuilder {
 					host: Default::default(),
 					path: "/testpath".into(),
 					tls: None,
-				}),
+				})),
 			);
 			// With host
 			check_v2rayn(
@@ -511,11 +519,11 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::from(transport::h2::OutboundBuilder {
+				Some(TransportBuilder::from(transport::h2::OutboundBuilder {
 					host: "test.host".into(),
 					path: Default::default(),
 					tls: None,
-				}),
+				})),
 			);
 			// Without host and path
 			check_v2rayn(
@@ -530,11 +538,11 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::from(transport::h2::OutboundBuilder {
+				Some(TransportBuilder::from(transport::h2::OutboundBuilder {
 					host: Default::default(),
 					path: Default::default(),
 					tls: None,
-				}),
+				})),
 			);
 		}
 
@@ -554,11 +562,11 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::from(transport::h2::OutboundBuilder {
+				Some(TransportBuilder::from(transport::h2::OutboundBuilder {
 					host: Default::default(),
 					path: "/testpath".into(),
 					tls: Some(transport::tls::OutboundBuilder::default()),
-				}),
+				})),
 			);
 			// Without host and path
 			check_v2rayn(
@@ -573,11 +581,11 @@ mod parse_v2rayn_impl {
 					sec: SecurityTypeBuilder::Auto,
 					use_legacy_header: false,
 				},
-				&TransportBuilder::from(transport::h2::OutboundBuilder {
+				Some(TransportBuilder::from(transport::h2::OutboundBuilder {
 					host: Default::default(),
 					path: Default::default(),
 					tls: Some(transport::tls::OutboundBuilder::default()),
-				}),
+				})),
 			);
 		}
 
@@ -585,14 +593,14 @@ mod parse_v2rayn_impl {
 			input: &str,
 			expected_tag: Option<&str>,
 			expected_settings: &SettingsBuilder,
-			expected_transport: &TransportBuilder,
+			expected_transport: Option<TransportBuilder>,
 		) {
 			let input = Url::from_str(input).unwrap();
 			let expected_tag = expected_tag.map(Into::into);
 			let (tag, settings, transport) = SettingsBuilder::parse_url(&input).unwrap();
 			assert_eq!(&tag, &expected_tag);
 			assert_eq!(&settings, expected_settings);
-			assert_eq!(&transport, expected_transport);
+			assert_eq!(transport, expected_transport);
 		}
 
 		#[test]
@@ -608,7 +616,7 @@ mod parse_v2rayn_impl {
 						encryption=auto#%E6%B5%8B%E8%AF%95",
 				None,
 				&expected_settings,
-				&Default::default(),
+				None,
 			);
 			check_mixed(
 				"vmess://eyJhZGQiOiJ0ZXN0LnNlcnZlci5jb20iLCJwcyI6Iua1i+ivlSIsInNjeSI\
@@ -617,7 +625,7 @@ mod parse_v2rayn_impl {
 				2NTdkNGZlYjNlIiwibmV0IjoidGNwIn0=",
 				Some("测试"),
 				&expected_settings,
-				&Default::default(),
+				None,
 			);
 		}
 	}

@@ -25,7 +25,12 @@ use crate::{
 		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
+	transport,
 };
+
+// -----------------------------------------------------------------------
+//                            Details
+// -----------------------------------------------------------------------
 
 #[ladder_lib_macro::impl_variants(Details)]
 mod details {
@@ -97,6 +102,8 @@ mod details {
 
 pub use details::Details;
 
+// ========= Builder =========
+
 #[ladder_lib_macro::impl_variants(DetailsBuilder)]
 mod details_builder {
 	use super::Details;
@@ -153,10 +160,14 @@ impl Default for DetailsBuilder {
 	}
 }
 
+// -----------------------------------------------------------------------
+//                            Outbound
+// -----------------------------------------------------------------------
+
 pub struct Outbound {
 	pub tag: Tag,
 	settings: Details,
-	pub transport: crate::transport::Outbound,
+	pub transport: Option<transport::Outbound>,
 }
 
 impl Outbound {
@@ -186,9 +197,19 @@ impl TcpConnector for Outbound {
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let proxy_addr = self.settings.addr(context)?;
-		let transport_addr = proxy_addr.as_ref().unwrap_or(dst);
-		let stream = self.transport.connect(transport_addr, context).await?;
+		// Make the base stream.
+		// If proxy has an address, connect to that first.
+		// Otherwise connect ot `dst`
+		let stream = {
+			let proxy_addr = self.settings.addr(context)?;
+			let base_addr = proxy_addr.as_ref().unwrap_or(dst);
+			if let Some(tran) = &self.transport {
+				tran.connect(base_addr, context).await?
+			} else {
+				context.dial_tcp(base_addr).await?.into()
+			}
+		};
+		// Now connect with proxy to `dst`
 		self.settings.connect_stream(stream, dst, context).await
 	}
 }
@@ -201,12 +222,13 @@ impl TcpStreamConnector for Outbound {
 		dst: &'a SocksAddr,
 		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let proxy_addr = self.settings.addr(context)?;
-		let transport_addr = proxy_addr.as_ref().unwrap_or(dst);
-		let stream = self
-			.transport
-			.connect_stream(stream, transport_addr)
-			.await?;
+		let stream = if let Some(tran) = &self.transport {
+			let proxy_addr = self.settings.addr(context)?;
+			let base_addr = proxy_addr.as_ref().unwrap_or(dst);
+			tran.connect_stream(stream, base_addr).await?
+		} else {
+			stream
+		};
 		self.settings.connect_stream(stream, dst, context).await
 	}
 
@@ -214,6 +236,8 @@ impl TcpStreamConnector for Outbound {
 		self.settings.addr(context)
 	}
 }
+
+// =========== Builder ==========
 
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -223,7 +247,7 @@ pub struct Builder {
 	#[cfg_attr(feature = "use_serde", serde(flatten))]
 	pub settings: DetailsBuilder,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: crate::transport::outbound::Builder,
+	pub transport: Option<transport::outbound::Builder>,
 }
 
 impl Builder {
@@ -237,7 +261,10 @@ impl Builder {
 		Ok(Outbound {
 			tag: self.tag,
 			settings: self.settings.build()?,
-			transport: self.transport.build()?,
+			transport: self
+				.transport
+				.map(transport::outbound::Builder::build)
+				.transpose()?,
 		})
 	}
 
@@ -250,12 +277,16 @@ impl Builder {
 	/// - the protocol does not support URL parsing
 	#[cfg(feature = "parse-url")]
 	pub fn parse_url(url: &url::Url) -> Result<Self, BoxStdErr> {
-		use crate::{proxy, transport};
+		use crate::proxy;
 		type ParseFunc = Box<
 			dyn Fn(
 				&url::Url,
 			) -> Result<
-				(Option<Tag>, DetailsBuilder, transport::outbound::Builder),
+				(
+					Option<Tag>,
+					DetailsBuilder,
+					Option<transport::outbound::Builder>,
+				),
 				BoxStdErr,
 			>,
 		>;
@@ -265,8 +296,7 @@ impl Builder {
 		parse_url_map.insert(
 			proxy::freedom::PROTOCOL_NAME,
 			Box::new(|url| {
-				proxy::freedom::Settings::parse_url(url)
-					.map(|b| (None, b.into(), Default::default()))
+				proxy::freedom::Settings::parse_url(url).map(|b| (None, b.into(), None))
 			}),
 		);
 		#[cfg(feature = "socks5-outbound")]
@@ -274,9 +304,7 @@ impl Builder {
 			use proxy::socks5::{outbound::SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|b| (None, b.into(), Default::default()))
-				}),
+				Box::new(|url| SettingsBuilder::parse_url(url).map(|b| (None, b.into(), None))),
 			);
 		}
 		#[cfg(feature = "http-outbound")]
@@ -284,9 +312,7 @@ impl Builder {
 			use proxy::http::{outbound::SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|b| (None, b.into(), Default::default()))
-				}),
+				Box::new(|url| SettingsBuilder::parse_url(url).map(|b| (None, b.into(), None))),
 			);
 		}
 		#[cfg(any(
@@ -297,9 +323,7 @@ impl Builder {
 			use proxy::shadowsocks::{outbound::SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|b| (None, b.into(), Default::default()))
-				}),
+				Box::new(|url| SettingsBuilder::parse_url(url).map(|b| (None, b.into(), None))),
 			);
 		}
 		#[cfg(feature = "trojan-outbound")]
@@ -307,9 +331,7 @@ impl Builder {
 			use proxy::trojan::{SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
-				Box::new(|url| {
-					SettingsBuilder::parse_url(url).map(|b| (None, b.into(), Default::default()))
-				}),
+				Box::new(|url| SettingsBuilder::parse_url(url).map(|b| (None, b.into(), None))),
 			);
 		}
 		#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
@@ -345,20 +367,28 @@ impl crate::protocol::DisplayInfo for Builder {
 	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"['{tag}'|{brief}|{tran_brief}]",
+			"['{tag}'|{brief}",
 			tag = &self.tag,
 			brief = &self.settings.brief(),
-			tran_brief = &self.transport.brief(),
-		)
+		)?;
+		if let Some(tran) = &self.transport {
+			write!(f, "|{}]", tran.brief())
+		} else {
+			f.write_str("]")
+		}
 	}
 
 	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"['{tag}'|{detail}|{tran_detail}]",
+			"['{tag}'|{detail}",
 			tag = &self.tag,
 			detail = &self.settings.detail(),
-			tran_detail = &self.transport.detail(),
-		)
+		)?;
+		if let Some(tran) = &self.transport {
+			write!(f, "|{}]", tran.detail())
+		} else {
+			f.write_str("]")
+		}
 	}
 }

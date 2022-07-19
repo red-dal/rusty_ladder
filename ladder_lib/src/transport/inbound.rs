@@ -17,9 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use crate::{prelude::BoxStdErr, protocol::AsyncReadWrite};
-use std::io;
-
 #[ladder_lib_macro::impl_variants(Inbound)]
 mod settings {
 	use crate::{protocol::AsyncReadWrite, transport};
@@ -27,7 +24,6 @@ mod settings {
 	use tokio::io::{AsyncRead, AsyncWrite};
 
 	pub enum Inbound {
-		None(transport::inbound::Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(transport::tls::Inbound),
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -53,19 +49,6 @@ mod settings {
 }
 pub use settings::Inbound;
 
-impl Inbound {
-	#[inline]
-	pub fn is_none(&self) -> bool {
-		matches!(self, Self::None(_))
-	}
-}
-
-impl Default for Inbound {
-	fn default() -> Self {
-		Self::None(Empty)
-	}
-}
-
 #[ladder_lib_macro::impl_variants(Builder)]
 mod settings_builder {
 	use super::Inbound;
@@ -79,7 +62,6 @@ mod settings_builder {
 		serde(rename_all = "lowercase", tag = "type")
 	)]
 	pub enum Builder {
-		None(transport::inbound::Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(transport::tls::InboundBuilder),
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -102,42 +84,3 @@ mod settings_builder {
 }
 
 pub use settings_builder::Builder;
-
-impl Default for Builder {
-	fn default() -> Self {
-		Builder::None(Empty)
-	}
-}
-
-#[cfg_attr(test, derive(PartialEq, Eq))]
-#[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
-#[derive(Debug, Clone, Copy)]
-pub struct Empty;
-
-#[allow(clippy::trivially_copy_pass_by_ref)]
-#[allow(clippy::unnecessary_wraps)]
-impl Empty {
-	#[inline]
-	pub async fn accept<IO>(&self, stream: IO) -> io::Result<Box<dyn AsyncReadWrite>>
-	where
-		IO: 'static + Into<Box<dyn AsyncReadWrite>>,
-	{
-		Ok(stream.into())
-	}
-
-	#[inline]
-	fn build(self) -> Result<Self, BoxStdErr> {
-		Ok(self)
-	}
-}
-
-impl crate::protocol::DisplayInfo for Empty {
-    fn fmt_brief(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		// Do nothing
-		Ok(())
-    }
-
-    fn fmt_detail(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		Ok(())
-    }
-}

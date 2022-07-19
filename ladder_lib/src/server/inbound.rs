@@ -28,6 +28,7 @@ use crate::{
 		inbound::{AcceptError, AcceptResult, SessionInfo, TcpAcceptor},
 		AsyncReadWrite, DisplayInfo, GetProtocolName,
 	},
+	transport,
 	utils::OneOrMany,
 	Monitor,
 };
@@ -169,7 +170,7 @@ pub struct Inbound {
 	pub network: network::Config,
 	pub err_policy: ErrorHandlingPolicy,
 	settings: Details,
-	transport: crate::transport::Inbound,
+	transport: Option<transport::Inbound>,
 }
 
 impl Inbound {
@@ -273,9 +274,13 @@ impl TcpAcceptor for Inbound {
 		stream: Box<dyn AsyncReadWrite>,
 		info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
-		let stream = self.transport.accept(stream).await?;
+		let stream = if let Some(tran) = &self.transport {
+			tran.accept(stream).await?
+		} else {
+			stream
+		};
 		let mut info = info;
-		info.is_transport_empty = matches!(&self.transport, crate::transport::Inbound::None(_));
+		info.is_transport_empty = self.transport.is_none();
 		self.settings.accept_tcp(stream, info).await
 	}
 }
@@ -381,7 +386,7 @@ pub struct Builder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub network_type: NetworkType,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: crate::transport::inbound::Builder,
+	pub transport: Option<transport::inbound::Builder>,
 }
 
 impl Builder {
@@ -410,7 +415,10 @@ impl Builder {
 			settings: self.settings.build()?,
 			network,
 			err_policy: self.err_policy,
-			transport: self.transport.build()?,
+			transport: self
+				.transport
+				.map(transport::inbound::Builder::build)
+				.transpose()?,
 		})
 	}
 
@@ -498,20 +506,28 @@ impl DisplayInfo for Builder {
 	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"['{tag}'|{brief}|{tran_brief}]",
+			"['{tag}'|{brief}",
 			tag = &self.tag,
 			brief = &self.settings.brief(),
-			tran_brief = &self.transport.brief(),
-		)
+		)?;
+		if let Some(tran) = &self.transport {
+			write!(f, "|{}]", tran.brief())
+		} else {
+			f.write_str("]")
+		}
 	}
 
 	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"['{tag}'|{detail}|{tran_detail}]",
+			"['{tag}'|{detail}",
 			tag = &self.tag,
 			detail = &self.settings.detail(),
-			tran_detail = &self.transport.detail(),
-		)
+		)?;
+		if let Some(tran) = &self.transport {
+			write!(f, "|{}]", tran.detail())
+		} else {
+			f.write_str("]")
+		}
 	}
 }
