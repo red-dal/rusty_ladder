@@ -271,46 +271,8 @@ pub fn new_cmd_key(id: &Uuid) -> [u8; 16] {
 	md5.finalize().into()
 }
 
-#[cfg(feature = "vmess-legacy-auth")]
-#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
-pub fn new_auth(time: i64, uuid: &Uuid) -> Result<[u8; AUTH_ID_LEN], Error> {
-	use hmac::{Hmac, Mac, NewMac};
-	type HmacMd5 = Hmac<Md5>;
-	let time = time.to_be_bytes();
-	let mut hmac: HmacMd5 = HmacMd5::new_from_slice(uuid.as_bytes())
-		.map_err(|e| Error::InvalidKeyLength(e.to_string().into()))?;
-	hmac.update(time.as_ref());
-	let auth = hmac.finalize().into_bytes().into();
-	Ok(auth)
-}
-
-#[cfg(feature = "vmess-legacy-auth")]
-pub fn new_request_key_iv(id: &Uuid, time: i64) -> (Key, Iv) {
-	let request_key = new_cmd_key(id);
-
-	// make iv
-	let time = time.to_be_bytes();
-	let mut md5 = Md5::new();
-	md5.update(&time);
-	md5.update(&time);
-	md5.update(&time);
-	md5.update(&time);
-	let request_iv = md5.finalize();
-
-	(request_key, request_iv.into())
-}
-
 pub fn new_response_key_and_iv(payload_key: &Key, payload_iv: &Iv, mode: HeaderMode) -> (Key, Iv) {
 	match mode {
-		#[cfg(feature = "vmess-legacy-auth")]
-		HeaderMode::Legacy => {
-			let mut md5 = Md5::new();
-			md5.update(payload_key);
-			let response_key = md5.finalize_reset();
-			md5.update(payload_iv);
-			let response_iv = md5.finalize();
-			(response_key.into(), response_iv.into())
-		}
 		HeaderMode::Aead => {
 			// use sha256 instead of md5
 			let mut sha256 = Sha256::new();

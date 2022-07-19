@@ -35,10 +35,6 @@ ws-transport-rustls = ["async-tungstenite", "tls-transport-rustls", "http"]
 tls-transport-openssl = ["__tls_openssl"]
 tls-transport-rustls = ["__tls_rustls"]
 
-# Enable browser transport.
-# This can be unstable.
-browser-transport = ["serde_json", "async-tungstenite", "base64", "serde"]
-
 # Enable SOCKS5 proxy.
 socks5-inbound = ["__transport-inbound"]
 socks5-outbound = ["__transport-outbound"]
@@ -128,7 +124,6 @@ vmess-outbound-openssl = [
 	"__transport-outbound",
 	"__codec",
 ]
-vmess-legacy-auth = []
 
 chain-outbound = []
 trojan-outbound = ["sha2", "__transport-outbound"]

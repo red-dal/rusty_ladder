@@ -51,9 +51,7 @@ pub struct SettingsBuilder {
 	pub id: Uuid,
 	pub sec: SecurityTypeBuilder,
 	/// Use legacy request header instead of AEAD header.
-	///
-	/// This has been deprecated and feature `vmess-legacy-auth`
-	/// must be enabled in order to use it.
+	/// This is no longer supported.
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub use_legacy_header: bool,
 }
@@ -84,23 +82,12 @@ impl SettingsBuilder {
 	/// Creates a `VMess` outbound [`Settings`].
 	///
 	/// # Errors
-	///
-	/// Return an error if `use_legacy_header` is true but
-	/// feature `vmess-legacy-auth` is not enabled.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		let mode =
-			if self.use_legacy_header {
-				#[cfg(feature = "vmess-legacy-auth")]
-				{
-					HeaderMode::Legacy
-				}
-				#[cfg(not(feature = "vmess-legacy-auth"))]
-				{
-					return Err("'use_legacy_header' is true but feature 'vmess-legacy-auth' is not enabled".into());
-				}
-			} else {
-				HeaderMode::Aead
-			};
+		let mode = if self.use_legacy_header {
+			return Err("legacy auth is not supported".into());
+		} else {
+			HeaderMode::Aead
+		};
 		let sec = match self.sec {
 			SecurityTypeBuilder::Aes128Cfb => {
 				return Err("stream encryption is not supported".into())

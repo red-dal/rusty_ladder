@@ -102,8 +102,6 @@ shadowsocks-inbound-ring = ["ladder_lib/shadowsocks-inbound-ring"]
 shadowsocks-outbound-ring = ["ladder_lib/shadowsocks-outbound-ring"]
 
 # ------------ VMess ------------
-vmess-legacy-auth = ["ladder_lib/vmess-legacy-auth"]
-
 vmess-openssl = ["vmess-inbound-openssl", "vmess-outbound-openssl"]
 vmess-inbound-openssl = ["ladder_lib/vmess-inbound-openssl"]
 vmess-outbound-openssl = ["ladder_lib/vmess-outbound-openssl"]

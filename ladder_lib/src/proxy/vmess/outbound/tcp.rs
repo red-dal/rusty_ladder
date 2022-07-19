@@ -16,10 +16,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
-
-#[cfg(feature = "vmess-legacy-auth")]
-use super::super::crypto;
-
 use super::super::{
 	response::{open_len, open_payload},
 	utils::{
@@ -51,16 +47,8 @@ type VMessKey = [u8; 16];
 type VMessIv = [u8; 16];
 
 enum ReadResponseState {
-	#[cfg(feature = "vmess-legacy-auth")]
-	ReadingResponseLegacy {
-		pos: usize,
-	},
-	ReadingResponseAeadLen {
-		pos: usize,
-	},
-	ReadingResponseAeadPayload {
-		pos: usize,
-	},
+	ReadingResponseAeadLen { pos: usize },
+	ReadingResponseAeadPayload { pos: usize },
 	Done,
 }
 
@@ -124,33 +112,6 @@ impl ResponseHelper {
 		}
 		loop {
 			match &mut self.state {
-				#[cfg(feature = "vmess-legacy-auth")]
-				ReadResponseState::ReadingResponseLegacy { pos } => {
-					buf.resize(4, 0);
-					debug_assert_eq!(buf.len(), 4);
-					let n = ready!(poll_read_exact(r.as_mut(), cx, buf, pos))?;
-					if n == 0 {
-						// Cannot read response because of EOF.
-						self.state = ReadResponseState::Done;
-						return eof("cannot read VMess legacy response because EOF");
-					}
-					crypto::Aes128CfbDecrypter::new(&self.response_key, &self.response_iv)
-						.decrypt(buf);
-
-					let response = Response::parse(buf);
-
-					trace!("Legacy response received: {:?}.", response);
-
-					if self.req.v == response.v {
-						self.state = ReadResponseState::Done;
-					} else {
-						return Err(io::Error::new(
-							io::ErrorKind::InvalidData,
-							Error::InvalidResponse(response),
-						))
-						.into();
-					}
-				}
 				ReadResponseState::ReadingResponseAeadLen { pos } => {
 					buf.resize(18, 0);
 					// 2 bytes (u16) + 16 bytes (TAG)
@@ -239,17 +200,6 @@ impl ReadHalfState {
 		}
 	}
 
-	#[cfg(feature = "vmess-legacy-auth")]
-	#[inline]
-	pub fn new_legacy(response_key: VMessKey, response_iv: VMessIv, req: Request) -> Self {
-		Self::new(
-			response_key,
-			response_iv,
-			req,
-			ReadResponseState::ReadingResponseLegacy { pos: 0 },
-		)
-	}
-
 	#[inline]
 	pub fn new_aead(response_key: VMessKey, response_iv: VMessIv, req: Request) -> Self {
 		Self::new(
@@ -275,20 +225,6 @@ where
 	R: AsyncRead + Unpin,
 	D: Decode,
 {
-	#[cfg(feature = "vmess-legacy-auth")]
-	pub fn new_legacy(
-		r: R,
-		dec: D,
-		response_key: VMessKey,
-		response_iv: VMessIv,
-		req: Request,
-	) -> Self {
-		Self {
-			state: ReadHalfState::new_legacy(response_key, response_iv, req),
-			fr: FrameReader::new(dec, r),
-		}
-	}
-
 	pub fn new_aead(
 		r: R,
 		dec: D,
@@ -381,14 +317,6 @@ where
 		let read_half = {
 			match self.mode {
 				HeaderMode::Aead => ReadHalf::new_aead(
-					self.r,
-					self.dec,
-					*self.response_key,
-					*self.response_iv,
-					self.req,
-				),
-				#[cfg(feature = "vmess-legacy-auth")]
-				HeaderMode::Legacy => ReadHalf::new_legacy(
 					self.r,
 					self.dec,
 					*self.response_key,
@@ -512,11 +440,6 @@ where
 		new_response_key_and_iv(&req.payload_key, &req.payload_iv, mode);
 
 	let (request_data, state) = match mode {
-		#[cfg(feature = "vmess-legacy-auth")]
-		HeaderMode::Legacy => (
-			req.encode_legacy(id, time),
-			ReadResponseState::ReadingResponseLegacy { pos: 0 },
-		),
 		HeaderMode::Aead => (
 			req.encode_aead(id, time),
 			ReadResponseState::ReadingResponseAeadLen { pos: 0 },
@@ -560,8 +483,6 @@ where
 		new_response_key_and_iv(&req.payload_key, &req.payload_iv, mode);
 
 	let request_data = match mode {
-		#[cfg(feature = "vmess-legacy-auth")]
-		HeaderMode::Legacy => req.encode_legacy(id, time),
 		HeaderMode::Aead => req.encode_aead(id, time),
 	};
 
@@ -676,8 +597,6 @@ where
 	};
 
 	let request_data = match mode {
-		#[cfg(feature = "vmess-legacy-auth")]
-		HeaderMode::Legacy => req.encode_legacy(id, time),
 		HeaderMode::Aead => req.encode_aead(id, time),
 	};
 

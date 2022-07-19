@@ -250,12 +250,6 @@ users = [
 ]
 ## Transport layer, same as above.
 transport = { type = "none" }
-## If you want to use the deprecated legacy authentication method.
-## Enable 'vmess-legacy-auth' feature and compile,
-## then uncomment the following line and change 'false' into 'true'.
-## ```
-# enable_legacy_auth = false
-## ```
 
 ## ================= Outbounds =================
 
@@ -444,14 +438,6 @@ sec = "auto"
 ## Optional.
 ## 'false' by default.
 ##
-## Legacy authentication header is deprecated.
-##
-## If it is required,
-## compiled with feature 'vmess-legacy-auth' enabled and
-## set this option to 'true'
-## ```
-# use_legacy_header = false
-## ```
 
 ## Transport layer.
 ## Optional.

@@ -192,25 +192,6 @@ impl Tester {
 
 			self.test_tcp_with_v2ray("vmess_in", &v2_conf_file, &conf_file, &proxies);
 		}
-		
-		#[cfg(feature = "vmess-legacy-auth")]
-		{
-			println!("\n--------------------------- VMess Legacy Inbound ---------------------------\n");
-			let dir = vmess_dir.clone_push("tcp_in");
-			let v2_conf_file = dir.clone_push("legacy_v2_out.json");
-			let conf_file = dir.clone_push("legacy_in.toml");
-
-			let mut proxies = vec![];
-
-			proxies.extend([
-				("socks5://127.0.0.1:10000", None),
-				("socks5://127.0.0.1:10001", None),
-				("socks5://127.0.0.1:10002", None),
-			]);
-
-			self.test_tcp_with_v2ray("vmess_in", &v2_conf_file, &conf_file, &proxies);
-		}
-
 		{
 			println!("\n--------------------------- VMess Outbound ---------------------------\n");
 			let dir = vmess_dir.clone_push("tcp_out");

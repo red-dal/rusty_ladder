@@ -19,9 +19,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 mod aead;
 
-#[cfg(feature = "vmess-legacy-auth")]
-#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
-use super::crypto::Aes128CfbEncryptor;
 use super::{
 	utils::{self, AddrType, Iv, Key, SecurityType},
 	HeaderMode,
@@ -162,20 +159,6 @@ impl Request {
 		}
 	}
 
-	#[cfg(feature = "vmess-legacy-auth")]
-	#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
-	pub fn encode_legacy(&self, uuid: &Uuid, time: i64) -> Vec<u8> {
-		trace!("Encoding VMess request using legacy method");
-		let mut request_buf = Vec::with_capacity(128);
-		let (request_key, request_iv) = utils::new_request_key_iv(uuid, time);
-		// should not failed this
-		let auth = utils::new_auth(time, uuid).unwrap();
-		request_buf.put(auth.as_ref());
-		let p = write_request_to(self, &mut request_buf);
-		Aes128CfbEncryptor::new(&request_key, &request_iv).encrypt(&mut request_buf[p..]);
-		request_buf
-	}
-
 	#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
 	pub fn encode_aead(&self, uuid: &Uuid, time: i64) -> Vec<u8> {
 		trace!("Encoding VMess request using AEAD");
@@ -197,13 +180,6 @@ impl Request {
 		R: AsyncRead + Unpin + 'static,
 	{
 		Ok(match mode {
-			#[cfg(feature = "vmess-legacy-auth")]
-			HeaderMode::Legacy => {
-				trace!("Reading Legacy VMess request header");
-				let request = read_legacy(stream, id, time).await?;
-				trace!("Legacy VMess request: {:?}", request);
-				request
-			}
 			HeaderMode::Aead => {
 				trace!("Reading AEAD VMess request header");
 				let request = read_aead(stream, cmd_key, auth_id).await?;
@@ -500,180 +476,6 @@ fn write_request_to(request: &Request, request_buf: &mut Vec<u8>) -> usize {
 
 	start_pos
 }
-
-#[cfg(feature = "vmess-legacy-auth")]
-mod legacy {
-	use super::{read_request, utils, ReadRequestError, Request};
-	use crate::proxy::vmess::crypto::Aes128CfbDecrypter;
-	use futures::ready;
-	use std::{
-		io::{self},
-		pin::Pin,
-		task::{Context, Poll},
-	};
-	use tokio::io::{AsyncRead, ReadBuf};
-	use uuid::Uuid;
-
-	struct AesCfbReader<R>
-	where
-		R: AsyncRead + Unpin,
-	{
-		inner: R,
-		// cipher: AesCfb,
-		cipher: Aes128CfbDecrypter,
-	}
-
-	impl<R> AesCfbReader<R>
-	where
-		R: AsyncRead + Unpin,
-	{
-		#[inline]
-		fn new(inner: R, cipher: Aes128CfbDecrypter) -> Self {
-			Self { inner, cipher }
-		}
-	}
-
-	impl<R> AsyncRead for AesCfbReader<R>
-	where
-		R: AsyncRead + Unpin,
-	{
-		fn poll_read(
-			self: Pin<&mut Self>,
-			cx: &mut Context<'_>,
-			buf: &mut ReadBuf<'_>,
-		) -> Poll<io::Result<()>> {
-			let me = self.get_mut();
-			ready!(Pin::new(&mut me.inner).poll_read(cx, buf))?;
-			me.cipher.decrypt(buf.filled_mut());
-			Ok(()).into()
-		}
-	}
-
-	pub(super) async fn read_legacy<R>(
-		stream: &mut R,
-		id: &Uuid,
-		time: i64,
-	) -> Result<Request, ReadRequestError>
-	where
-		R: AsyncRead + Unpin,
-	{
-		let (request_key, request_iv) = utils::new_request_key_iv(id, time);
-		let mut cipher_reader =
-			AesCfbReader::new(stream, Aes128CfbDecrypter::new(&request_key, &request_iv));
-		let request = read_request(&mut cipher_reader).await?;
-		Ok(request)
-	}
-
-	#[cfg(test)]
-	mod tests {
-		use super::{super::tests::init_test, *};
-		use crate::{
-			protocol::{SocksAddr, SocksDestination},
-			proxy::vmess::request::Command,
-			utils::timestamp_now,
-		};
-		use log::{error, info};
-		use rand::{rngs::OsRng, Rng, RngCore};
-		use std::{io::Cursor, net::Ipv4Addr, str::FromStr};
-		use tokio::{io::AsyncReadExt, runtime::Runtime};
-		use utils::SecurityType;
-
-		#[test]
-		fn test_read_request() {
-			init_test();
-			let id = Uuid::from_str("27848739-7e62-4138-9fd3-098a63964b6b").unwrap();
-			let time = timestamp_now();
-			let target_addr = SocksAddr::new(
-				SocksDestination::Ip(Ipv4Addr::new(127, 0, 0, 1).into()),
-				1080,
-			);
-
-			let (request_key, request_iv) = utils::new_request_key_iv(&id, time);
-
-			let mut rng = OsRng;
-			let payload_key = rng.gen();
-			let payload_iv = rng.gen();
-
-			let mut request = Request::new(&payload_iv, &payload_key, target_addr, Command::Tcp);
-
-			request.sec = SecurityType::Auto;
-			request.p = rng.next_u32() as u8 % 16;
-			request.v = rng.next_u32() as u8;
-
-			let buffer = request.encode_legacy(&id, time);
-			info!("{:#?}", request);
-
-			let mut cursor = Cursor::new(buffer);
-			let mut auth = [0_u8; 16];
-
-			let rt = Runtime::new().unwrap();
-			rt.block_on(async move {
-				cursor.read_exact(&mut auth).await.unwrap();
-				let cipher = Aes128CfbDecrypter::new(&request_key, &request_iv);
-				let mut cipher_cursor = AesCfbReader::new(cursor, cipher);
-				let result_request = match read_request(&mut cipher_cursor).await {
-					Ok(result_request) => result_request,
-					Err(err) => match err {
-						ReadRequestError::Io(err) => {
-							error!("{}", err);
-							panic!("{}", err)
-						}
-						ReadRequestError::Invalid(err) => {
-							error!("{}", err);
-							panic!("{}", err)
-						}
-					},
-				};
-				assert_eq!(result_request.payload_iv, request.payload_iv);
-				assert_eq!(result_request.payload_key, request.payload_key);
-				assert_eq!(result_request.v, request.v);
-				assert_eq!(result_request.opt, request.opt);
-				assert_eq!(result_request.p, request.p);
-				assert_eq!(result_request.dest_addr, request.dest_addr);
-				assert_eq!(result_request.cmd, request.cmd);
-			});
-		}
-
-		#[test]
-		fn test_read_request_legacy() {
-			init_test();
-			let id = Uuid::from_str("27848739-7e62-4138-9fd3-098a63964b6b").unwrap();
-			let time = timestamp_now();
-			let _cmd_key = utils::new_cmd_key(&id);
-			let target_addr = SocksAddr::new(
-				SocksDestination::Ip(Ipv4Addr::new(127, 0, 0, 1).into()),
-				1080,
-			);
-
-			let mut rng = OsRng;
-			let payload_key = rng.gen();
-			let payload_iv = rng.gen();
-
-			let mut request = Request::new(&payload_iv, &payload_key, target_addr, Command::Tcp);
-
-			request.sec = SecurityType::Auto;
-			request.p = rng.next_u32() as u8 % 16;
-			request.v = rng.next_u32() as u8;
-
-			info!("{:#?}", request);
-
-			futures::executor::block_on(async move {
-				let buffer = request.encode_legacy(&id, time);
-				let (_auth_id, data) = buffer.split_at(16);
-				let data = data.to_owned();
-				let mut cursor = io::Cursor::new(data);
-				let result_request = read_legacy(&mut cursor, &id, time).await.unwrap();
-				assert_eq!(request.payload_iv, result_request.payload_iv);
-				assert_eq!(request.payload_key, result_request.payload_key);
-				assert_eq!(request.v, result_request.v);
-				assert_eq!(request.p, result_request.p);
-			});
-		}
-	}
-}
-
-#[cfg(feature = "vmess-legacy-auth")]
-use legacy::read_legacy;
 
 #[cfg(test)]
 mod tests {

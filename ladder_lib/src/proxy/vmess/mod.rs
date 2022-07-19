@@ -22,7 +22,6 @@ An implementation of the vmess protocol.
 See more at <https://www.v2fly.org/>
 
 Currently only supports:
-- non-AEAD legacy request header encryption (more details at <https://github.com/v2ray/v2ray-core/issues/2523>)
 - AES-128-GCM, CHACHA20-POLY1305, NONE encryption (no AUTO and AES-128-CFB)
 - single connection (no dynamic ports)
 - only one UUID (no alterId)
@@ -56,8 +55,6 @@ const MAX_PAYLOAD_LENGTH: usize = 16384; // 2 ^ 14
 
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub enum HeaderMode {
-	#[cfg(feature = "vmess-legacy-auth")]
-	Legacy,
 	Aead,
 }
 
@@ -79,28 +76,21 @@ mod tests {
 	use std::str::FromStr;
 	use uuid::Uuid;
 
-	fn test_vmess(aead_header: bool) {
+	#[test]
+	fn test_vmess() {
 		let id = Uuid::from_str("b5b870f2-0efd-4980-a0a7-88a6bacb01d0").unwrap();
 		let num_alter_ids = 0;
 		let users = vec![User::new(id, num_alter_ids)];
 
-		let aead_str = if aead_header { "aead" } else { "legacy" };
-
 		let args = vec![
-			(format!("vmess-{}-none", aead_str), SecurityType::None),
-			(format!("vmess-{}-aes", aead_str), SecurityType::Aes128Gcm),
-			(
-				format!("vmess-{}-chacha", aead_str),
-				SecurityType::Chacha20Poly1305,
-			),
+			("vmess-none", SecurityType::None),
+			("vmess-aes", SecurityType::Aes128Gcm),
+			("vmess-chacha", SecurityType::Chacha20Poly1305),
 		];
 
 		for (tag, sec) in args {
 			let inbound = InboundSettingsBuilder {
 				users: users.clone(),
-				// For testing
-				#[cfg(feature = "vmess-legacy-auth")]
-				enable_legacy_auth: true,
 			}
 			.build()
 			.unwrap();
@@ -111,15 +101,5 @@ mod tests {
 				outbound
 			});
 		}
-	}
-
-	#[test]
-	fn test_vmess_legacy_header() {
-		test_vmess(false);
-	}
-
-	#[test]
-	fn test_vmess_legacy_aead() {
-		test_vmess(true);
 	}
 }

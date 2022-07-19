@@ -63,16 +63,6 @@ impl Response {
 	pub fn encode(&self, response_key: &Key, response_iv: &Iv, mode: super::HeaderMode) -> Vec<u8> {
 		let response_buf = [self.v, self.opt, self.cmd, self.cmd_len];
 		match mode {
-			#[cfg(feature = "vmess-legacy-auth")]
-			HeaderMode::Legacy => {
-				let mut res = Vec::from(response_buf);
-				crate::crypto::Aes128CfbEncryptor::Aes128CfbEncryptor::new(
-					response_key,
-					response_iv,
-				)
-				.encrypt(&mut res);
-				res
-			}
 			HeaderMode::Aead => aead::seal_response(&response_buf, response_key, response_iv),
 		}
 	}

@@ -21,8 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #[cfg_attr(feature = "__crypto_openssl", path = "openssl.rs")]
 #[cfg_attr(feature = "__crypto_crypto_ring", path = "rust_crypto.rs")]
 mod inner;
-#[cfg(feature = "vmess-legacy-auth")]
-pub use inner::{Aes128CfbDecrypter, Aes128CfbEncryptor};
 
 pub const AES_KEY_LEN: usize = 16;
 pub type Block = [u8; AES_KEY_LEN];

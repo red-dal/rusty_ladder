@@ -33,8 +33,6 @@ mod settings {
 		Ws(super::super::ws::Outbound),
 		#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
 		H2(super::super::h2::Outbound),
-		#[cfg(feature = "browser-transport")]
-		Browser(super::super::browser::Settings),
 	}
 
 	impl Outbound {
@@ -85,8 +83,6 @@ mod builder {
 		Ws(super::super::ws::OutboundBuilder),
 		#[cfg(any(feature = "h2-transport-openssl", feature = "h2-transport-rustls"))]
 		H2(super::super::h2::OutboundBuilder),
-		#[cfg(feature = "browser-transport")]
-		Browser(super::super::browser::SettingsBuilder),
 	}
 
 	impl Builder {

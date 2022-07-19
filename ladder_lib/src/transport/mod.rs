@@ -20,9 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
 pub mod ws;
 
-#[cfg(feature = "browser-transport")]
-pub mod browser;
-
 #[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 pub mod tls;
 
@@ -34,6 +31,3 @@ pub use inbound::Inbound;
 
 pub mod outbound;
 pub use outbound::Outbound;
-
-#[cfg(feature = "browser-transport")]
-mod http_utils;

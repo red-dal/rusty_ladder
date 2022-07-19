@@ -41,18 +41,6 @@ use uuid::Uuid;
 /// Maximum allowed absolute difference between the time in auth from client and server current time.
 const MAX_TIMESTAMP_DIFF: u64 = 120;
 
-#[cfg(feature = "vmess-legacy-auth")]
-mod user_validator;
-
-#[cfg(feature = "vmess-legacy-auth")]
-use user_validator::UserValidator;
-
-#[cfg(feature = "vmess-legacy-auth")]
-type ArcValidator = Arc<AsyncMutex<UserValidator>>;
-
-#[cfg(feature = "vmess-legacy-auth")]
-use user_validator::spawn_update_task;
-
 // -----------------------------------------------------------
 //                         Builder
 // -----------------------------------------------------------
@@ -65,15 +53,6 @@ use user_validator::spawn_update_task;
 )]
 pub struct SettingsBuilder {
 	pub users: Vec<User>,
-	/// Enable legacy authentication. False by default.
-	///
-	/// Legacy authentication is deprecated and unsecured.
-	///
-	/// See more at
-	/// https://www.v2fly.org/config/protocols/vmess.html#vmess-md5-%E8%AE%A4%E8%AF%81%E4%BF%A1%E6%81%AF-%E6%B7%98%E6%B1%B0%E6%9C%BA%E5%88%B6
-	#[cfg(feature = "vmess-legacy-auth")]
-	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub enable_legacy_auth: bool,
 }
 
 impl SettingsBuilder {
@@ -82,38 +61,13 @@ impl SettingsBuilder {
 	/// # Errors
 	///
 	/// Returns an error if error occurred when building `self.transport`.
-	///
-	/// If feature `vmess-legacy-auth` is enabled and `use_legacy` is false,
-	/// but some users use legacy authentication, returns an error.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
 		if self.users.is_empty() {
 			return Err("VMess inbound must have at least one user".into());
 		}
-
-		#[cfg(feature = "vmess-legacy-auth")]
-		if !self.enable_legacy_auth {
-			for user in &self.users {
-				if let AlterId::Legacy(ids) = &user.alter_ids {
-					return Err(format!(
-						"VMess user use legacy authentication (num: {}) while use_legacy is false",
-						ids.len()
-					)
-					.into());
-				}
-			}
-		}
-
 		Ok(Settings {
 			users: self.users.into_iter().collect(),
 			container: auth_id::GuardedContainer::new(MAX_TIMESTAMP_DIFF),
-			#[cfg(feature = "vmess-legacy-auth")]
-			legacy_authenticator: if self.enable_legacy_auth {
-				LegacyAuthenticator::Enabled {
-					validator: AsyncMutex::new(None),
-				}
-			} else {
-				LegacyAuthenticator::Disabled
-			},
 		})
 	}
 }
@@ -142,14 +96,6 @@ impl crate::protocol::DisplayInfo for SettingsBuilder {
 	}
 }
 
-#[cfg(feature = "vmess-legacy-auth")]
-enum LegacyAuthenticator {
-	Enabled {
-		validator: AsyncMutex<Option<ArcValidator>>,
-	},
-	Disabled,
-}
-
 // -----------------------------------------------------------
 //                         Settings
 // -----------------------------------------------------------
@@ -157,58 +103,9 @@ enum LegacyAuthenticator {
 pub struct Settings {
 	users: Vec<User>,
 	container: auth_id::GuardedContainer,
-	#[cfg(feature = "vmess-legacy-auth")]
-	legacy_authenticator: LegacyAuthenticator,
 }
 
 impl Settings {
-	#[cfg(feature = "vmess-legacy-auth")]
-	fn contains_legacy_users(&self) -> bool {
-		let mut is_used = false;
-		for user in &self.users {
-			if let AlterId::Legacy(_) = &user.alter_ids {
-				is_used = true;
-			}
-		}
-		is_used
-	}
-
-	/// Check if `auth` is valid using legacy method.
-	///
-	/// Returns an `UserInfo` of the user if authentication message is valid.
-	///
-	/// If legacy authentication method is disabled, this will always return `None`
-	#[cfg(feature = "vmess-legacy-auth")]
-	async fn check_auth_legacy(&self, auth: &[u8; AUTH_LENGTH]) -> Option<UserInfo> {
-		if let LegacyAuthenticator::Enabled { validator } = &self.legacy_authenticator {
-			// Returns None if there are no users using legacy authentication.
-			if !self.contains_legacy_users() {
-				return None;
-			}
-			let mut validator_holder = validator.lock().await;
-			let now = timestamp_now();
-			let validator = validator_holder
-				.get_or_insert_with(|| {
-					let validator =
-						Arc::new(AsyncMutex::new(UserValidator::new(now, self.users.iter())));
-					spawn_update_task(validator.clone(), self.users.clone());
-					validator
-				})
-				.lock()
-				.await;
-
-			if let Some(info) = validator.get(auth) {
-				trace!("Valid VMess legacy request auth {:?}", auth);
-				Some(info.clone())
-			} else {
-				trace!("Invalid VMess legacy request auth {:?}", auth);
-				None
-			}
-		} else {
-			None
-		}
-	}
-
 	#[inline]
 	async fn check_auth_aead(&self, auth_id: &AuthId) -> Option<UserInfo> {
 		// Select users using AEAD header.
@@ -245,12 +142,6 @@ impl Settings {
 
 	#[inline]
 	async fn get_user_from_auth(&self, auth: &AuthId) -> Option<(UserInfo, HeaderMode)> {
-		// If legacy method is disabled, this will always be None
-		#[cfg(feature = "vmess-legacy-auth")]
-		if let Some(info) = self.check_auth_legacy(auth).await {
-			return Some((info, HeaderMode::Legacy));
-		}
-
 		self.check_auth_aead(auth)
 			.await
 			.map(|info| (info, HeaderMode::Aead))

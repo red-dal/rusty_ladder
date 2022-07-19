@@ -68,7 +68,6 @@ const FEATURES: &[&str] = &[
 	make_feature_str!("shadowsocks-outbound-openssl"),
 	make_feature_str!("shadowsocks-inbound-ring"),
 	make_feature_str!("shadowsocks-outbound-ring"),
-	make_feature_str!("vmess-legacy-auth"),
 	make_feature_str!("vmess-inbound-openssl"),
 	make_feature_str!("vmess-outbound-openssl"),
 	make_feature_str!("vmess-inbound-ring"),
