@@ -24,11 +24,11 @@ use crate::{
 	prelude::*,
 	protocol::{
 		socks_addr::{DomainName, ReadError},
-		AsyncReadWrite, ProxyContext,
+		AsyncReadWrite, DisplayInfo, ProxyContext,
 	},
 	utils::websocket::{self, Stream as WsStream},
 };
-use std::{collections::HashMap, io};
+use std::{collections::HashMap, fmt::Write, io};
 
 pub type PlainStream<IO> = WsStream<IO>;
 pub type SecureClientStream<IO> = WsStream<tls::ClientStream<IO>>;
@@ -374,6 +374,37 @@ impl OutboundBuilder {
 	}
 }
 
+impl DisplayInfo for OutboundBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.tls.is_none() {
+			f.write_str("ws-out")
+		} else {
+			f.write_str("wss-out")
+		}
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.tls.is_none() {
+			f.write_str("ws-out")
+		} else {
+			f.write_str("wss-out")
+		}?;
+		let mut content = String::new();
+		if !self.host.is_empty() {
+			content.push('(');
+			write!(&mut content, "host:'{}'", &self.host)?;
+		}
+		if !self.path.is_empty() {
+			content.push(if content.is_empty() { '(' } else { ',' });
+			write!(&mut content, "path:'{}'", &self.path)?;
+		}
+		if !content.is_empty() {
+			write!(f, "{content})")?;
+		}
+		Ok(())
+	}
+}
+
 // -------------------------------------------
 //                Inbound
 // -------------------------------------------
@@ -444,6 +475,83 @@ impl InboundBuilder {
 	}
 }
 
+impl DisplayInfo for InboundBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.tls.is_none() {
+			f.write_str("ws-in")
+		} else {
+			f.write_str("wss-in")
+		}
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		if self.tls.is_none() {
+			f.write_str("ws-in")
+		} else {
+			f.write_str("wss-in")
+		}?;
+		if !self.path.is_empty() {
+			write!(f, "(path:'{}')", self.path)?;
+		}
+		Ok(())
+	}
+}
+
 fn is_path_invalid(path: &str) -> bool {
 	!path.is_empty() && !path.starts_with('/')
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_outbound_display_info() {
+		let mut s = OutboundBuilder {
+			headers: HashMap::new(),
+			path: String::new(),
+			host: String::new(),
+			tls: None,
+		};
+		assert_eq!(s.brief().to_string(), "ws-out");
+		assert_eq!(s.detail().to_string(), "ws-out");
+		s.tls = Some(Default::default());
+		assert_eq!(s.brief().to_string(), "wss-out");
+		assert_eq!(s.detail().to_string(), "wss-out");
+		s.path = "some_path".into();
+		assert_eq!(s.brief().to_string(), "wss-out");
+		assert_eq!(s.detail().to_string(), "wss-out(path:'some_path')");
+		s.path = String::new();
+		s.host = "localhost".into();
+		assert_eq!(s.brief().to_string(), "wss-out");
+		assert_eq!(s.detail().to_string(), "wss-out(host:'localhost')");
+		s.path = "some_path".into();
+		s.host = "localhost".into();
+		assert_eq!(s.brief().to_string(), "wss-out");
+		assert_eq!(
+			s.detail().to_string(),
+			"wss-out(host:'localhost',path:'some_path')"
+		);
+	}
+
+	#[test]
+	fn test_inbound_display_info() {
+		let mut s = InboundBuilder {
+			headers: HashMap::new(),
+			path: String::new(),
+			tls: None,
+		};
+		assert_eq!(s.brief().to_string(), "ws-in");
+		assert_eq!(s.detail().to_string(), "ws-in");
+		s.tls = Some(super::tls::InboundBuilder {
+			alpns: Default::default(),
+			cert_file: String::new().into(),
+			key_file: String::new().into(),
+		});
+		assert_eq!(s.brief().to_string(), "wss-in");
+		assert_eq!(s.detail().to_string(), "wss-in");
+		s.path = "some_path".into();
+		assert_eq!(s.brief().to_string(), "wss-in");
+		assert_eq!(s.detail().to_string(), "wss-in(path:'some_path')");
+	}
 }
