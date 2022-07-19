@@ -26,7 +26,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{AcceptError, AcceptResult, SessionInfo, TcpAcceptor},
-		AsyncReadWrite, GetProtocolName,
+		AsyncReadWrite, DisplayInfo, GetProtocolName,
 	},
 	utils::OneOrMany,
 	Monitor,
@@ -134,6 +134,13 @@ mod details_builder {
 		/// Returns an error if the inner type failed to build.
 		#[implement(map_into)]
 		pub fn build(self) -> Result<Details, BoxStdErr> {}
+	}
+
+	impl crate::protocol::DisplayInfo for DetailsBuilder {
+		#[implement]
+		fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {}
+		#[implement]
+		fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {}
 	}
 }
 pub use details_builder::DetailsBuilder;
@@ -484,5 +491,27 @@ impl Builder {
 			network_type: Default::default(),
 			transport: Default::default(),
 		})
+	}
+}
+
+impl DisplayInfo for Builder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"['{tag}'|{brief}|{tran_brief}]",
+			tag = &self.tag,
+			brief = &self.settings.brief(),
+			tran_brief = &self.transport.brief(),
+		)
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(
+			f,
+			"['{tag}'|{detail}|{tran_detail}]",
+			tag = &self.tag,
+			detail = &self.settings.detail(),
+			tran_detail = &self.transport.detail(),
+		)
 	}
 }

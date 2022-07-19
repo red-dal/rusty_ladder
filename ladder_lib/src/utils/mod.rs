@@ -196,7 +196,7 @@ pub mod url {
 
 /// Format all items in "'first','second','third'...,'final'"
 pub fn fmt_iter<T: std::fmt::Display>(
-	f: &mut std::fmt::Formatter<'_>,
+	f: &mut impl std::fmt::Write,
 	mut items: impl Iterator<Item = T>,
 ) -> std::fmt::Result {
 	if let Some(first) = items.next() {
