@@ -1,5 +1,7 @@
 # **Rusty-ladder**
-This is a proxy client/server that helps you bypass the Great Fire Wall.
+A proxy client/server for bypassing GFW censorship.
+
+This is a hobby project and not for production.
 
 Currently supports: 
 - HTTP in/outbound with basic username/password authentication
@@ -8,9 +10,6 @@ Currently supports:
 - VMess in/outbound
 - Trojan outbound
 - TLS/WS/WSS transport layer for in/outbounds
-
-# **Requirements**
-- OpenSSL (required for crytography/TLS)
 
 # **How to use**
 Create a configuration file in TOML v0.5 format.
@@ -50,49 +49,15 @@ If built with feature `use-tui` enabled, run with `--tui` to enable the TUI.
 ## **Use cargo to build**
 Build with cargo by running:
 ```bash
-RUSTFLAGS='-C link-arg=-s' cargo build --release
+cargo build --release
 ```
-`RUSTFLAGS='-C link-arg=-s'` is used to minimize the size of binary.
-
-The executable `rusty_ladder` can be found in `./target/release/`.
+Binary will be in `./target/release/`.
 
 ## **Use cargo cross to build**
-To build with [cross](https://github.com/rust-embedded/cross) and package the result, run:
+[cross](https://github.com/rust-embedded/cross) is used to build for different platforms.
 ```bash
-bash ./build/build.sh
+cross build --release --no-default-features --features "$FEATURES" --target $target
 ```
-All results will be in `./build/output/`.
-
-For linux target, OpenSSL is used by default as crypto/TLS library, so custom docker images `./build/Dockerfile.*` are needed.
-For windows target, ring/rustls is used as crypto/TLS library.
-
-To remove all docker images and output, run:
-```bash
-bash ./build/clean_up.sh
-```
-
-## **OpenSSL**
-OpenSSL is needed for cryptography/TLS for some proxies/transport by default.
-You will need both libraries and headers to build this crate. 
-
-For example on debian/ubuntu, you will need 
-```bash
-apt install libssl-dev
-```
-
-If you want to cross compile to other platform with cargo,
-you may need to download the source code of OpenSSL and cross compile it manually first,
-then specify the location of OpenSSL by setting environment
-variables `OPENSSL_INCLUDE_DIR`, `OPENSSL_LIB_DIR` and `OPENSSL_DIR` and build like this: 
-```bash
-export OPENSSL_DIR="..."
-export OPENSSL_LIB_DIR=$OPENSSL_DIR
-export OPENSSL_INCLUDE_DIR=$OPENSSL_DIR/include 
-
-cargo build --target aarch64-unknown-linux-gnu 
-```
-
-See more at https://docs.rs/openssl/0.10.36/openssl/#manual
 
 ## **Feature Flags**
 Commandline:
@@ -166,14 +131,10 @@ Proxy:
 - `all-proxies-ring` (*Enabled by default*)
 
     Enable all proxies with ring/RustCrypto as crypto library.
-    This enabled for windows target in `build/build.sh` instead of OpenSSL.
 
 - `all-proxies-openssl` 
 
     Enable all proxies with OpenSSL as crypto library.
-    You can only use either `-openssl` or `-rustls`/`-ring`.
-    
-    Requires OpenSSL.
 
 - `use-udp` (*Enabled by default*)
 
@@ -250,14 +211,12 @@ export V2RAY_PATH=../v2ray/v2ray
 cargo test --workspace
 ```
 
-# **Benchmark**
-See more in speed_tester/README.md
-
 # **Credits**
 - [shadowsocks/shadowsocks-rust](https://github.com/shadowsocks/shadowsocks-rust)
 - [v2fly/v2ray-core](https://github.com/v2fly/v2ray-core)
 - [OpenSSL](https://www.openssl.org/)
 - [sfackler/rust-openssl](https://github.com/sfackler/rust-openssl)
+- [rustls](https://github.com/rustls/rustls)
 
 # **License**
 ```
