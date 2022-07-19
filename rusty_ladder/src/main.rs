@@ -23,10 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![allow(clippy::default_trait_access)]
 
 // TODO: log to TUI
-// TOOD: log brief config during initialization
 use config::Config;
-use fern::colors::{Color, ColoredLevelConfig};
-use log::Level;
 use std::{borrow::Cow, io, str::FromStr, sync::Arc};
 use structopt::StructOpt;
 use tokio::runtime::Runtime;
@@ -428,7 +425,14 @@ fn serve(opts: &AppOptions) -> Result<(), Error> {
 			));
 		}
 		// Initialize logger
-		init_logger(&conf.log).map_err(Error::Config)?;
+		conf.log.init_logger().map_err(Error::Config)?;
+		for inb in &conf.server.inbounds {
+			log::info!("Found inbound: {}", inb.detail());
+		}
+		for outb in &conf.server.outbounds {
+			log::info!("Found outbound: {}", outb.detail());
+		}
+		log::info!("Found {} routing rules.", conf.server.router.rules.len());
 		let server = Arc::new(
 			conf.server
 				.build()
@@ -463,9 +467,9 @@ fn main() {
 
 #[cfg(feature = "use-tui")]
 mod tui_utils {
-	use super::{config::Config, init_logger, tui, Arc, BoxStdErr, Runtime};
+	use super::{config::Config, tui, Arc, BoxStdErr, Runtime};
 	use futures::future::abortable;
-	use ladder_lib::Monitor;
+	use ladder_lib::{protocol::DisplayInfo, Monitor};
 	use log::debug;
 	use std::{sync::mpsc, thread};
 
@@ -473,12 +477,15 @@ mod tui_utils {
 		if use_tui && matches!(&conf.log.output, Some(super::config::LogOutput::Stdout)) {
 			return Err("cannot use stdout for log when using TUI".into());
 		}
+		conf.log.init_logger()?;
 
-		// Initialize logger
-		init_logger(&conf.log)?;
-
-		let rt = Arc::new(rt);
-
+		for inb in &conf.server.inbounds {
+			log::info!("Found inbound: {}", inb.detail());
+		}
+		for outb in &conf.server.outbounds {
+			log::info!("Found outbound: {}", outb.detail());
+		}
+		log::info!("Found {} routing rules.", conf.server.router.rules.len());
 		let server = Arc::new(conf.server.build()?);
 
 		if use_tui {
@@ -504,6 +511,7 @@ mod tui_utils {
 			};
 
 			// Handling serve result
+			let rt = Arc::new(rt);
 			let result = match rt.block_on(serve_task) {
 				Ok(result) => result,
 				Err(_aborted) => {
@@ -534,78 +542,17 @@ mod tui_utils {
 	}
 }
 
-/// Initialize logger.
-///
-/// DO NOT call this funtion more than once!
-fn init_logger(conf: &config::Log) -> Result<(), BoxStdErr> {
-	if let Some(output) = &conf.output {
-		let time_format =
-			time::format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]Z")
-				.unwrap();
-		let is_colorful = output.is_colorful();
-		let colors = ColoredLevelConfig::new()
-			.info(Color::Blue)
-			.trace(Color::Magenta);
-		let levels: &[String; 5] = {
-			let strs = if is_colorful {
-				[
-					colors.color(Level::Error).to_string(),
-					colors.color(Level::Warn).to_string(),
-					colors.color(Level::Info).to_string(),
-					colors.color(Level::Debug).to_string(),
-					colors.color(Level::Trace).to_string(),
-				]
-			} else {
-				[
-					Level::Error.to_string(),
-					Level::Warn.to_string(),
-					Level::Info.to_string(),
-					Level::Debug.to_string(),
-					Level::Trace.to_string(),
-				]
-			};
-			// This function should only be called once,
-			// so it is ok to leak.
-			Box::leak(Box::new(strs))
-		};
-		let dispatch =
-			fern::Dispatch::new()
-				.level(conf.level)
-				.format(move |out, message, record| {
-					let time = time::OffsetDateTime::now_utc()
-						.format(&time_format)
-						.unwrap();
-					let level = match record.level() {
-						Level::Error => levels[0].as_str(),
-						Level::Warn => levels[1].as_str(),
-						Level::Info => levels[2].as_str(),
-						Level::Debug => levels[3].as_str(),
-						Level::Trace => levels[4].as_str(),
-					};
-					// Ignore target for any level above DEBUG
-					// let target = if record.level() <= Level::Info {
-					// 	""
-					// } else {
-					// 	record.target()
-					// };
-					let target = record.target();
-					out.finish(format_args!("[{time} {level} {target}] {message}"));
-				});
-		match &output {
-			config::LogOutput::Stdout => dispatch.chain(std::io::stdout()),
-			config::LogOutput::Stderr => dispatch.chain(std::io::stderr()),
-			config::LogOutput::File(f) => dispatch.chain(fern::log_file(f)?),
-		}
-		.apply()?;
-	}
-	// Ignore empty output
-	Ok(())
-}
+// ----------------------------------------------------------
+//                          Config
+// ----------------------------------------------------------
 
 mod config {
+	use crate::BoxStdErr;
+	use fern::colors::{Color, ColoredLevelConfig};
 	use ladder_lib::ServerBuilder;
-	use log::LevelFilter;
+	use log::{Level, LevelFilter};
 
+	// ------------------- Logging -------------------
 	const STR_STDOUT: &str = "@stdout";
 	const STR_STDERR: &str = "@stderr";
 	const STR_NONE: &str = "@none";
@@ -657,6 +604,77 @@ mod config {
 		pub output: Option<LogOutput>,
 	}
 
+	impl Log {
+		/// Initialize logger.
+		///
+		/// DO NOT call this funtion more than once!
+		pub fn init_logger(&self) -> Result<(), BoxStdErr> {
+			if let Some(output) = &self.output {
+				let time_format = time::format_description::parse(
+					"[year]-[month]-[day]T[hour]:[minute]:[second]Z",
+				)
+				.unwrap();
+				let is_colorful = output.is_colorful();
+				let colors = ColoredLevelConfig::new()
+					.info(Color::Blue)
+					.trace(Color::Magenta);
+				let levels: &[String; 5] = {
+					let strs = if is_colorful {
+						[
+							colors.color(Level::Error).to_string(),
+							colors.color(Level::Warn).to_string(),
+							colors.color(Level::Info).to_string(),
+							colors.color(Level::Debug).to_string(),
+							colors.color(Level::Trace).to_string(),
+						]
+					} else {
+						[
+							Level::Error.to_string(),
+							Level::Warn.to_string(),
+							Level::Info.to_string(),
+							Level::Debug.to_string(),
+							Level::Trace.to_string(),
+						]
+					};
+					// This function should only be called once,
+					// so it is ok to leak.
+					Box::leak(Box::new(strs))
+				};
+				let dispatch =
+					fern::Dispatch::new()
+						.level(self.level)
+						.format(move |out, message, record| {
+							let time = time::OffsetDateTime::now_utc()
+								.format(&time_format)
+								.unwrap();
+							let level = match record.level() {
+								Level::Error => levels[0].as_str(),
+								Level::Warn => levels[1].as_str(),
+								Level::Info => levels[2].as_str(),
+								Level::Debug => levels[3].as_str(),
+								Level::Trace => levels[4].as_str(),
+							};
+							// Ignore target for any level above DEBUG
+							// let target = if record.level() <= Level::Info {
+							// 	""
+							// } else {
+							// 	record.target()
+							// };
+							let target = record.target();
+							out.finish(format_args!("[{time} {level} {target}] {message}"));
+						});
+				match &output {
+					LogOutput::Stdout => dispatch.chain(std::io::stdout()),
+					LogOutput::Stderr => dispatch.chain(std::io::stderr()),
+					LogOutput::File(f) => dispatch.chain(fern::log_file(f)?),
+				}
+				.apply()?;
+			}
+			// Ignore empty output
+			Ok(())
+		}
+	}
+
 	impl Default for Log {
 		fn default() -> Self {
 			Log {
@@ -666,14 +684,6 @@ mod config {
 		}
 	}
 
-	#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
-	pub struct Config {
-		#[cfg_attr(feature = "parse-config", serde(default))]
-		pub log: Log,
-		#[cfg_attr(feature = "parse-config", serde(flatten))]
-		pub server: ServerBuilder,
-	}
-
 	fn default_log_level() -> LevelFilter {
 		LevelFilter::Info
 	}
@@ -681,5 +691,14 @@ mod config {
 	#[allow(clippy::unnecessary_wraps)]
 	fn default_output() -> Option<LogOutput> {
 		Some(LogOutput::Stdout)
+	}
+
+	// ------------------- Config -------------------
+	#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
+	pub struct Config {
+		#[cfg_attr(feature = "parse-config", serde(default))]
+		pub log: Log,
+		#[cfg_attr(feature = "parse-config", serde(flatten))]
+		pub server: ServerBuilder,
 	}
 }
