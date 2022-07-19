@@ -19,13 +19,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
 	prelude::*,
-	protocol::{AsyncReadWrite, ProxyContext},
+	protocol::{AsyncReadWrite, DisplayInfo, ProxyContext},
 	utils::tls::{Acceptor, Connector},
 };
 use smol_str::SmolStr;
 use std::io;
 
 pub use crate::utils::tls::{ClientStream, ConfigError, ServerStream};
+
+// ----------------------------------------------------
+//                    Outbound
+// ----------------------------------------------------
 
 pub struct Outbound {
 	pub connector: Connector,
@@ -55,6 +59,10 @@ impl Outbound {
 		return self.connector.connect(stream, addr).await;
 	}
 }
+
+// ----------------------------------------------------
+//                    OutboundBuilder
+// ----------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(
@@ -89,6 +97,20 @@ impl OutboundBuilder {
 	}
 }
 
+impl DisplayInfo for OutboundBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("tls-out")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("tls-out")
+	}
+}
+
+// ----------------------------------------------------
+//                    Inbound
+// ----------------------------------------------------
+
 pub struct Inbound {
 	acceptor: Acceptor,
 }
@@ -102,6 +124,10 @@ impl Inbound {
 		self.acceptor.accept(stream).await
 	}
 }
+
+// ----------------------------------------------------
+//                    InboundBuilder
+// ----------------------------------------------------
 
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug, Clone)]
@@ -140,5 +166,16 @@ impl InboundBuilder {
 			self.alpns.iter().map(|a| a.as_bytes()),
 		)?;
 		Ok(Inbound { acceptor })
+	}
+}
+
+impl DisplayInfo for InboundBuilder {
+	fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("tls-in")
+	}
+
+	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		// TODO: More info maybe?
+		f.write_str("tls-in")
 	}
 }
