@@ -19,7 +19,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #[allow(unused_imports)]
 use crate::protocol::ProxyContext;
-use crate::{prelude::*, protocol::AsyncReadWrite};
+use crate::{
+	prelude::*,
+	protocol::{AsyncReadWrite, DisplayInfo},
+};
 use std::io;
 
 #[ladder_lib_macro::impl_variants(Outbound)]
@@ -105,6 +108,13 @@ mod builder {
 		#[implement(map_into_map_err_into)]
 		pub fn build(self) -> Result<Outbound, BoxStdErr> {}
 	}
+
+	impl crate::protocol::DisplayInfo for Builder {
+		#[implement(map_into)]
+		fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {}
+		#[implement(map_into)]
+		fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {}
+	}
 }
 pub use builder::Builder;
 
@@ -118,6 +128,17 @@ impl Default for Builder {
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
 #[derive(Debug, Clone, Copy)]
 pub struct Empty;
+
+impl DisplayInfo for Empty {
+	fn fmt_brief(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		// Do nothing
+		Ok(())
+	}
+
+	fn fmt_detail(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		Ok(())
+	}
+}
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
 #[allow(clippy::unnecessary_wraps)]

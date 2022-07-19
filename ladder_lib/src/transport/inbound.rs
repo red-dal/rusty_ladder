@@ -69,7 +69,7 @@ impl Default for Inbound {
 #[ladder_lib_macro::impl_variants(Builder)]
 mod settings_builder {
 	use super::Inbound;
-	use crate::{prelude::BoxStdErr, transport};
+	use crate::{prelude::BoxStdErr, protocol::DisplayInfo, transport};
 
 	#[cfg_attr(test, derive(PartialEq, Eq))]
 	#[derive(Debug, Clone)]
@@ -91,6 +91,13 @@ mod settings_builder {
 	impl Builder {
 		#[implement(map_into_map_err_into)]
 		pub fn build(self) -> Result<Inbound, BoxStdErr> {}
+	}
+
+	impl DisplayInfo for Builder {
+		#[implement]
+		fn fmt_brief(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {}
+		#[implement]
+		fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {}
 	}
 }
 
@@ -122,4 +129,15 @@ impl Empty {
 	fn build(self) -> Result<Self, BoxStdErr> {
 		Ok(self)
 	}
+}
+
+impl crate::protocol::DisplayInfo for Empty {
+    fn fmt_brief(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		// Do nothing
+		Ok(())
+    }
+
+    fn fmt_detail(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		Ok(())
+    }
 }
