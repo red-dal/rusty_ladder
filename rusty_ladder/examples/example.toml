@@ -236,16 +236,9 @@ password = "password"
 [[inbounds]]
 protocol = "vmess"
 addr = "127.0.0.1:10003"
-## A list of uuids of users.
 ## This list cannot be empty.
 users = [
-    ## Number of alternative IDs.
-    ## Optional. 0 will be used by default.
-    ##
-    ## You dont need to set this unless legacy authentication
-    ## is required.
-    ## If 0, AEAD authentication will be used.
-    { id = "9982b968-5aca-4976-bf39-71ad80242578", num_alter_ids = 0 },
+    { id = "9982b968-5aca-4976-bf39-71ad80242578" },
     { id = "032f2f27-d103-47f7-b561-d3f79c916c4e" },
 ]
 ## Transport layer, same as above.

@@ -17,7 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-mod alter_ids;
 mod tcp;
 #[cfg(feature = "use-udp")]
 mod udp;
@@ -109,10 +108,7 @@ impl Settings {
 	#[inline]
 	async fn check_auth_aead(&self, auth_id: &AuthId) -> Option<UserInfo> {
 		// Select users using AEAD header.
-		let cmd_keys_iter = self.users.iter().filter_map(|u| match &u.alter_ids {
-			AlterId::Legacy(_) => None,
-			AlterId::Aead => Some((&u.id, &u.cmd_key)),
-		});
+		let cmd_keys_iter = self.users.iter().map(|u| (&u.id, &u.cmd_key));
 		let curr_time = timestamp_now();
 		// Detect replay.
 		if let Some(old_time) = self.container.insert(*auth_id, curr_time).await {
@@ -256,23 +252,16 @@ struct UserInfo {
 #[derive(Debug, Clone)]
 pub struct User {
 	id: Uuid,
-	alter_ids: AlterId,
 	cmd_key: [u8; 16],
 }
 
 impl User {
 	#[inline]
 	#[must_use]
-	pub fn new(id: Uuid, num_alter_ids: usize) -> Self {
-		let alter_ids = if num_alter_ids == 0 {
-			AlterId::Aead
-		} else {
-			AlterId::Legacy(alter_ids::new(&id, num_alter_ids))
-		};
+	pub fn new(id: Uuid) -> Self {
 		User {
 			id,
 			cmd_key: new_cmd_key(&id),
-			alter_ids,
 		}
 	}
 
@@ -280,12 +269,6 @@ impl User {
 	pub fn uuid(&self) -> &Uuid {
 		&self.id
 	}
-}
-
-#[derive(Debug, Clone)]
-enum AlterId {
-	Aead,
-	Legacy(Vec<Uuid>),
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -345,7 +328,12 @@ mod serde_internals {
 	impl<'de> Deserialize<'de> for User {
 		fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
 			let s = SerdeUser::deserialize(deserializer)?;
-			Ok(User::new(s.id, s.num_alter_ids))
+			if s.num_alter_ids != 0 {
+				return Err(serde::de::Error::custom(
+					"num_alter_ids other than 0 is not supported",
+				));
+			}
+			Ok(User::new(s.id))
 		}
 	}
 }
@@ -367,18 +355,9 @@ mod tests {
 
 		let s = SettingsBuilder {
 			users: vec![
-				User::new(
-					Uuid::from_str("a8963692-90e0-4897-8d71-dc1ce2d7fea6").unwrap(),
-					0,
-				),
-				User::new(
-					Uuid::from_str("39c2f893-f167-4b09-abd4-f475dbb41e4f").unwrap(),
-					0,
-				),
-				User::new(
-					Uuid::from_str("f9d3ce5e-6014-4708-a882-7d4dd878e7a1").unwrap(),
-					0,
-				),
+				User::new(Uuid::from_str("a8963692-90e0-4897-8d71-dc1ce2d7fea6").unwrap()),
+				User::new(Uuid::from_str("39c2f893-f167-4b09-abd4-f475dbb41e4f").unwrap()),
+				User::new(Uuid::from_str("f9d3ce5e-6014-4708-a882-7d4dd878e7a1").unwrap()),
 			],
 		};
 		assert_eq!(s.brief().to_string(), "vmess-in");

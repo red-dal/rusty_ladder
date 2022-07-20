@@ -79,8 +79,7 @@ mod tests {
 	#[test]
 	fn test_vmess() {
 		let id = Uuid::from_str("b5b870f2-0efd-4980-a0a7-88a6bacb01d0").unwrap();
-		let num_alter_ids = 0;
-		let users = vec![User::new(id, num_alter_ids)];
+		let users = vec![User::new(id)];
 
 		let args = vec![
 			("vmess-none", SecurityType::None),
