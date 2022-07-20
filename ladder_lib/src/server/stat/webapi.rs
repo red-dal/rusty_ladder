@@ -82,7 +82,6 @@ GET /connections?inbounds=socks,http&outbounds=vmess
 
 use super::Monitor;
 use crate::prelude::{BoxStdErr, Tag};
-use log::{error, warn};
 use smol_str::SmolStr;
 use std::{net::SocketAddr, str::FromStr};
 use warp::Filter;
@@ -116,7 +115,7 @@ pub async fn serve_web_api(
 	addr: &SocketAddr,
 	secret: SmolStr,
 ) -> Result<(), BoxStdErr> {
-	info!("Serving Web API on {}", addr);
+	log::info!("Serving Web API on {}", addr);
 	let cors = warp::cors()
 		.allow_any_origin()
 		.allow_method(http::Method::GET);
@@ -163,7 +162,7 @@ fn get_connections(
 			let mut ids = Vec::new();
 			for val in ids_str.split(',') {
 				let id = u64::from_str(val).map_err(|_| {
-					error!("query 'ids' ('{}') contains invalid id", ids_str);
+					log::error!("query 'ids' ('{}') contains invalid id", ids_str);
 					warp::reject()
 				})?;
 				ids.push(id);
@@ -180,7 +179,7 @@ fn get_connections(
 			match super::StateFilter::from_str(state) {
 				Ok(state) => state,
 				Err(e) => {
-					error!("{}", e);
+					log::error!("{}", e);
 					return Err(warp::reject());
 				}
 			}

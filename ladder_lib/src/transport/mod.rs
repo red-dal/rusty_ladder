@@ -31,3 +31,30 @@ pub use inbound::Inbound;
 
 pub mod outbound;
 pub use outbound::Outbound;
+
+/// A dummy struct.
+///
+/// This is needed for using [`impl_variants`] macro.
+#[cfg_attr(test, derive(PartialEq, Eq))]
+#[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
+#[derive(Debug, Clone, Copy)]
+pub struct Empty;
+
+impl Empty {
+	#[inline]
+	#[allow(clippy::unnecessary_wraps)]
+	fn build(self) -> Result<Self, crate::prelude::BoxStdErr> {
+		Ok(self)
+	}
+}
+
+impl crate::protocol::DisplayInfo for Empty {
+	fn fmt_brief(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		// Do nothing
+		Ok(())
+	}
+
+	fn fmt_detail(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		Ok(())
+	}
+}

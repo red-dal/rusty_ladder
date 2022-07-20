@@ -141,14 +141,12 @@ pub struct AppOptions {
 	/// Set the log level. Must be one of ["debug", "info", "warn", "error"]
 	///
 	/// If not specified, "warn" will be used.
-	#[cfg(feature = "parse-url")]
 	#[structopt(long, name = "LOG_LEVEL")]
 	log: Option<log::LevelFilter>,
 
 	/// Set the output for log.
 	///
 	/// If not specified, STDOUT will be used (if tui is not enabled).
-	#[cfg(feature = "parse-url")]
 	#[structopt(long, name = "LOG_FILE")]
 	log_out: Option<String>,
 }
@@ -404,7 +402,8 @@ fn serve(opts: &AppOptions) -> Result<(), Error> {
 				opts.outbound.as_deref(),
 				opts.block.as_deref(),
 				opts.log,
-				opts.log_file.as_deref(),
+				opts.log_out.as_deref(),
+				opts.tui,
 			)?
 		}
 	};
@@ -418,6 +417,7 @@ fn serve(opts: &AppOptions) -> Result<(), Error> {
 	}
 	#[cfg(not(feature = "use-tui"))]
 	{
+		use ladder_lib::protocol::DisplayInfo;
 		if opts.tui {
 			return Err(Error::Input(
 				"feature `use-tui` must be enabled to use TUI".into(),

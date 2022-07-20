@@ -28,11 +28,14 @@ use crate::{
 		inbound::{AcceptError, AcceptResult, SessionInfo, TcpAcceptor},
 		AsyncReadWrite, DisplayInfo, GetProtocolName,
 	},
-	transport,
 	utils::OneOrMany,
 	Monitor,
 };
 use std::{future::Future, time::SystemTime};
+
+//-----------------------------------
+//               Details
+//-----------------------------------
 
 #[ladder_lib_macro::impl_variants(Details)]
 mod details {
@@ -170,7 +173,7 @@ pub struct Inbound {
 	pub network: network::Config,
 	pub err_policy: ErrorHandlingPolicy,
 	settings: Details,
-	transport: Option<transport::Inbound>,
+	transport: crate::transport::Inbound,
 }
 
 impl Inbound {
@@ -274,13 +277,9 @@ impl TcpAcceptor for Inbound {
 		stream: Box<dyn AsyncReadWrite>,
 		info: SessionInfo,
 	) -> Result<AcceptResult<'a>, AcceptError> {
-		let stream = if let Some(tran) = &self.transport {
-			tran.accept(stream).await?
-		} else {
-			stream
-		};
+		let stream = self.transport.accept(stream).await?;
 		let mut info = info;
-		info.is_transport_empty = self.transport.is_none();
+		info.is_transport_empty = matches!(&self.transport, crate::transport::Inbound::None(_));
 		self.settings.accept_tcp(stream, info).await
 	}
 }
@@ -369,9 +368,7 @@ impl Default for NetworkType {
 	}
 }
 
-//-----------------------------------
-//               Builder
-//-----------------------------------
+// ========================= Builder ========================
 
 #[derive(Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
@@ -386,7 +383,7 @@ pub struct Builder {
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub network_type: NetworkType,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub transport: Option<transport::inbound::Builder>,
+	pub transport: crate::transport::inbound::Builder,
 }
 
 impl Builder {
@@ -415,10 +412,7 @@ impl Builder {
 			settings: self.settings.build()?,
 			network,
 			err_policy: self.err_policy,
-			transport: self
-				.transport
-				.map(transport::inbound::Builder::build)
-				.transpose()?,
+			transport: self.transport.build()?,
 		})
 	}
 
@@ -510,24 +504,24 @@ impl DisplayInfo for Builder {
 			tag = &self.tag,
 			brief = &self.settings.brief(),
 		)?;
-		if let Some(tran) = &self.transport {
-			write!(f, "|{}]", tran.brief())
-		} else {
+		if self.transport.is_empty() {
 			f.write_str("]")
+		} else {
+			write!(f, "|{}]", self.transport.brief())
 		}
 	}
 
 	fn fmt_detail(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(
 			f,
-			"['{tag}'|{detail}",
+			"['{tag}'|{brief}",
 			tag = &self.tag,
-			detail = &self.settings.detail(),
+			brief = &self.settings.detail(),
 		)?;
-		if let Some(tran) = &self.transport {
-			write!(f, "|{}]", tran.detail())
-		} else {
+		if self.transport.is_empty() {
 			f.write_str("]")
+		} else {
+			write!(f, "|{}]", self.transport.detail())
 		}
 	}
 }

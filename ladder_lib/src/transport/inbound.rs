@@ -17,6 +17,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
+use super::Empty;
+use crate::protocol::AsyncReadWrite;
+use std::io;
+
+// -------------------------------------------------
+//                   Inbound
+// -------------------------------------------------
+
 #[ladder_lib_macro::impl_variants(Inbound)]
 mod settings {
 	use crate::{protocol::AsyncReadWrite, transport};
@@ -24,6 +32,7 @@ mod settings {
 	use tokio::io::{AsyncRead, AsyncWrite};
 
 	pub enum Inbound {
+		None(transport::inbound::Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(transport::tls::Inbound),
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -49,6 +58,23 @@ mod settings {
 }
 pub use settings::Inbound;
 
+impl Inbound {
+	#[inline]
+	pub fn is_none(&self) -> bool {
+		matches!(self, Self::None(_))
+	}
+}
+
+impl Default for Inbound {
+	fn default() -> Self {
+		Self::None(Empty)
+	}
+}
+
+// -------------------------------------------------
+//                   Builder
+// -------------------------------------------------
+
 #[ladder_lib_macro::impl_variants(Builder)]
 mod settings_builder {
 	use super::Inbound;
@@ -62,6 +88,7 @@ mod settings_builder {
 		serde(rename_all = "lowercase", tag = "type")
 	)]
 	pub enum Builder {
+		None(transport::inbound::Empty),
 		#[cfg(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls"))]
 		Tls(transport::tls::InboundBuilder),
 		#[cfg(any(feature = "ws-transport-openssl", feature = "ws-transport-rustls"))]
@@ -84,3 +111,29 @@ mod settings_builder {
 }
 
 pub use settings_builder::Builder;
+
+impl Default for Builder {
+	fn default() -> Self {
+		Builder::None(Empty)
+	}
+}
+
+impl Builder {
+	#[inline]
+	#[must_use]
+	pub fn is_empty(&self) -> bool {
+		matches!(self, Self::None(_))
+	}
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+#[allow(clippy::unnecessary_wraps)]
+impl Empty {
+	#[inline]
+	pub async fn accept<IO>(&self, stream: IO) -> io::Result<Box<dyn AsyncReadWrite>>
+	where
+		IO: 'static + Into<Box<dyn AsyncReadWrite>>,
+	{
+		Ok(stream.into())
+	}
+}
