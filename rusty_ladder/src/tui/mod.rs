@@ -97,6 +97,7 @@ pub fn run(
 	stop_receiver: mpsc::Receiver<()>,
 	update_interval: Duration,
 	monitor: Monitor,
+	rt: tokio::runtime::Handle,
 ) -> Result<(), BoxStdErr> {
 	setup_panic();
 	trace!(
@@ -113,7 +114,7 @@ pub fn run(
 	// let mut last_update_time = Instant::now();
 
 	let mut renderer = Renderer::new();
-	let mut data_manager = DataManager::new(monitor);
+	let mut data_manager = DataManager::new(rt, monitor);
 
 	let mut sort_column: Option<ColumnIndex> = None;
 

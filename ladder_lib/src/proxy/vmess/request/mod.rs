@@ -510,7 +510,7 @@ mod tests {
 
 		info!("{:#?}", request);
 
-		futures::executor::block_on(async move {
+		tokio::runtime::Runtime::new().unwrap().block_on(async move {
 			let buffer = request.encode_aead(&id, time);
 			let (auth_id, data) = buffer.split_at(16);
 			let data = data.to_owned();

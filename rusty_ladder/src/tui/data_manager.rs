@@ -21,17 +21,20 @@ use super::ColumnIndex;
 use ladder_lib::server::stat::{self, snapshot, Monitor, Snapshot};
 use log::trace;
 use std::cmp::Ordering;
+use tokio::runtime::Handle;
 
 pub(super) struct DataManager {
 	monitor: Monitor,
 	pub snapshots: Vec<Snapshot>,
+	rt: Handle,
 }
 
 impl DataManager {
-	pub fn new(monitor: Monitor) -> Self {
+	pub fn new(rt: Handle, monitor: Monitor) -> Self {
 		Self {
 			monitor,
 			snapshots: Vec::with_capacity(64),
+			rt,
 		}
 	}
 
@@ -40,7 +43,7 @@ impl DataManager {
 		{
 			let result = &mut self.snapshots;
 			let monitor = &self.monitor;
-			futures::executor::block_on(async {
+			self.rt.block_on(async {
 				// call async functions
 				monitor.query(&stat::Filter::new_all(), result);
 			});
