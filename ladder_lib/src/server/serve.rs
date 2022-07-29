@@ -30,7 +30,7 @@ use crate::{
 		inbound::{
 			AcceptError, AcceptResult, FinishHandshake, HandshakeError, SessionInfo, TcpAcceptor,
 		},
-		outbound::{Error as OutboundError, TcpConnector},
+		outbound::Error as OutboundError,
 		BufBytesStream, GetProtocolName,
 	},
 	utils::{

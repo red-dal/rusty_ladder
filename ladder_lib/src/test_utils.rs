@@ -27,6 +27,7 @@ use crate::{
 	utils::relay::{Counter, Relay},
 };
 use async_trait::async_trait;
+use futures::FutureExt;
 use std::{borrow::Cow, error::Error, io, time::Duration};
 use tokio::{
 	net::{TcpListener, TcpStream},
@@ -71,7 +72,11 @@ pub fn run_proxy_test<I, Out: TcpStreamConnector>(
 
 		let out_stream = TcpStream::connect(&in_addr).await.unwrap();
 		let mut out_stream = outbound
-			.connect_stream(Box::new(out_stream), &echo_addr.into(), &DummyTcpContext())
+			.connect_stream(
+				Box::new(|_, _| async move { Ok(out_stream.into()) }.boxed()),
+				echo_addr.into(),
+				&DummyTcpContext(),
+			)
 			.await
 			.unwrap();
 		proxy_stream_for_test(&mut out_stream).await;

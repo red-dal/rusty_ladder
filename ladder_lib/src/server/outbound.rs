@@ -22,10 +22,11 @@ use crate::protocol::outbound::udp;
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpConnector, TcpStreamConnector},
-		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
+		outbound::{Error as OutboundError, StreamFunc, TcpConnector, TcpStreamConnector},
+		BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
+use futures::FutureExt;
 
 // -------------------------------------------------
 //                   Details
@@ -36,8 +37,8 @@ mod details {
 	use super::OutboundError;
 	use crate::{
 		protocol::{
-			outbound::TcpStreamConnector, AsyncReadWrite, BufBytesStream, GetProtocolName,
-			ProxyContext, SocksAddr,
+			outbound::{StreamFunc, TcpStreamConnector},
+			BufBytesStream, GetProtocolName, ProxyContext, SocksAddr,
 		},
 		proxy,
 	};
@@ -73,14 +74,11 @@ mod details {
 		#[implement]
 		async fn connect_stream<'a>(
 			&'a self,
-			stream: Box<dyn AsyncReadWrite>,
-			_dst: &'a SocksAddr,
-			_context: &'a dyn ProxyContext,
+			stream_func: Box<StreamFunc<'a>>,
+			dst: SocksAddr,
+			context: &'a dyn ProxyContext,
 		) -> Result<BufBytesStream, OutboundError> {
 		}
-
-		#[implement]
-		fn addr(&self, context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {}
 	}
 
 	#[cfg(feature = "use-udp")]
@@ -172,6 +170,23 @@ impl Outbound {
 	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
 		self.settings.get_tcp_stream_connector()
 	}
+
+	pub(crate) async fn connect(
+		&self,
+		dst: &SocksAddr,
+		context: &dyn ProxyContext,
+	) -> Result<BufBytesStream, OutboundError> {
+		let transport = &self.transport;
+		self.settings
+			.connect_stream(
+				Box::new(|addr: SocksAddr, context: &dyn ProxyContext| {
+					async move { transport.connect(&addr, context).await }.boxed()
+				}),
+				dst.clone(),
+				context,
+			)
+			.await
+	}
 }
 
 #[cfg(feature = "use-udp")]
@@ -194,12 +209,16 @@ impl TcpConnector for Outbound {
 		dst: &SocksAddr,
 		context: &dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let stream = {
-			let proxy_addr = self.settings.addr(context)?;
-			let base_addr = proxy_addr.as_ref().unwrap_or(dst);
-			self.transport.connect(base_addr, context).await?
-		};
-		self.settings.connect_stream(stream, dst, context).await
+		let transport = &self.transport;
+		self.settings
+			.connect_stream(
+				Box::new(|addr: SocksAddr, context: &dyn ProxyContext| {
+					async move { transport.connect(&addr, context).await }.boxed()
+				}),
+				dst.clone(),
+				context,
+			)
+			.await
 	}
 }
 
@@ -207,20 +226,21 @@ impl TcpConnector for Outbound {
 impl TcpStreamConnector for Outbound {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
-		dst: &'a SocksAddr,
+		stream_func: Box<StreamFunc<'a>>,
+		dst: SocksAddr,
 		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		let stream = {
-			let proxy_addr = self.settings.addr(context)?;
-			let base_addr = proxy_addr.as_ref().unwrap_or(dst);
-			self.transport.connect_stream(stream, base_addr).await?
-		};
-		self.settings.connect_stream(stream, dst, context).await
-	}
-
-	fn addr(&self, context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
-		self.settings.addr(context)
+		let transport = &self.transport;
+		let stream_func = Box::new(move |addr: SocksAddr, context: &'a dyn ProxyContext| {
+			async move {
+				let stream = stream_func(addr.clone(), context).await?;
+				transport.connect_stream(stream, &addr).await
+			}
+			.boxed()
+		});
+		self.settings
+			.connect_stream(stream_func, dst, context)
+			.await
 	}
 }
 
