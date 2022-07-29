@@ -22,7 +22,7 @@ use crate::protocol::outbound::udp::{Connector, GetConnector};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpStreamConnector},
+		outbound::{Error as OutboundError, StreamFunc, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetConnectorError, GetProtocolName, ProxyContext,
 	},
 };
@@ -66,65 +66,56 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
-		dst: &'a SocksAddr,
+		stream_func: Box<StreamFunc<'a>>,
+		dst: SocksAddr,
 		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		debug_assert!(!self.chain.is_empty());
-		let links: Result<Vec<(&dyn TcpStreamConnector, SocksAddr, &Tag)>, Error> = self
-			.chain
-			.iter()
-			.map(|tag| {
-				context
-					.get_tcp_stream_connector(tag)
-					.map_err(Error::from)
-					.and_then(|con| {
-						con.addr(context)
-							.map_err(|err| Error::Node {
-								tag: tag.clone(),
-								err,
-							})?
-							.ok_or_else(|| Error::WrongType {
-								tag: tag.clone(),
-								proto_name: con.protocol_name().into(),
-							})
-							.map(|addr| (con, addr, tag))
-					})
-			})
-			.collect();
-		let mut links = links?.into_iter().peekable();
-		let mut stream = {
-			let (con, _addr, tag) = links.next().ok_or(Error::EmptyChain)?;
-			let next_addr = links.peek().map_or(dst, |(_, addr, _)| addr);
-			con.connect_stream(stream, next_addr, context)
-				.await
-				.map_err(|err| Error::Node {
-					tag: tag.clone(),
-					err,
-				})?
-		};
-		while let Some((con, _addr, tag)) = links.next() {
-			let next_addr = links.peek().map_or(dst, |(_, addr, _)| addr);
-			stream = con
-				.connect_stream(Box::new(stream), next_addr, context)
-				.await
-				.map_err(|err| Error::Node {
-					tag: tag.clone(),
-					err,
-				})?;
+		use futures::{future::BoxFuture, FutureExt};
+
+		fn connect_link<'a>(
+			dst: SocksAddr,
+			context: &'a dyn ProxyContext,
+			mut links: Vec<&'a dyn TcpStreamConnector>,
+			base_stream_func: Box<StreamFunc<'a>>,
+		) -> BoxFuture<'a, Result<Box<dyn AsyncReadWrite>, OutboundError>> {
+			let curr_link = links.pop();
+			async move {
+				if let Some(curr_link) = curr_link {
+					let stream = curr_link
+						.connect_stream(
+							Box::new(|addr: SocksAddr, context: &dyn ProxyContext| {
+								// Make base stream with current address.
+								async move {
+									let stream =
+										connect_link(addr, context, links, base_stream_func)
+											.await
+											.map_err(OutboundError::into_io_err)?;
+									Ok(stream)
+								}
+								.boxed()
+							}),
+							dst,
+							context,
+						)
+						.await?;
+					Ok(Box::new(stream) as Box<dyn AsyncReadWrite>)
+				} else {
+					base_stream_func(dst.clone(), context)
+						.await
+						.map_err(OutboundError::Io)
+				}
+			}
+			.boxed()
 		}
 
-		Ok(stream)
-	}
-
-	#[inline]
-	fn addr(&self, context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
-		let first_tag = self.chain.first().ok_or(Error::EmptyChain)?;
-		let first = context
-			.get_tcp_stream_connector(first_tag)
-			.map_err(Error::from)?;
-		let first_addr = first.addr(context)?.ok_or(Error::ConnectOverStream)?;
-		Ok(Some(first_addr))
+		debug_assert!(!self.chain.is_empty());
+		let mut links: Vec<&dyn TcpStreamConnector> = Vec::new();
+		for tag in &self.chain {
+			links.push(context.get_tcp_stream_connector(tag).map_err(Error::from)?);
+		}
+		connect_link(dst.clone(), context, links, stream_func)
+			.await
+			.map(Into::into)
 	}
 }
 
@@ -193,7 +184,8 @@ impl From<GetConnectorError> for Error {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::protocol::DisplayInfo;
+	use crate::protocol::{outbound::TcpConnector, CompositeBytesStream, DisplayInfo};
+	use futures::FutureExt;
 
 	#[test]
 	fn test_display_info() {
@@ -202,5 +194,158 @@ mod tests {
 		};
 		assert_eq!(format!("{}", s.brief()), "chain");
 		assert_eq!(format!("{}", s.detail()), "chain('in','middle','out')");
+	}
+
+	#[test]
+	fn test_connect_stream() {
+		use std::io;
+		use tokio::net::TcpStream;
+
+		struct DummyProxy {
+			tag: String,
+			addr: SocketAddr,
+		}
+
+		impl GetProtocolName for DummyProxy {
+			fn protocol_name(&self) -> &'static str {
+				"dummy"
+			}
+		}
+
+		#[async_trait]
+		impl TcpStreamConnector for DummyProxy {
+			async fn connect_stream<'a>(
+				&'a self,
+				stream_func: Box<StreamFunc<'a>>,
+				dst: SocksAddr,
+				context: &'a dyn ProxyContext,
+			) -> Result<BufBytesStream, OutboundError> {
+				let addr = SocksAddr::from(self.addr);
+				let mut stream = { stream_func(SocksAddr::from(self.addr), context).await? };
+				let tag = &self.tag;
+				stream
+					.write(format!("[({tag}) connecting to {addr} for {dst}]\n").as_bytes())
+					.await?;
+				Ok(stream.into())
+			}
+		}
+
+		struct DummpContext {
+			first: DummyProxy,
+			second: DummyProxy,
+			third: DummyProxy,
+		}
+
+		#[async_trait]
+		impl ProxyContext for DummpContext {
+			async fn lookup_host(&self, _domain: &str, _port: u16) -> io::Result<Vec<SocketAddr>> {
+				unreachable!()
+			}
+
+			async fn dial_tcp(&self, _addr: &SocksAddr) -> io::Result<TcpStream> {
+				unreachable!()
+			}
+
+			fn get_tcp_connector(&self, _tag: &str) -> Result<&dyn TcpConnector, GetConnectorError> {
+				unreachable!()
+			}
+
+			fn get_tcp_stream_connector(
+				&self,
+				tag: &str,
+			) -> Result<&dyn TcpStreamConnector, GetConnectorError> {
+				Ok(match tag {
+					"first" => &self.first,
+					"second" => &self.second,
+					"third" => &self.third,
+					_ => return Err(GetConnectorError::UnknownTag(tag.into())),
+				})
+			}
+		}
+
+		let context = DummpContext {
+			first: DummyProxy {
+				tag: "first".into(),
+				addr: "127.0.0.1:2222".parse().unwrap(),
+			},
+			second: DummyProxy {
+				tag: "second".into(),
+				addr: "127.0.0.1:3333".parse().unwrap(),
+			},
+			third: DummyProxy {
+				tag: "third".into(),
+				addr: "127.0.0.1:4444".parse().unwrap(),
+			},
+		};
+		let proxy = Settings {
+			chain: vec!["first".into(), "second".into(), "third".into()],
+		};
+		let (server, mut end) = tokio::io::duplex(1024);
+		let mut server = {
+			let (r, w) = tokio::io::split(server);
+			Box::new(CompositeBytesStream::new(r, w)) as Box<dyn AsyncReadWrite>
+		};
+		let task = async move {
+			let mut stream = proxy
+				.connect_stream(
+					Box::new(|addr: SocksAddr, _| {
+						async move {
+							server
+								.write(format!("[(base) connecting to {addr}]\n").as_bytes())
+								.await
+								.unwrap();
+							Ok(server)
+						}
+						.boxed()
+					}),
+					"localhost:9999".parse().unwrap(),
+					&context,
+				)
+				.await
+				.unwrap();
+
+			let mut data = Vec::<u8>::with_capacity(8 * 1024);
+			end.read_buf(&mut data).await.unwrap();
+
+			{
+				let mut data = std::str::from_utf8(&data).unwrap().lines();
+				assert_eq!(
+					data.next().unwrap(),
+					"[(base) connecting to 127.0.0.1:2222]"
+				);
+				assert_eq!(
+					data.next().unwrap(),
+					"[(first) connecting to 127.0.0.1:2222 for 127.0.0.1:3333]"
+				);
+				assert_eq!(
+					data.next().unwrap(),
+					"[(second) connecting to 127.0.0.1:3333 for 127.0.0.1:4444]"
+				);
+				assert_eq!(
+					data.next().unwrap(),
+					"[(third) connecting to 127.0.0.1:4444 for localhost:9999]"
+				);
+				assert!(data.next().is_none());
+			}
+
+			{
+				data.clear();
+				stream.write_all(b"hello world!").await.unwrap();
+				end.read_buf(&mut data).await.unwrap();
+				assert_eq!(
+					std::str::from_utf8(data.as_slice()).unwrap(),
+					"hello world!"
+				);
+
+				end.write_all(b"hello back to you!").await.unwrap();
+				data.clear();
+				stream.read_buf(&mut data).await.unwrap();
+				assert_eq!(
+					std::str::from_utf8(data.as_slice()).unwrap(),
+					"hello back to you!"
+				);
+			}
+		};
+		tokio::runtime::Runtime::new().unwrap().block_on(task);
 	}
 }
