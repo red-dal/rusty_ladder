@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{common::BufBytesStream, AsyncReadWrite, GetProtocolName, ProxyContext};
 use crate::prelude::*;
+use futures::future::BoxFuture;
 use std::io;
 
 #[cfg(feature = "use-udp")]
@@ -33,23 +34,34 @@ pub trait TcpConnector: Send + Sync {
 	) -> Result<BufBytesStream, Error>;
 }
 
+pub type StreamResult = io::Result<Box<dyn AsyncReadWrite>>;
+pub type StreamFunc<'a> =
+	dyn FnOnce(SocksAddr, &'a dyn ProxyContext) -> BoxFuture<'a, StreamResult> + Send + 'a;
+
 #[async_trait]
 pub trait TcpStreamConnector: GetProtocolName + Send + Sync {
+	/// Connect to `dst` through proxy.
+	///
+	/// `stream_func` is used to create the base stream. Example:
+	/// ```
+	/// use ladder_lib::protocol::{ ProxyContext, outbound::StreamFunc, SocksAddr };
+	/// use futures::FutureExt;
+	/// let stream_func: Box<StreamFunc<'_>> = Box::new(
+	///		|addr: SocksAddr, context: &dyn ProxyContext| {
+	///			async move {
+	///				// Do something here to connect to `addr`
+	///				// and return the Ok(stream)
+	///				todo!()
+	///			}.boxed()
+	///		}
+	/// );
+	/// ```
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
-		dst: &'a SocksAddr,
+		stream_func: Box<StreamFunc<'a>>,
+		dst: SocksAddr,
 		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, Error>;
-
-	/// Return the address for the proxy server for transport to connect to.
-	/// 
-	/// If [`None`] is returned, transport will directly connect to 
-	/// target address instead of the proxy server.
-	/// 
-	/// # Errors
-	/// Return an [`Error`] if outbound is not configured correctly.
-	fn addr(&self, context: &dyn ProxyContext) -> Result<Option<SocksAddr>, Error>;
 }
 
 #[derive(Debug, thiserror::Error)]
