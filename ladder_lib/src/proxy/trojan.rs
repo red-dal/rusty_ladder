@@ -48,7 +48,7 @@ See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpStreamConnector},
+		outbound::{Error as OutboundError, StreamFunc, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	utils::LazyWriteHalf,
@@ -110,7 +110,7 @@ impl SettingsBuilder {
 		}
 		#[cfg(not(any(feature = "tls-transport-openssl", feature = "tls-transport-rustls")))]
 		{
-			Err("TLS transport must be enabled for Trojan".into())
+			Err("TLS transport must be enabled for Trojan URL parsing".into())
 		}
 	}
 }
@@ -176,16 +176,12 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
-		dst: &'a SocksAddr,
-		_context: &'a dyn ProxyContext,
+		stream_func: Box<StreamFunc<'a>>,
+		dst: SocksAddr,
+		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		Ok(self.priv_connect(stream, dst).await?)
-	}
-
-	#[inline]
-	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
-		Ok(Some(self.addr.clone()))
+		let stream = stream_func(self.addr.clone(), context).await?;
+		self.priv_connect(stream, &dst).await
 	}
 }
 
@@ -379,7 +375,6 @@ enum Command {
 fn password_to_hex(password: &[u8], buf: &mut impl BufMut) {
 	let mut hasher = Sha224::new();
 	hasher.update(password);
-
 	let hash = hasher.finalize();
 	let hex = format!("{:056x}", hash);
 	buf.put_slice(hex.as_bytes());

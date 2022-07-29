@@ -29,7 +29,7 @@ use crate::protocol::outbound::udp::{Connector, GetConnector};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpStreamConnector},
+		outbound::{Error as OutboundError, StreamFunc, TcpStreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	proxy::socks5::utils::AUTH_FAILED,
@@ -243,16 +243,12 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
-		dst: &'a SocksAddr,
-		_context: &'a dyn ProxyContext,
+		stream_func: Box<StreamFunc<'a>>,
+		dst: SocksAddr,
+		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		self.priv_connect(stream, dst).await
-	}
-
-	#[inline]
-	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
-		Ok(Some(self.addr.clone()))
+		let stream = stream_func(self.addr.clone(), context).await?;
+		self.priv_connect(stream, &dst).await
 	}
 }
 

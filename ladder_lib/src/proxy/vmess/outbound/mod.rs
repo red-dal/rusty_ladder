@@ -23,6 +23,7 @@ mod udp;
 
 use super::utils::{SecurityType, SecurityTypeBuilder};
 use super::{Command, HeaderMode, Request, PROTOCOL_NAME};
+use crate::protocol::outbound::StreamFunc;
 use crate::protocol::{AsyncReadWrite, BufBytesStream};
 use crate::{
 	prelude::*,
@@ -252,16 +253,12 @@ impl GetProtocolName for Settings {
 impl TcpStreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
-		stream: Box<dyn AsyncReadWrite>,
-		dst: &'a SocksAddr,
-		_context: &'a dyn ProxyContext,
+		stream_func: Box<StreamFunc<'a>>,
+		dst: SocksAddr,
+		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
-		Ok(self.priv_connect(stream, dst).await?)
-	}
-
-	#[inline]
-	fn addr(&self, _context: &dyn ProxyContext) -> Result<Option<SocksAddr>, OutboundError> {
-		Ok(Some(self.addr.clone()))
+		let stream = stream_func(self.addr.clone(), context).await?;
+		self.priv_connect(stream, &dst).await
 	}
 }
 
