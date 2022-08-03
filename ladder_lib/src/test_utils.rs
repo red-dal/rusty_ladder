@@ -20,8 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, HandshakeError, SessionInfo, TcpAcceptor},
-		outbound::{TcpConnector, TcpStreamConnector},
+		inbound::{AcceptError, Handshake, HandshakeError, SessionInfo, StreamAcceptor},
+		outbound::{Connector, StreamConnector},
 		AsyncReadWrite, BufBytesStream, GetConnectorError, ProxyContext,
 	},
 	utils::relay::{Counter, Relay},
@@ -43,12 +43,12 @@ const LARGE_CHUNK_SIZE: usize = 8 * 1024;
 
 const TIMEOUT_DUR: Duration = Duration::from_millis(400);
 
-pub fn run_proxy_test<I, Out: TcpStreamConnector>(
+pub fn run_proxy_test<I, Out: StreamConnector>(
 	tag: Cow<'static, str>,
 	inbound: I,
 	out_func: impl Fn(SocksAddr) -> Out,
 ) where
-	I: 'static + TcpAcceptor + Send + Sync,
+	I: 'static + StreamAcceptor + Send + Sync,
 {
 	init_log();
 
@@ -152,12 +152,12 @@ async fn handle_server<I>(
 	inbound: I,
 ) -> Result<(), Box<dyn Error + Send + Sync>>
 where
-	I: 'static + TcpAcceptor + Send + Sync,
+	I: 'static + StreamAcceptor + Send + Sync,
 {
 	let addr = std::net::Ipv4Addr::LOCALHOST;
 	let (stream, _) = listener.accept().await?;
 	let accept_result = inbound
-		.accept_tcp(
+		.accept_stream(
 			Box::new(stream),
 			SessionInfo {
 				addr: crate::network::Addrs {
@@ -191,7 +191,7 @@ where
 	};
 
 	match accept_result {
-		AcceptResult::Tcp(handshake_handler, dst_addr) => {
+		Handshake::Stream(handshake_handler, dst_addr) => {
 			let target_addr = match dst_addr.dest {
 				SocksDestination::Name(_) => {
 					return Err("Cannot use domain in this test".into());
@@ -217,7 +217,7 @@ where
 			.await?;
 		}
 		#[cfg(feature = "use-udp")]
-		AcceptResult::Udp(_) => {
+		Handshake::Datagram(_) => {
 			panic!("Cannot test UDP yet")
 		}
 	}
@@ -239,14 +239,14 @@ impl ProxyContext for DummyTcpContext {
 		}
 	}
 
-	fn get_tcp_connector(&self, _tag: &str) -> Result<&dyn TcpConnector, GetConnectorError> {
+	fn get_tcp_connector(&self, _tag: &str) -> Result<&dyn Connector, GetConnectorError> {
 		unreachable!()
 	}
 
 	fn get_tcp_stream_connector(
 		&self,
 		_tag: &str,
-	) -> Result<&dyn TcpStreamConnector, GetConnectorError> {
+	) -> Result<&dyn StreamConnector, GetConnectorError> {
 		unreachable!()
 	}
 }

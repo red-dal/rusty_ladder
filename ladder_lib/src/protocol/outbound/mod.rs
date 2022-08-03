@@ -26,7 +26,7 @@ use std::io;
 pub mod udp;
 
 #[async_trait]
-pub trait TcpConnector: Send + Sync {
+pub trait Connector: Send + Sync {
 	async fn connect(
 		&self,
 		dst: &SocksAddr,
@@ -39,7 +39,7 @@ pub type StreamFunc<'a> =
 	dyn FnOnce(SocksAddr, &'a dyn ProxyContext) -> BoxFuture<'a, StreamResult> + Send + 'a;
 
 #[async_trait]
-pub trait TcpStreamConnector: GetProtocolName + Send + Sync {
+pub trait StreamConnector: GetProtocolName + Send + Sync {
 	/// Connect to `dst` through proxy.
 	///
 	/// `stream_func` is used to create the base stream. Example:

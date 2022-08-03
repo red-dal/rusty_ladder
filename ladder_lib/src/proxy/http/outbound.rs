@@ -24,7 +24,7 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, TcpStreamConnector},
+		outbound::{Error as OutboundError, StreamFunc, StreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
@@ -95,7 +95,7 @@ pub struct Settings {
 impl Settings {
 	#[must_use]
 	#[inline]
-	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn StreamConnector> {
 		Some(self)
 	}
 
@@ -192,7 +192,7 @@ impl crate::protocol::outbound::udp::GetConnector for Settings {
 }
 
 #[async_trait]
-impl TcpStreamConnector for Settings {
+impl StreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
 		stream_func: Box<StreamFunc<'a>>,

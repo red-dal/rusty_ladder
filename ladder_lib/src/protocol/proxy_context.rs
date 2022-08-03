@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crate::{
 	prelude::*,
-	protocol::outbound::{TcpConnector, TcpStreamConnector},
+	protocol::outbound::{Connector, StreamConnector},
 };
 use std::io;
 use thiserror::Error;
@@ -30,7 +30,7 @@ pub trait ProxyContext: Send + Sync {
 	async fn lookup_host(&self, domain: &str, port: u16) -> io::Result<Vec<SocketAddr>>;
 	async fn dial_tcp(&self, addr: &SocksAddr) -> io::Result<TcpStream>;
 
-	/// Returns a [`Arc<dyn TcpConnector>`].
+	/// Returns a [`Arc<dyn Connector>`].
 	///
 	/// # Errors
 	///
@@ -40,9 +40,9 @@ pub trait ProxyContext: Send + Sync {
 	///
 	/// - [`GetConnectorError::NotSupported`] if connector with `tag` is found but does
 	///   not support TCP.
-	fn get_tcp_connector(&self, tag: &str) -> Result<&dyn TcpConnector, GetConnectorError>;
+	fn get_tcp_connector(&self, tag: &str) -> Result<&dyn Connector, GetConnectorError>;
 
-	/// Returns a [`Arc<dyn TcpStreamConnector>`].
+	/// Returns a [`Arc<dyn StreamConnector>`].
 	///
 	/// # Errors
 	///
@@ -55,7 +55,7 @@ pub trait ProxyContext: Send + Sync {
 	fn get_tcp_stream_connector(
 		&self,
 		tag: &str,
-	) -> Result<&dyn TcpStreamConnector, GetConnectorError>;
+	) -> Result<&dyn StreamConnector, GetConnectorError>;
 }
 
 #[derive(Debug, Error)]

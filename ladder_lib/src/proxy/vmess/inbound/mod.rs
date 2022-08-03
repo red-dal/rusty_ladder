@@ -30,7 +30,7 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, SessionInfo, TcpAcceptor},
+		inbound::{AcceptError, Handshake, SimpleHandshake, SessionInfo, StreamAcceptor},
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -152,13 +152,13 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpAcceptor for Settings {
+impl StreamAcceptor for Settings {
 	#[inline]
-	async fn accept_tcp<'a>(
+	async fn accept_stream<'a>(
 		&'a self,
 		mut stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
-	) -> Result<AcceptResult<'a>, AcceptError> {
+	) -> Result<Handshake<'a>, AcceptError> {
 		debug!("Accepting VMess handshake");
 
 		let mut auth_id = AuthId::default();
@@ -277,14 +277,14 @@ fn make_result<'a, R, W>(
 	dst: SocksAddr,
 	read_half: tcp::ReadHalf<R>,
 	write_half: tcp::WriteHalf<W>,
-) -> Result<AcceptResult<'a>, AcceptError>
+) -> Result<Handshake<'a>, AcceptError>
 where
 	R: 'static + AsyncRead + Unpin + Send + Sync,
 	W: 'static + AsyncWrite + Unpin + Send + Sync,
 {
 	match cmd {
-		Command::Tcp => Ok(AcceptResult::Tcp(
-			Box::new(PlainHandshakeHandler(BufBytesStream {
+		Command::Tcp => Ok(Handshake::Stream(
+			Box::new(SimpleHandshake(BufBytesStream {
 				r: read_half.into_boxed(),
 				w: write_half.into_boxed(),
 			})),
@@ -294,7 +294,7 @@ where
 			#[cfg(feature = "use-udp")]
 			{
 				let stream = udp::new_stream(read_half, write_half, dst);
-				Ok(AcceptResult::Udp(stream))
+				Ok(Handshake::Datagram(stream))
 			}
 			#[cfg(not(feature = "use-udp"))]
 			{

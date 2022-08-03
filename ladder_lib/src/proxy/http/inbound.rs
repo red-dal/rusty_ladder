@@ -28,7 +28,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{
-			AcceptError, AcceptResult, FinishHandshake, HandshakeError, SessionInfo, TcpAcceptor,
+			AcceptError, Handshake, Finish, HandshakeError, SessionInfo, StreamAcceptor,
 		},
 		outbound::Error as OutboundError,
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
@@ -146,13 +146,13 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpAcceptor for Settings {
+impl StreamAcceptor for Settings {
 	#[inline]
-	async fn accept_tcp<'a>(
+	async fn accept_stream<'a>(
 		&'a self,
 		mut stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
-	) -> Result<AcceptResult<'a>, AcceptError> {
+	) -> Result<Handshake<'a>, AcceptError> {
 		let (mut req, leftover) = match read_request(&mut stream).await {
 			Ok(r) => r,
 			Err(ReadError::Io(e)) => return Err(AcceptError::Io(e)),
@@ -198,7 +198,7 @@ impl TcpAcceptor for Settings {
 		}
 
 		let handshake = HandshakeFinisher::new(stream, req, leftover);
-		Ok(AcceptResult::Tcp(Box::new(handshake), dst))
+		Ok(Handshake::Stream(Box::new(handshake), dst))
 	}
 }
 
@@ -229,7 +229,7 @@ impl HandshakeFinisher {
 }
 
 #[async_trait]
-impl FinishHandshake for HandshakeFinisher {
+impl Finish for HandshakeFinisher {
 	async fn finish(mut self: Box<Self>) -> Result<BufBytesStream, HandshakeError> {
 		let mut sent_buf = Vec::new();
 		let mut client_stream = self.stream;

@@ -21,7 +21,7 @@ use super::Server;
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{TcpConnector, TcpStreamConnector},
+		outbound::{Connector, StreamConnector},
 		GetConnectorError, GetProtocolName, ProxyContext, SocksAddr, SocksDestination,
 	},
 };
@@ -59,7 +59,7 @@ impl ProxyContext for Server {
 		dial_res
 	}
 
-	fn get_tcp_connector(&self, tag: &str) -> Result<&dyn TcpConnector, GetConnectorError> {
+	fn get_tcp_connector(&self, tag: &str) -> Result<&dyn Connector, GetConnectorError> {
 		let outbound = self
 			.get_outbound(tag)
 			.ok_or_else(|| GetConnectorError::UnknownTag(Tag::from(tag)))?;
@@ -69,7 +69,7 @@ impl ProxyContext for Server {
 	fn get_tcp_stream_connector(
 		&self,
 		tag: &str,
-	) -> Result<&dyn TcpStreamConnector, GetConnectorError> {
+	) -> Result<&dyn StreamConnector, GetConnectorError> {
 		let outbound = self
 			.get_outbound(tag)
 			.ok_or_else(|| GetConnectorError::UnknownTag(Tag::from(tag)))?;

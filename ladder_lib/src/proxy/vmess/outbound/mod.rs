@@ -28,7 +28,7 @@ use crate::protocol::{AsyncReadWrite, BufBytesStream};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, TcpStreamConnector},
+		outbound::{Error as OutboundError, StreamConnector},
 		GetProtocolName, ProxyContext,
 	},
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -167,7 +167,7 @@ pub struct Settings {
 impl Settings {
 	#[must_use]
 	#[inline]
-	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn StreamConnector> {
 		Some(self)
 	}
 
@@ -250,7 +250,7 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpStreamConnector for Settings {
+impl StreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
 		stream_func: Box<StreamFunc<'a>>,

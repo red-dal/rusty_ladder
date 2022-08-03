@@ -37,32 +37,77 @@ pub struct SessionInfo {
 	pub is_transport_empty: bool,
 }
 
-// TODO: More description
 #[async_trait]
-pub trait TcpAcceptor: GetProtocolName {
-	async fn accept_tcp<'a>(
+pub trait StreamAcceptor: GetProtocolName {
+	/// Accepting proxy on `stream`.
+	///
+	/// # Examples
+	/// ```
+	/// use ladder_lib::protocol::{ 
+	///		inbound::{ StreamAcceptor, AcceptError, Handshake, SessionInfo },
+	///		CompositeBytesStream, AsyncReadWrite, GetProtocolName
+	///	};
+	/// use async_trait::async_trait;
+	/// use std::io::Cursor;
+	///
+	/// struct Example;
+	///
+	/// impl GetProtocolName for Example {
+	///		fn protocol_name(&self) -> &'static str {
+	///			"example"
+	///		}
+	/// }
+	///
+	/// // Implementing trait.
+	/// #[async_trait]
+	/// impl StreamAcceptor for Example {
+	///		async fn accept_stream<'a>(
+	///			&'a self,
+	///			stream: Box<dyn AsyncReadWrite>,
+	///			info: SessionInfo,
+	///		) -> Result<Handshake<'a>, AcceptError> { 
+	///			// Try to determine destination from client request.
+	///			unimplemented!()
+	///		}
+	/// }
+	///
+	/// // Using trait.
+	/// async move {
+	///		let info = unimplemented!();
+	///		let stream = unimplemented!();
+	///		let handshake = Example.accept_stream(stream, info).await;
+	///		if let Ok(Handshake::Stream(handshake, dst)) = handshake {
+	///			// `dst` is the destination requested by client.
+	///			// Now do something here...
+	///			// Then finish handshake with `finish` or `finish_err`.
+	///			let stream = handshake.finish().await.unwrap();
+	///		}
+	/// };
+	/// ```
+	async fn accept_stream<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
 		info: SessionInfo,
-	) -> Result<AcceptResult<'a>, AcceptError>;
+	) -> Result<Handshake<'a>, AcceptError>;
 }
 
-pub enum AcceptResult<'a> {
-	Tcp(Box<dyn FinishHandshake + 'a>, SocksAddr),
+pub enum Handshake<'a> {
+	/// (proxy handshake, destination address requested by client)
+	Stream(Box<dyn Finish + 'a>, SocksAddr),
 	#[cfg(feature = "use-udp")]
-	Udp(udp::DatagramStream),
+	Datagram(udp::DatagramStream),
 }
 
 #[async_trait]
-pub trait FinishHandshake: Send {
+pub trait Finish: Send {
 	async fn finish(self: Box<Self>) -> Result<BufBytesStream, HandshakeError>;
 	async fn finish_err(self: Box<Self>, err: &outbound::Error) -> Result<(), HandshakeError>;
 }
 
-pub struct PlainHandshakeHandler(pub BufBytesStream);
+pub struct SimpleHandshake(pub BufBytesStream);
 
 #[async_trait]
-impl FinishHandshake for PlainHandshakeHandler {
+impl Finish for SimpleHandshake {
 	async fn finish(self: Box<Self>) -> Result<BufBytesStream, HandshakeError> {
 		return Ok(self.0);
 	}

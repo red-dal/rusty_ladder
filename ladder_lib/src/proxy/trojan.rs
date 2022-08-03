@@ -48,7 +48,7 @@ See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, TcpStreamConnector},
+		outbound::{Error as OutboundError, StreamFunc, StreamConnector},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	utils::LazyWriteHalf,
@@ -133,7 +133,7 @@ pub struct Settings {
 impl Settings {
 	#[must_use]
 	#[inline]
-	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn StreamConnector> {
 		Some(self)
 	}
 
@@ -173,7 +173,7 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpStreamConnector for Settings {
+impl StreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
 		stream_func: Box<StreamFunc<'a>>,

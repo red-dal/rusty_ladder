@@ -25,7 +25,7 @@ use crate::{
 	network,
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, SessionInfo, TcpAcceptor},
+		inbound::{AcceptError, Handshake, SessionInfo, StreamAcceptor},
 		AsyncReadWrite, DisplayInfo, GetProtocolName,
 	},
 	utils::OneOrMany,
@@ -41,7 +41,7 @@ use std::{future::Future, time::SystemTime};
 mod details {
 	use crate::{
 		protocol::{
-			inbound::{AcceptError, AcceptResult, SessionInfo, TcpAcceptor},
+			inbound::{AcceptError, Handshake, SessionInfo, StreamAcceptor},
 			AsyncReadWrite, GetProtocolName, Network,
 		},
 		proxy,
@@ -71,13 +71,13 @@ mod details {
 	}
 
 	#[async_trait]
-	impl TcpAcceptor for Details {
+	impl StreamAcceptor for Details {
 		#[implement]
-		async fn accept_tcp<'a>(
+		async fn accept_stream<'a>(
 			&'a self,
 			stream: Box<dyn AsyncReadWrite>,
 			info: SessionInfo,
-		) -> Result<AcceptResult<'a>, AcceptError> {
+		) -> Result<Handshake<'a>, AcceptError> {
 		}
 	}
 }
@@ -271,16 +271,16 @@ impl GetProtocolName for Inbound {
 }
 
 #[async_trait]
-impl TcpAcceptor for Inbound {
-	async fn accept_tcp<'a>(
+impl StreamAcceptor for Inbound {
+	async fn accept_stream<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
 		info: SessionInfo,
-	) -> Result<AcceptResult<'a>, AcceptError> {
+	) -> Result<Handshake<'a>, AcceptError> {
 		let stream = self.transport.accept(stream).await?;
 		let mut info = info;
 		info.is_transport_empty = matches!(&self.transport, crate::transport::Inbound::None(_));
-		self.settings.accept_tcp(stream, info).await
+		self.settings.accept_stream(stream, info).await
 	}
 }
 

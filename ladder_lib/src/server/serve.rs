@@ -28,7 +28,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{
-			AcceptError, AcceptResult, FinishHandshake, HandshakeError, SessionInfo, TcpAcceptor,
+			AcceptError, Handshake, Finish, HandshakeError, SessionInfo, StreamAcceptor,
 		},
 		outbound::Error as OutboundError,
 		BufBytesStream, GetProtocolName,
@@ -179,7 +179,7 @@ impl ServerCallback {
 		#[cfg(feature = "use-udp")]
 		let udp_session_timeout = self.udp_session_timeout;
 		async move {
-			let accept_res = match inbound.accept_tcp(args.stream, info).await {
+			let accept_res = match inbound.accept_stream(args.stream, info).await {
 				Ok(res) => res,
 				Err(e) => {
 					match e {
@@ -208,7 +208,7 @@ impl ServerCallback {
 			};
 
 			match accept_res {
-				AcceptResult::Tcp(handshake_handler, dst) => {
+				Handshake::Stream(handshake_handler, dst) => {
 					StreamSession {
 						server: &server,
 						inbound: &inbound,
@@ -223,7 +223,7 @@ impl ServerCallback {
 					.await
 				}
 				#[cfg(feature = "use-udp")]
-				AcceptResult::Udp(inbound_stream) => {
+				Handshake::Datagram(inbound_stream) => {
 					let monitor = args.sh.as_ref().map(|h| h.monitor().clone());
 					udp::dispatch(
 						inbound_stream,
@@ -278,7 +278,7 @@ struct StreamSession<'a> {
 	id: String,
 	stat_handle: Option<SessionHandle>,
 	src: &'a SocketAddr,
-	handshake_handler: Box<dyn FinishHandshake + 'a>,
+	handshake_handler: Box<dyn Finish + 'a>,
 	dst: &'a SocksAddr,
 }
 

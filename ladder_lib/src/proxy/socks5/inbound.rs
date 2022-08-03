@@ -28,7 +28,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		inbound::{
-			AcceptError, AcceptResult, FinishHandshake, HandshakeError, SessionInfo, TcpAcceptor,
+			AcceptError, Handshake, Finish, HandshakeError, SessionInfo, StreamAcceptor,
 		},
 		outbound::Error as OutboundError,
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
@@ -223,13 +223,13 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpAcceptor for Settings {
+impl StreamAcceptor for Settings {
 	#[inline]
-	async fn accept_tcp<'a>(
+	async fn accept_stream<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
 		info: SessionInfo,
-	) -> Result<AcceptResult<'a>, AcceptError> {
+	) -> Result<Handshake<'a>, AcceptError> {
 		debug!("Performing SOCKS5 handshake with client ({info:?})...");
 		let mut stream = BufBytesStream::from(stream);
 		let mut buf = Vec::with_capacity(HANDSHAKE_BUFFER_CAPACITY);
@@ -319,7 +319,7 @@ impl TcpAcceptor for Settings {
 			}
 		}
 		// Send reply later
-		Ok(AcceptResult::Tcp(
+		Ok(Handshake::Stream(
 			Box::new(HandshakeHandle { inner: stream }),
 			request.addr,
 		))
@@ -349,7 +349,7 @@ async fn reply_error<W: AsyncWrite + Unpin>(
 #[cfg(feature = "use-udp")]
 mod udp {
 	use super::{
-		reply_error, AcceptError, AcceptResult, Error, Reply, ReplyCode, Request, Settings,
+		reply_error, AcceptError, Handshake, Error, Reply, ReplyCode, Request, Settings,
 	};
 	use crate::{
 		prelude::BoxStdErr,
@@ -379,7 +379,7 @@ mod udp {
 			buf: &mut Vec<u8>,
 			local_addr: &SocketAddr,
 			is_transport_empty: bool,
-		) -> Result<AcceptResult<'a>, AcceptError> {
+		) -> Result<Handshake<'a>, AcceptError> {
 			if is_transport_empty {
 				// Do nothing
 			} else {
@@ -428,7 +428,7 @@ mod udp {
 				udp_relay_addr
 			);
 
-			return Ok(AcceptResult::Udp(sock));
+			return Ok(Handshake::Datagram(sock));
 		}
 	}
 
@@ -671,7 +671,7 @@ struct HandshakeHandle {
 }
 
 #[async_trait]
-impl FinishHandshake for HandshakeHandle {
+impl Finish for HandshakeHandle {
 	async fn finish(mut self: Box<Self>) -> Result<BufBytesStream, HandshakeError> {
 		write_reply(&mut self.inner, ReplyCode::Succeeded).await?;
 		Ok(self.inner)

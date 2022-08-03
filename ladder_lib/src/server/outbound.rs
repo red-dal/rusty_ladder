@@ -22,7 +22,7 @@ use crate::protocol::outbound::udp;
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, TcpConnector, TcpStreamConnector},
+		outbound::{Error as OutboundError, StreamFunc, Connector, StreamConnector},
 		BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
@@ -37,7 +37,7 @@ mod details {
 	use super::OutboundError;
 	use crate::{
 		protocol::{
-			outbound::{StreamFunc, TcpStreamConnector},
+			outbound::{StreamFunc, StreamConnector},
 			BufBytesStream, GetProtocolName, ProxyContext, SocksAddr,
 		},
 		proxy,
@@ -70,7 +70,7 @@ mod details {
 	}
 
 	#[async_trait]
-	impl TcpStreamConnector for Details {
+	impl StreamConnector for Details {
 		#[implement]
 		async fn connect_stream<'a>(
 			&'a self,
@@ -93,7 +93,7 @@ mod details {
 	impl Details {
 		#[must_use]
 		#[implement]
-		pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {}
+		pub fn get_tcp_stream_connector(&self) -> Option<&dyn StreamConnector> {}
 	}
 }
 
@@ -167,7 +167,7 @@ pub struct Outbound {
 
 impl Outbound {
 	#[must_use]
-	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn StreamConnector> {
 		self.settings.get_tcp_stream_connector()
 	}
 
@@ -203,7 +203,7 @@ impl GetProtocolName for Outbound {
 }
 
 #[async_trait]
-impl TcpConnector for Outbound {
+impl Connector for Outbound {
 	async fn connect(
 		&self,
 		dst: &SocksAddr,
@@ -223,7 +223,7 @@ impl TcpConnector for Outbound {
 }
 
 #[async_trait]
-impl TcpStreamConnector for Outbound {
+impl StreamConnector for Outbound {
 	async fn connect_stream<'a>(
 		&'a self,
 		stream_func: Box<StreamFunc<'a>>,

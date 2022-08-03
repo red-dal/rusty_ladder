@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::{BoxBackgroundFut, DnsError, DnsServerAddr, Server, TokioToFutureAdapter};
 use crate::{
 	prelude::*,
-	protocol::{outbound::TcpConnector, BufBytesStream, ProxyContext},
+	protocol::{outbound::Connector, BufBytesStream, ProxyContext},
 };
 use futures::{FutureExt, TryFutureExt};
 use std::io;

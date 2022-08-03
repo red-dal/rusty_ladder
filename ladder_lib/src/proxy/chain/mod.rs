@@ -22,7 +22,7 @@ use crate::protocol::outbound::udp::{Connector, GetConnector};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, TcpStreamConnector},
+		outbound::{Error as OutboundError, StreamFunc, StreamConnector},
 		AsyncReadWrite, BufBytesStream, GetConnectorError, GetProtocolName, ProxyContext,
 	},
 };
@@ -51,7 +51,7 @@ impl Settings {
 	#[must_use]
 	#[inline]
 	#[allow(clippy::unused_self)]
-	pub fn get_tcp_stream_connector(&self) -> Option<&dyn TcpStreamConnector> {
+	pub fn get_tcp_stream_connector(&self) -> Option<&dyn StreamConnector> {
 		None
 	}
 }
@@ -63,7 +63,7 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpStreamConnector for Settings {
+impl StreamConnector for Settings {
 	async fn connect_stream<'a>(
 		&'a self,
 		stream_func: Box<StreamFunc<'a>>,
@@ -75,7 +75,7 @@ impl TcpStreamConnector for Settings {
 		fn connect_link<'a>(
 			dst: SocksAddr,
 			context: &'a dyn ProxyContext,
-			mut links: Vec<&'a dyn TcpStreamConnector>,
+			mut links: Vec<&'a dyn StreamConnector>,
 			base_stream_func: Box<StreamFunc<'a>>,
 		) -> BoxFuture<'a, Result<Box<dyn AsyncReadWrite>, OutboundError>> {
 			let curr_link = links.pop();
@@ -109,7 +109,7 @@ impl TcpStreamConnector for Settings {
 		}
 
 		debug_assert!(!self.chain.is_empty());
-		let mut links: Vec<&dyn TcpStreamConnector> = Vec::new();
+		let mut links: Vec<&dyn StreamConnector> = Vec::new();
 		for tag in &self.chain {
 			links.push(context.get_tcp_stream_connector(tag).map_err(Error::from)?);
 		}
@@ -184,7 +184,7 @@ impl From<GetConnectorError> for Error {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::protocol::{outbound::TcpConnector, CompositeBytesStream, DisplayInfo};
+	use crate::protocol::{outbound::Connector, CompositeBytesStream, DisplayInfo};
 	use futures::FutureExt;
 
 	#[test]
@@ -213,7 +213,7 @@ mod tests {
 		}
 
 		#[async_trait]
-		impl TcpStreamConnector for DummyProxy {
+		impl StreamConnector for DummyProxy {
 			async fn connect_stream<'a>(
 				&'a self,
 				stream_func: Box<StreamFunc<'a>>,
@@ -246,14 +246,14 @@ mod tests {
 				unreachable!()
 			}
 
-			fn get_tcp_connector(&self, _tag: &str) -> Result<&dyn TcpConnector, GetConnectorError> {
+			fn get_tcp_connector(&self, _tag: &str) -> Result<&dyn Connector, GetConnectorError> {
 				unreachable!()
 			}
 
 			fn get_tcp_stream_connector(
 				&self,
 				tag: &str,
-			) -> Result<&dyn TcpStreamConnector, GetConnectorError> {
+			) -> Result<&dyn StreamConnector, GetConnectorError> {
 				Ok(match tag {
 					"first" => &self.first,
 					"second" => &self.second,

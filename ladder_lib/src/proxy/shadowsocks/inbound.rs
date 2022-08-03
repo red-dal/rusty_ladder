@@ -21,7 +21,7 @@ use super::{method_to_algo, tcp, utils::salt_len, Error, Method, PROTOCOL_NAME};
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, SessionInfo, TcpAcceptor},
+		inbound::{AcceptError, Handshake, SimpleHandshake, SessionInfo, StreamAcceptor},
 		socks_addr::ReadError,
 		AsyncReadWrite, BufBytesStream, CompositeBytesStream, GetProtocolName,
 	},
@@ -107,13 +107,13 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpAcceptor for Settings {
+impl StreamAcceptor for Settings {
 	#[inline]
-	async fn accept_tcp<'a>(
+	async fn accept_stream<'a>(
 		&'a self,
 		mut stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
-	) -> Result<AcceptResult<'a>, AcceptError> {
+	) -> Result<Handshake<'a>, AcceptError> {
 		trace!("Accepting shadowsocks inbound");
 		if let Some(s) = &self.crypto {
 			// with encryption
@@ -147,8 +147,8 @@ impl TcpAcceptor for Settings {
 				w: Box::new(crypt_write),
 			};
 
-			Ok(AcceptResult::Tcp(
-				Box::new(PlainHandshakeHandler(crypt_stream)),
+			Ok(Handshake::Stream(
+				Box::new(SimpleHandshake(crypt_stream)),
 				addr,
 			))
 		} else {
@@ -166,8 +166,8 @@ impl TcpAcceptor for Settings {
 			};
 			trace!("Shadowsocks target address: {}", addr);
 
-			Ok(AcceptResult::Tcp(
-				Box::new(PlainHandshakeHandler(BufBytesStream::from(stream))),
+			Ok(Handshake::Stream(
+				Box::new(SimpleHandshake(BufBytesStream::from(stream))),
 				addr,
 			))
 		}

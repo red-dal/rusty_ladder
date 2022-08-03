@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, AcceptResult, PlainHandshakeHandler, SessionInfo, TcpAcceptor},
+		inbound::{AcceptError, Handshake, SimpleHandshake, SessionInfo, StreamAcceptor},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, Network,
 	},
 };
@@ -86,16 +86,16 @@ impl GetProtocolName for Settings {
 }
 
 #[async_trait]
-impl TcpAcceptor for Settings {
+impl StreamAcceptor for Settings {
 	#[inline]
-	async fn accept_tcp<'a>(
+	async fn accept_stream<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
-	) -> Result<AcceptResult<'a>, AcceptError> {
+	) -> Result<Handshake<'a>, AcceptError> {
 		if self.network.use_tcp() {
-			Ok(AcceptResult::Tcp(
-				Box::new(PlainHandshakeHandler(BufBytesStream::from(stream))),
+			Ok(Handshake::Stream(
+				Box::new(SimpleHandshake(BufBytesStream::from(stream))),
 				self.dst.clone(),
 			))
 		} else {
