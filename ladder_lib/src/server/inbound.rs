@@ -17,10 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{
-	stat::{Id, RegisterArgs, SessionHandle},
-	Error,
-};
 use crate::{
 	network,
 	prelude::*,
@@ -29,9 +25,7 @@ use crate::{
 		AsyncReadWrite, DisplayInfo, GetProtocolName,
 	},
 	utils::OneOrMany,
-	Monitor,
 };
-use std::{future::Future, time::SystemTime};
 
 //-----------------------------------
 //               Details
@@ -182,85 +176,6 @@ impl Inbound {
 	pub fn protocol_name(&self) -> &'static str {
 		self.settings.protocol_name()
 	}
-
-	/// Accept and handle byte stream request forever.
-	///
-	/// # Errors
-	///
-	/// Returns an [`Error`] if there are any invalid configurations or IO errors.
-	///
-	/// Errors occurred in `callback` will not return an [`Error`].
-	pub async fn serve(
-		self: &Arc<Self>,
-		inbound_ind: usize,
-		monitor: Option<Monitor>,
-		callback: impl 'static + Callback,
-	) -> Result<(), Error> {
-		{
-			let tag_str = if self.tag.is_empty() {
-				String::new()
-			} else {
-				format!(" '{}'", self.tag)
-			};
-			log::warn!(
-				"Serving {} inbound{} on {}",
-				self.protocol_name(),
-				tag_str,
-				self.network
-			);
-		}
-		let callback = Arc::new(callback);
-		let mut acceptor = self.network.bind().await?;
-		loop {
-			let callback = callback.clone();
-			let ar = acceptor.accept().await?;
-			let monitor = monitor.clone();
-			// randomly generated connection ID
-			let conn_id = rand::thread_rng().next_u64();
-			let inbound = self.clone();
-			tokio::spawn(async move {
-				let stream = ar.stream;
-				let from = ar.addr.get_peer();
-				let stat_handle = monitor.as_ref().map(|m| {
-					m.register_tcp_session(RegisterArgs {
-						conn_id,
-						inbound_ind,
-						inbound_tag: inbound.tag.clone(),
-						start_time: SystemTime::now(),
-						from,
-					})
-				});
-				let args = CallbackArgs {
-					sh: stat_handle.clone(),
-					stream,
-					addr: ar.addr,
-					conn_id,
-					inbound_ind,
-					inbound: inbound.clone(),
-				};
-				if let Err(e) = callback.run(args).await {
-					let in_proto = inbound.protocol_name();
-					if let Error::Inactive(secs) = &e {
-						warn!(
-							"[{conn_id:x}] connection closed in \
-                            'in_tag'|{in_proto} session due to inactivity for {secs} secs."
-						);
-					} else {
-						error!(
-							"[{conn_id:x}] error occurred in \
-                            '{in_tag}'|{in_proto} session: {e} ",
-							in_tag = inbound.tag,
-						);
-					}
-				}
-				// kill connection in the monitor
-				let end_time = SystemTime::now();
-				if let Some(stat_handle) = stat_handle {
-					stat_handle.set_dead(end_time);
-				}
-			});
-		}
-	}
 }
 
 impl GetProtocolName for Inbound {
@@ -282,21 +197,6 @@ impl StreamAcceptor for Inbound {
 		info.is_transport_empty = matches!(&self.transport, crate::transport::Inbound::None(_));
 		self.settings.accept_stream(stream, info).await
 	}
-}
-
-pub struct CallbackArgs {
-	pub sh: Option<SessionHandle>,
-	pub stream: Box<dyn AsyncReadWrite>,
-	pub addr: network::Addrs,
-	pub conn_id: Id,
-	pub inbound_ind: usize,
-	pub inbound: Arc<Inbound>,
-}
-
-pub trait Callback: Send + Sync {
-	type Fut: Future<Output = Result<(), Error>> + Send;
-
-	fn run(&self, args: CallbackArgs) -> Self::Fut;
 }
 
 #[cfg(feature = "use-udp")]

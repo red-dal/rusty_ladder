@@ -20,27 +20,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #[cfg(feature = "use-udp")]
 use super::udp;
 use super::{
-	inbound::{Callback, CallbackArgs, ErrorHandlingPolicy},
-	stat::{Monitor, SessionHandle},
+	inbound::ErrorHandlingPolicy,
+	stat::{Id, Monitor, RegisterArgs, SessionHandle},
 	Error, Inbound, Outbound, Server,
 };
 use crate::{
+	network,
 	prelude::*,
 	protocol::{
-		inbound::{
-			AcceptError, Handshake, Finish, HandshakeError, SessionInfo, StreamAcceptor,
-		},
+		inbound::{AcceptError, Finish, Handshake, HandshakeError, SessionInfo, StreamAcceptor},
 		outbound::Error as OutboundError,
-		BufBytesStream, GetProtocolName,
+		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	utils::{
 		relay::{Counter, Relay},
 		BytesCount,
 	},
 };
-use futures::{future::BoxFuture, FutureExt, TryFutureExt};
-use std::future::Future;
+use futures::TryFutureExt;
 use std::time::Instant;
+use std::{future::Future, time::SystemTime};
 use tokio::time::timeout;
 
 impl Server {
@@ -81,20 +80,25 @@ impl Server {
 			let monitor = monitor.clone();
 			// Serving TCP
 			let tcp_task = {
-				let callback = ServerCallback {
-					server: self.clone(),
-					#[cfg(feature = "use-udp")]
-					udp_session_timeout: self.global.udp_session_timeout,
-				};
-				inbound
-					.serve(inbound_ind, monitor.clone(), callback)
-					.map_err(|e| Box::new(e) as BoxStdErr)
+				let server = self.clone();
+				#[cfg(feature = "use-udp")]
+				let udp_session_timeout = self.global.udp_session_timeout;
+				serve_inbound(inbound.clone(), inbound_ind, monitor.clone(), move |args| {
+					handle_incomming(
+						args,
+						server.clone(),
+						#[cfg(feature = "use-udp")]
+						udp_session_timeout,
+					)
+				})
+				.map_err(|e| Box::new(e) as BoxStdErr)
 			};
 			tasks.push(Box::pin(tcp_task));
 
 			// Serving UDP
 			#[cfg(feature = "use-udp")]
 			{
+				use futures::future::{BoxFuture, FutureExt};
 				use crate::protocol::inbound::udp::DatagramStream;
 				struct Callback {
 					inbound_ind: usize,
@@ -153,99 +157,178 @@ impl Server {
 	}
 }
 
-struct ServerCallback {
-	server: Arc<Server>,
-	#[cfg(feature = "use-udp")]
-	udp_session_timeout: std::time::Duration,
+struct CallbackArgs {
+	pub sh: Option<SessionHandle>,
+	pub stream: Box<dyn AsyncReadWrite>,
+	pub addr: network::Addrs,
+	pub conn_id: Id,
+	pub inbound_ind: usize,
+	pub inbound: Arc<Inbound>,
 }
 
-impl ServerCallback {
-	fn priv_run(&self, args: CallbackArgs) -> impl Future<Output = Result<(), Error>> {
-		let id = format!("[{:x}]", args.conn_id);
-		// ------ handshake ------
-		let src = args.addr.get_peer();
-		info!(
-			"{id} making {proto} inbound handshake with '{src}'.",
-			proto = args.inbound.protocol_name(),
-		);
-
-		let info = SessionInfo {
-			addr: args.addr.clone(),
-			is_transport_empty: false,
+/// Accept and handle byte stream request forever.
+///
+/// # Errors
+///
+/// Returns an [`Error`] if there are any invalid configurations or IO errors.
+///
+/// Errors occurred in `callback` will not return.
+async fn serve_inbound<F>(
+	inbound: Arc<Inbound>,
+	inbound_ind: usize,
+	monitor: Option<Monitor>,
+	callback: impl 'static + Send + Sync + Fn(CallbackArgs) -> F,
+) -> Result<(), Error>
+where
+	F: Future<Output = Result<(), Error>> + Send,
+{
+	{
+		let tag_str = if inbound.tag.is_empty() {
+			String::new()
+		} else {
+			format!(" '{}'", inbound.tag)
 		};
-		let inbound_ind = args.inbound_ind;
-		let inbound = args.inbound.clone();
-		let server = self.server.clone();
-		#[cfg(feature = "use-udp")]
-		let udp_session_timeout = self.udp_session_timeout;
-		async move {
-			let accept_res = match inbound.accept_stream(args.stream, info).await {
-				Ok(res) => res,
-				Err(e) => {
-					match e {
-						AcceptError::Io(e) => return Err(HandshakeError::Io(e).into()),
-						AcceptError::ProtocolSilentDrop(stream, e) => {
-							match inbound.err_policy {
-								ErrorHandlingPolicy::Drop => {
-									// do nothing
-								}
-								ErrorHandlingPolicy::UnlimitedTimeout => {
-									// keep reading until the client drops
-									silent_drop(stream);
-								}
-							};
-							return Err(HandshakeError::Protocol(e).into());
-						}
-						AcceptError::TcpNotAcceptable => {
-							return Err(HandshakeError::TcpNotAcceptable.into())
-						}
-						AcceptError::UdpNotAcceptable => {
-							return Err(HandshakeError::UdpNotAcceptable.into())
-						}
-						AcceptError::Protocol(e) => return Err(HandshakeError::Protocol(e).into()),
-					}
-				}
-			};
-
-			match accept_res {
-				Handshake::Stream(handshake_handler, dst) => {
-					StreamSession {
-						server: &server,
-						inbound: &inbound,
-						inbound_ind,
-						id,
-						stat_handle: args.sh,
-						src: &src,
-						handshake_handler,
-						dst: &dst,
-					}
-					.run()
-					.await
-				}
-				#[cfg(feature = "use-udp")]
-				Handshake::Datagram(inbound_stream) => {
-					let monitor = args.sh.as_ref().map(|h| h.monitor().clone());
-					udp::dispatch(
-						inbound_stream,
-						inbound.tag.clone(),
-						inbound_ind,
-						src,
-						&server,
-						monitor,
-						udp_session_timeout,
-					)
-					.await
+		log::warn!(
+			"Serving {} inbound{} on {}",
+			inbound.protocol_name(),
+			tag_str,
+			inbound.network
+		);
+	}
+	let callback = Arc::new(callback);
+	let mut acceptor = inbound.network.bind().await?;
+	loop {
+		let callback = callback.clone();
+		let ar = acceptor.accept().await?;
+		let monitor = monitor.clone();
+		// randomly generated connection ID
+		let conn_id = rand::thread_rng().next_u64();
+		let inbound = inbound.clone();
+		tokio::spawn(async move {
+			let stream = ar.stream;
+			let from = ar.addr.get_peer();
+			let stat_handle = monitor.as_ref().map(|m| {
+				m.register_tcp_session(RegisterArgs {
+					conn_id,
+					inbound_ind,
+					inbound_tag: inbound.tag.clone(),
+					start_time: SystemTime::now(),
+					from,
+				})
+			});
+			if let Err(e) = callback(CallbackArgs {
+				sh: stat_handle.clone(),
+				stream,
+				addr: ar.addr,
+				conn_id,
+				inbound_ind,
+				inbound: inbound.clone(),
+			})
+			.await
+			{
+				let in_proto = inbound.protocol_name();
+				if let Error::Inactive(secs) = &e {
+					warn!(
+						"[{conn_id:x}] connection closed in \
+                            'in_tag'|{in_proto} session due to inactivity for {secs} secs."
+					);
+				} else {
+					error!(
+						"[{conn_id:x}] error occurred in \
+                            '{in_tag}'|{in_proto} session: {e} ",
+						in_tag = inbound.tag,
+					);
 				}
 			}
-		}
+			// kill connection in the monitor
+			let end_time = SystemTime::now();
+			if let Some(stat_handle) = stat_handle {
+				stat_handle.set_dead(end_time);
+			}
+		});
 	}
 }
 
-impl Callback for ServerCallback {
-	type Fut = BoxFuture<'static, Result<(), Error>>;
+async fn handle_incomming(
+	args: CallbackArgs,
+	server: Arc<Server>,
+	#[cfg(feature = "use-udp")] udp_session_timeout: std::time::Duration,
+) -> Result<(), Error> {
+	let id = format!("[{:x}]", args.conn_id);
+	// ------ handshake ------
+	// Source (peer) of the current stream.
+	let src = args.addr.get_peer();
+	info!(
+		"{id} making {proto} inbound handshake with '{src}'.",
+		proto = args.inbound.protocol_name(),
+	);
 
-	fn run(&self, args: CallbackArgs) -> Self::Fut {
-		self.priv_run(args).boxed()
+	let info = SessionInfo {
+		addr: args.addr.clone(),
+		is_transport_empty: false,
+	};
+	let inbound_ind = args.inbound_ind;
+	let inbound = args.inbound.clone();
+	let server = server.clone();
+	#[cfg(feature = "use-udp")]
+	let udp_session_timeout = udp_session_timeout;
+	let accept_res = match inbound.accept_stream(args.stream, info).await {
+		Ok(res) => res,
+		Err(e) => {
+			match e {
+				AcceptError::Io(e) => return Err(HandshakeError::Io(e).into()),
+				AcceptError::ProtocolSilentDrop(stream, e) => {
+					match inbound.err_policy {
+						ErrorHandlingPolicy::Drop => {
+							// do nothing
+						}
+						ErrorHandlingPolicy::UnlimitedTimeout => {
+							// keep reading until the client drops
+							silent_drop(stream);
+						}
+					};
+					return Err(HandshakeError::Protocol(e).into());
+				}
+				AcceptError::TcpNotAcceptable => {
+					return Err(HandshakeError::TcpNotAcceptable.into())
+				}
+				AcceptError::UdpNotAcceptable => {
+					return Err(HandshakeError::UdpNotAcceptable.into())
+				}
+				AcceptError::Protocol(e) => return Err(HandshakeError::Protocol(e).into()),
+			}
+		}
+	};
+
+	match accept_res {
+		Handshake::Stream(handshake_handler, dst) => {
+			StreamSession {
+				server: &server,
+				inbound: &inbound,
+				inbound_ind,
+				id,
+				stat_handle: args.sh,
+				src: &src,
+				handshake_handler,
+				dst: &dst,
+			}
+			.run()
+			.await
+		}
+		#[cfg(feature = "use-udp")]
+		Handshake::Datagram(inbound_stream) => {
+			let monitor = args.sh.as_ref().map(|h| h.monitor().clone());
+			udp::dispatch(
+				inbound_stream,
+				inbound.tag.clone(),
+				inbound_ind,
+				src,
+				&server,
+				monitor,
+				udp_session_timeout,
+			)
+			.await
+		}
 	}
 }
 

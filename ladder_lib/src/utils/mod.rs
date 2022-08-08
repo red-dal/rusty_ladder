@@ -194,8 +194,9 @@ pub mod url {
 	}
 }
 
+#[allow(dead_code)]
 /// Format all items in "'first','second','third'...,'final'"
-pub fn fmt_iter<T: std::fmt::Display>(
+pub(crate) fn fmt_iter<T: std::fmt::Display>(
 	f: &mut impl std::fmt::Write,
 	mut items: impl Iterator<Item = T>,
 ) -> std::fmt::Result {
