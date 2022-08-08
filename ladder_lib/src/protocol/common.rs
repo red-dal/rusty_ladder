@@ -176,12 +176,10 @@ pub struct BufBytesStream {
 
 impl BufBytesStream {
 	#[must_use]
-	pub fn from_raw(r: BoxRead, w: BoxWrite) -> Self {
+	#[inline]
+	pub fn new(r: BoxBufRead, w: BoxWrite) -> Self {
 		// TODO: use with_capacity instead of default capacity
-		Self {
-			r: Box::new(tokio::io::BufReader::new(r)),
-			w,
-		}
+		Self { r, w }
 	}
 }
 
@@ -211,7 +209,7 @@ impl From<tokio::net::TcpStream> for BufBytesStream {
 impl From<Box<dyn AsyncReadWrite>> for BufBytesStream {
 	fn from(s: Box<dyn AsyncReadWrite>) -> Self {
 		let (rh, wh) = s.split();
-		Self::from_raw(rh, wh)
+		Self::new(Box::new(tokio::io::BufReader::new(rh)), wh)
 	}
 }
 

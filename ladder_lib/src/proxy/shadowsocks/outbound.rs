@@ -21,13 +21,14 @@ use super::{method_to_algo, password_to_key, tcp, utils::salt_len, Method, PROTO
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, StreamConnector},
+		outbound::{Error as OutboundError, StreamConnector, StreamFunc},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	utils::{crypto::aead::Algorithm, LazyWriteHalf},
 };
 use bytes::Bytes;
 use rand::rngs::OsRng;
+use tokio::io::BufReader;
 
 // -------------------------------------------------------------------------
 //                              Builder
@@ -159,7 +160,10 @@ impl Settings {
 			dst.write_to(&mut addr_buf);
 			let (r, w) = stream.split();
 			let write_half = LazyWriteHalf::new(w, addr_buf);
-			Ok(BufBytesStream::from_raw(r, Box::new(write_half)))
+			Ok(BufBytesStream::new(
+				Box::new(BufReader::new(r)),
+				Box::new(write_half),
+			))
 		}
 	}
 }

@@ -27,7 +27,7 @@ use crate::{
 	protocol::{BoxBufRead, BoxWrite},
 	proxy::vmess::utils::ShakeLengthWriter,
 	utils::{
-		codec::{Decode, Encode, FrameReader, FrameWriter},
+		codec::{Decode, Encode, FrameReadHalf, FrameWriteHalf},
 		crypto::aead::{Algorithm, Decrypt, Decryptor, Encrypt, Encryptor, Key},
 		LazyWriteHalf,
 	},
@@ -47,15 +47,15 @@ struct ChunkStreamArgs<R, W, D, E> {
 
 fn new_chunk_stream<R, W, D, E>(
 	args: ChunkStreamArgs<R, W, D, E>,
-) -> (FrameReader<D, R>, FrameWriter<E, W>)
+) -> (FrameReadHalf<D, R>, FrameWriteHalf<E, W>)
 where
 	R: AsyncRead + Unpin,
 	W: AsyncWrite + Unpin,
 	D: 'static + Decode,
 	E: 'static + Encode,
 {
-	let w = FrameWriter::new(MAX_PAYLOAD_LENGTH, args.encoder, args.w);
-	let r = FrameReader::new(args.decoder, args.r);
+	let w = FrameWriteHalf::new(MAX_PAYLOAD_LENGTH, args.encoder, args.w);
+	let r = FrameReadHalf::new(args.decoder, args.r);
 
 	(r, w)
 }
@@ -73,9 +73,9 @@ macro_rules! dispatch {
 
 pub enum ReadHalf<R: AsyncRead + Unpin> {
 	Plain(R),
-	PlainChunk(FrameReader<plain_codec::PlainLenDecoder, R>),
-	PlainChunkMask(FrameReader<plain_codec::ShakeLenDecoder, R>),
-	Aead(FrameReader<aead_codec::Decoder<ShakeLengthReader>, R>),
+	PlainChunk(FrameReadHalf<plain_codec::PlainLenDecoder, R>),
+	PlainChunkMask(FrameReadHalf<plain_codec::ShakeLenDecoder, R>),
+	Aead(FrameReadHalf<aead_codec::Decoder<ShakeLengthReader>, R>),
 }
 
 impl<R: 'static + AsyncRead + Unpin + Send + Sync> ReadHalf<R> {
@@ -95,9 +95,9 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReadHalf<R> {
 
 pub enum WriteHalf<W: AsyncWrite + Unpin> {
 	Plain(LazyWriteHalf<W>),
-	PlainChunk(FrameWriter<plain_codec::PlainLenEncoder, W>),
-	PlainChunkMask(FrameWriter<plain_codec::ShakeLenEncoder, W>),
-	Aead(FrameWriter<aead_codec::Encoder<ShakeLengthWriter>, W>),
+	PlainChunk(FrameWriteHalf<plain_codec::PlainLenEncoder, W>),
+	PlainChunkMask(FrameWriteHalf<plain_codec::ShakeLenEncoder, W>),
+	Aead(FrameWriteHalf<aead_codec::Encoder<ShakeLengthWriter>, W>),
 }
 
 impl<W: 'static + AsyncWrite + Unpin + Send + Sync> WriteHalf<W> {

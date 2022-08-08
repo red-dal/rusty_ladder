@@ -38,7 +38,7 @@ impl<T: Encode> Encode for Box<T> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum WriterState {
+enum State {
 	/// Encoding bytes from source into buffer.
 	Encoding,
 	/// Consuming buffer and writing its bytes.
@@ -53,15 +53,15 @@ enum WriterState {
 ///
 /// If you want to access the internal encoder or writer,
 /// just use `w` and `encoder` field directly.
-pub struct FrameWriter<E: Encode, W: AsyncWrite + Unpin> {
+pub struct FrameWriteHalf<E: Encode, W: AsyncWrite + Unpin> {
 	buf: Vec<u8>,
-	state: WriterState,
+	state: State,
 	pub max_payload_len: usize,
 	pub encoder: E,
 	pub w: W,
 }
 
-impl<E, W> FrameWriter<E, W>
+impl<E, W> FrameWriteHalf<E, W>
 where
 	E: Encode,
 	W: AsyncWrite + Unpin,
@@ -74,7 +74,7 @@ where
 		let buf = Vec::with_capacity(BUFFER_CAPACITY);
 		Self {
 			buf,
-			state: WriterState::Encoding,
+			state: State::Encoding,
 			max_payload_len,
 			encoder,
 			w,
@@ -82,7 +82,7 @@ where
 	}
 }
 
-impl<E, W> AsyncWrite for FrameWriter<E, W>
+impl<E, W> AsyncWrite for FrameWriteHalf<E, W>
 where
 	E: Encode,
 	W: AsyncWrite + Unpin,
@@ -96,20 +96,6 @@ where
 	) -> Poll<Result<usize, io::Error>> {
 		// `src` will be encoded into `self.buf`
 		// then written into `self.w`.
-
-		// In order to implement AsyncWrite and be compatible with
-		// other IO (chain proxy), a buffer must be used.
-
-		// In theory you can make a new trait with function like
-		//
-		// poll_write_vec(self, src: &mut Vec<u8>);
-		//
-		// and make a wrapper with buffer that implements AsyncWrite,
-		// so some copying can be avoided and less memory is used.
-		//
-		// But to do that a lot of codes needs to be rewritten
-		// (like in the `relay` mod) and I am lazy.
-
 		let me = self.get_mut();
 		// Truncate extra bytes.
 		if src.len() > me.max_payload_len {
@@ -117,30 +103,25 @@ where
 		}
 		loop {
 			match &mut me.state {
-				WriterState::Encoding => {
-					trace!("Encoding src ({} bytes) into buf", src.len());
+				// First encode `src` into `self.buf`
+				State::Encoding => {
 					me.encoder
 						.encode_into(src, &mut me.buf)
 						.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
 					// Next goes to Writing.
-					me.state = WriterState::Writing(0);
+					me.state = State::Writing(0);
 				}
-				WriterState::Writing(pos) => {
+				// Then write data of `self.buf` into `self.w`
+				State::Writing(pos) => {
 					ready!(poll_write_all(Pin::new(&mut me.w), cx, pos, &me.buf))?;
-					trace!(
-						"Done writing data from buf ({} bytes): {:?}",
-						me.buf.len(),
-						&me.buf[..16]
-					);
 					// Clear up buffer so encoder don't accidentally append bytes
 					// into it instead of overwritten it.
 					me.buf.clear();
-					// Next goes back to Encoding.
-					me.state = WriterState::Encoding;
+					me.state = State::Encoding;
 					return Poll::Ready(Ok(src.len()));
 				}
-				WriterState::Closed => {
+				// Return error if closed
+				State::Closed => {
 					return Err(io::Error::new(
 						io::ErrorKind::BrokenPipe,
 						"FrameWriter already closed.",
@@ -160,7 +141,7 @@ where
 		// Just call the inner writer's poll_shutdown.
 		// Maybe add a custom encode_eof in Encode trait and write some bytes while shutting down.
 		let me = self.get_mut();
-		me.state = WriterState::Closed;
+		me.state = State::Closed;
 		Pin::new(&mut me.w).poll_shutdown(cx)
 	}
 }

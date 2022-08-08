@@ -24,12 +24,12 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::outbound::udp::tunnel::{DatagramStream, RecvDatagram, SendDatagram},
-	utils::codec::{self, FrameWriter},
+	utils::codec::{self, FrameWriteHalf},
 };
 
 pub fn new_udp_stream<R, W, E, D>(
 	read_half: tcp::ReadHalf<R, D>,
-	write_half: FrameWriter<E, W>,
+	write_half: FrameWriteHalf<E, W>,
 ) -> DatagramStream
 where
 	R: 'static + AsyncRead + Unpin + Send + Sync,
@@ -90,7 +90,7 @@ where
 	W: AsyncWrite + Unpin,
 	E: 'static + codec::Encode,
 {
-	writer: FrameWriter<E, W>,
+	writer: FrameWriteHalf<E, W>,
 }
 
 impl<W, E> WriteHalf<W, E>
@@ -98,7 +98,7 @@ where
 	W: AsyncWrite + Unpin,
 	E: codec::Encode,
 {
-	fn new(writer: FrameWriter<E, W>) -> Self {
+	fn new(writer: FrameWriteHalf<E, W>) -> Self {
 		Self { writer }
 	}
 }

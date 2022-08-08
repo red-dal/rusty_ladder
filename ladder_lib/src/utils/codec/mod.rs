@@ -22,5 +22,5 @@ mod write;
 
 const BUFFER_CAPACITY: usize = 4 * 1024;
 
-pub use read::{Decode, FrameReader};
-pub use write::{Encode, FrameWriter};
+pub use read::{Decode, FrameReadHalf};
+pub use write::{Encode, FrameWriteHalf};

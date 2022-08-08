@@ -71,7 +71,7 @@ use crate::{
 	protocol::{AsyncReadWrite, BoxRead, BoxWrite},
 	utils::{
 		append_mut, append_u16_mut,
-		codec::{self, FrameReader, FrameWriter},
+		codec::{self, FrameReadHalf, FrameWriteHalf},
 		crypto::aead::{
 			self,
 			nonce::{CounterSequence, EMPTY as EMPTY_NONCE},
@@ -94,22 +94,22 @@ fn default_read_nonce() -> CounterSequence {
 	CounterSequence::new(EMPTY_NONCE)
 }
 
-pub type CryptFrameReader = FrameReader<Decoder, BoxRead>;
-pub type CryptFrameWriter = FrameWriter<Encoder, BoxWrite>;
+pub type CryptFrameReadHalf = FrameReadHalf<Decoder, BoxRead>;
+pub type CryptFrameWriteHalf = FrameWriteHalf<Encoder, BoxWrite>;
 
 pub fn new_crypt_stream(
 	stream: Box<dyn AsyncReadWrite>,
 	algo: Algorithm,
 	password: Bytes,
 	local_salt: Vec<u8>,
-) -> (CryptFrameReader, CryptFrameWriter) {
+) -> (CryptFrameReadHalf, CryptFrameWriteHalf) {
 	let (r, w) = stream.split();
-	let w = FrameWriter::new(
+	let w = FrameWriteHalf::new(
 		MAX_PAYLOAD_SIZE.into(),
 		Encoder::new(algo, default_write_nonce(), &password, local_salt),
 		w,
 	);
-	let r = FrameReader::new(Decoder::new(algo, password), r);
+	let r = FrameReadHalf::new(Decoder::new(algo, password), r);
 	(r, w)
 }
 

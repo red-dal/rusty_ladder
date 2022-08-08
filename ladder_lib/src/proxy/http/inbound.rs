@@ -27,9 +27,7 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{
-			AcceptError, Handshake, Finish, HandshakeError, SessionInfo, StreamAcceptor,
-		},
+		inbound::{AcceptError, Finish, Handshake, HandshakeError, SessionInfo, StreamAcceptor},
 		outbound::Error as OutboundError,
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
@@ -39,6 +37,7 @@ use std::{
 	collections::{HashMap, HashSet},
 	io,
 };
+use tokio::io::BufReader;
 
 // ------------------------------------------------------------------
 //                               Builder
@@ -271,7 +270,7 @@ impl Finish for HandshakeFinisher {
 		let (r, w) = client_stream.split();
 		let r = Box::new(AsyncReadExt::chain(io::Cursor::new(sent_buf), r));
 
-		Ok(BufBytesStream::from_raw(r, w))
+		Ok(BufBytesStream::new(Box::new(BufReader::new(r)), w))
 	}
 
 	async fn finish_err(self: Box<Self>, err: &OutboundError) -> Result<(), HandshakeError> {

@@ -29,7 +29,7 @@ use crate::{
 	prelude::*,
 	protocol::{outbound::Error as OutboundError, BufBytesStream},
 	utils::{
-		codec::{Decode, Encode, FrameReader, FrameWriter},
+		codec::{Decode, Encode, FrameReadHalf, FrameWriteHalf},
 		crypto::aead::{Algorithm, Decrypt, Decryptor, Encrypt, Encryptor, Key as AeadKey},
 		poll_read_exact, LazyWriteHalf,
 	},
@@ -40,7 +40,7 @@ use std::{
 	pin::Pin,
 	task::{Context, Poll},
 };
-use tokio::io::ReadBuf;
+use tokio::io::{AsyncBufRead, ReadBuf};
 use uuid::Uuid;
 
 type VMessKey = [u8; 16];
@@ -174,7 +174,7 @@ impl ResponseHelper {
 
 enum ReadHalfState {
 	ReadingResponse {
-		reader: ResponseHelper,
+		response_reader: ResponseHelper,
 		buf: Vec<u8>,
 	},
 	Reading,
@@ -190,7 +190,7 @@ impl ReadHalfState {
 		state: ReadResponseState,
 	) -> Self {
 		ReadHalfState::ReadingResponse {
-			reader: ResponseHelper {
+			response_reader: ResponseHelper {
 				response_key,
 				response_iv,
 				req,
@@ -216,7 +216,7 @@ where
 	R: AsyncRead + Unpin,
 	D: Decode,
 {
-	fr: FrameReader<D, R>,
+	fr: FrameReadHalf<D, R>,
 	state: ReadHalfState,
 }
 
@@ -234,7 +234,7 @@ where
 	) -> Self {
 		Self {
 			state: ReadHalfState::new_aead(response_key, response_iv, req),
-			fr: FrameReader::new(dec, r),
+			fr: FrameReadHalf::new(dec, r),
 		}
 	}
 }
@@ -245,16 +245,35 @@ where
 	D: Decode,
 {
 	fn poll_read(
-		self: Pin<&mut Self>,
+		mut self: Pin<&mut Self>,
 		cx: &mut Context<'_>,
 		read_buf: &mut ReadBuf<'_>,
 	) -> Poll<io::Result<()>> {
-		// Must read response and check if it is valid before
-		// polling FrameReader.
+		let data = ready!(self.as_mut().poll_fill_buf(cx))?;
+		let amt = std::cmp::min(data.len(), read_buf.remaining());
+		read_buf.put_slice(&data[..amt]);
+		self.as_mut().consume(amt);
+		Ok(()).into()
+	}
+}
+
+impl<R, D> AsyncBufRead for ReadHalf<R, D>
+where
+	R: AsyncRead + Unpin,
+	D: Decode,
+{
+	fn poll_fill_buf<'a>(
+		self: Pin<&'a mut Self>,
+		cx: &mut Context<'_>,
+	) -> Poll<io::Result<&'a [u8]>> {
 		let me = self.get_mut();
 		loop {
 			match &mut me.state {
-				ReadHalfState::ReadingResponse { reader, buf } => {
+				// First try to read response from  server.
+				ReadHalfState::ReadingResponse {
+					response_reader: reader,
+					buf,
+				} => {
 					if let Err(e) =
 						ready!(reader.poll_read_response(Pin::new(&mut me.fr.r), cx, buf))
 					{
@@ -264,18 +283,21 @@ where
 					trace!("Done reading VMess response");
 					me.state = ReadHalfState::Reading;
 				}
+				// Buffering
 				ReadHalfState::Reading => {
-					let fr = &mut me.fr;
-					ready!(Pin::new(fr).poll_read(cx, read_buf)).map_err(|e| {
-						me.state = ReadHalfState::Closed;
-						e
-					})?;
-					if read_buf.filled().is_empty() {
+					let data = match ready!(Pin::new(&mut me.fr).poll_fill_buf(cx)) {
+						Ok(data) => data,
+						Err(e) => {
+							me.state = ReadHalfState::Closed;
+							return Err(e).into();
+						},
+					};
+					if data.is_empty() {
 						// EOF
 						me.state = ReadHalfState::Closed;
-						trace!("ReadHalf's FrameReader reached EOF");
+						trace!("ReadHalf's FrameReadHalf reached EOF");
 					}
-					return Ok(()).into();
+					return Ok(data).into();
 				}
 				ReadHalfState::Closed => {
 					return Err(io::Error::new(
@@ -285,6 +307,14 @@ where
 					.into();
 				}
 			}
+		}
+	}
+
+	fn consume(self: Pin<&mut Self>, amt: usize) {
+		if let ReadHalfState::Reading = &self.state {
+			Pin::new(&mut self.get_mut().fr).consume(amt);
+		} else {
+			panic!("consume can only be called in ReadHalfState::Reading");
 		}
 	}
 }
@@ -307,7 +337,7 @@ where
 	E: Encode,
 	D: Decode,
 {
-	fn build(self) -> (ReadHalf<R, D>, FrameWriter<E, W>)
+	fn build(self) -> (ReadHalf<R, D>, FrameWriteHalf<E, W>)
 	where
 		R: AsyncRead + Unpin,
 		W: AsyncWrite + Unpin,
@@ -328,7 +358,7 @@ where
 
 		(
 			read_half,
-			FrameWriter::new(MAX_PAYLOAD_LENGTH, self.enc, self.w),
+			FrameWriteHalf::new(MAX_PAYLOAD_LENGTH, self.enc, self.w),
 		)
 	}
 }
@@ -341,13 +371,13 @@ where
 	Masking(
 		(
 			ReadHalf<R, plain_codec::ShakeLenDecoder>,
-			FrameWriter<plain_codec::ShakeLenEncoder, W>,
+			FrameWriteHalf<plain_codec::ShakeLenEncoder, W>,
 		),
 	),
 	NoMasking(
 		(
 			ReadHalf<R, plain_codec::PlainLenDecoder>,
-			FrameWriter<plain_codec::PlainLenEncoder, W>,
+			FrameWriteHalf<plain_codec::PlainLenEncoder, W>,
 		),
 	),
 }
@@ -359,8 +389,8 @@ where
 {
 	fn from(s: PlainStream<R, W>) -> Self {
 		match s {
-			PlainStream::Masking((r, w)) => BufBytesStream::from_raw(Box::new(r), Box::new(w)),
-			PlainStream::NoMasking((r, w)) => BufBytesStream::from_raw(Box::new(r), Box::new(w)),
+			PlainStream::Masking((r, w)) => BufBytesStream::new(Box::new(r), Box::new(w)),
+			PlainStream::NoMasking((r, w)) => BufBytesStream::new(Box::new(r), Box::new(w)),
 		}
 	}
 }
@@ -524,7 +554,7 @@ where
 }
 
 pub type AeadReadHalf<R> = ReadHalf<R, aead_codec::Decoder<ShakeLengthReader>>;
-pub type AeadWriteHalf<W> = FrameWriter<aead_codec::Encoder<ShakeLengthWriter>, W>;
+pub type AeadWriteHalf<W> = FrameWriteHalf<aead_codec::Encoder<ShakeLengthWriter>, W>;
 
 pub(super) fn new_outbound_aead<R, W>(
 	r: R,

@@ -48,13 +48,14 @@ See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, StreamConnector},
+		outbound::{Error as OutboundError, StreamConnector, StreamFunc},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 	utils::LazyWriteHalf,
 };
 use async_trait::async_trait;
 use sha2::{Digest, Sha224};
+use tokio::io::BufReader;
 
 pub const PROTOCOL_NAME: &str = "trojan";
 
@@ -162,7 +163,10 @@ impl Settings {
 
 		let (rh, wh) = stream.split();
 		let wh = LazyWriteHalf::new(wh, req_buf);
-		Ok(BufBytesStream::from_raw(rh, Box::new(wh)))
+		Ok(BufBytesStream::new(
+			Box::new(BufReader::new(rh)),
+			Box::new(wh),
+		))
 	}
 }
 

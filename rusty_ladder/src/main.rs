@@ -245,8 +245,9 @@ enum Error {
 }
 
 impl Error {
+	#[allow(dead_code)]
 	#[inline]
-	pub fn new_input(s: impl Into<Cow<'static, str>>) -> Self {
+	pub fn input(s: impl Into<Cow<'static, str>>) -> Self {
 		Self::Input(s.into())
 	}
 }
@@ -273,20 +274,20 @@ mod parse_url_impl {
 		let inbound = {
 			let s = inbound
 				.as_ref()
-				.ok_or_else(|| Error::new_input("--inbound not specified"))?;
+				.ok_or_else(|| Error::input("--inbound not specified"))?;
 			let url = url::Url::from_str(s)
-				.map_err(|e| Error::new_input(format!("invalid inbound URL ({})", e)))?;
+				.map_err(|e| Error::input(format!("invalid inbound URL ({})", e)))?;
 			ladder_lib::server::inbound::Builder::parse_url(&url)
-				.map_err(|e| Error::new_input(format!("invalid inbound ({})", e)))?
+				.map_err(|e| Error::input(format!("invalid inbound ({})", e)))?
 		};
 		let outbound = {
 			let s = outbound
 				.as_ref()
-				.ok_or_else(|| Error::new_input("--outbound not specified"))?;
+				.ok_or_else(|| Error::input("--outbound not specified"))?;
 			let url = url::Url::from_str(s)
-				.map_err(|e| Error::new_input(format!("invalid outbound URL ({})", e)))?;
+				.map_err(|e| Error::input(format!("invalid outbound URL ({})", e)))?;
 			ladder_lib::server::outbound::Builder::parse_url(&url)
-				.map_err(|e| Error::new_input(format!("invalid outbound ({})", e)))?
+				.map_err(|e| Error::input(format!("invalid outbound ({})", e)))?
 		};
 		let rules = make_blocklist(block)?;
 		let level_filter = level.unwrap_or(DEFAULT_LOG_LEVEL);

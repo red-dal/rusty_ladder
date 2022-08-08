@@ -34,6 +34,7 @@ use crate::{
 	utils::{crypto::aead::Algorithm, timestamp_now},
 };
 use rand::{rngs::OsRng, thread_rng};
+use tokio::io::BufReader;
 use uuid::Uuid;
 
 // -----------------------------------------------------------
@@ -217,7 +218,10 @@ impl Settings {
 				req.opt.clear_chunk_stream();
 				req.opt.clear_chunk_masking();
 				let (r, w) = tcp::new_outbound_zero(rh, wh, req, &self.id, time, mode);
-				return Ok(BufBytesStream::from_raw(Box::new(r), Box::new(w)));
+				return Ok(BufBytesStream::new(
+					Box::new(BufReader::new(r)),
+					Box::new(w),
+				));
 			}
 			SecurityType::None => {
 				let stream = tcp::new_outbound_plain(rh, wh, req, &self.id, time, mode);
@@ -235,7 +239,7 @@ impl Settings {
 		let (read_half, write_half) =
 			tcp::new_outbound_aead(rh, wh, req, &self.id, time, algo, mode)?;
 
-		Ok(BufBytesStream::from_raw(
+		Ok(BufBytesStream::new(
 			Box::new(read_half),
 			Box::new(write_half),
 		))

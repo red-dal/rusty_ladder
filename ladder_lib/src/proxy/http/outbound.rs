@@ -24,11 +24,12 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, StreamConnector},
+		outbound::{Error as OutboundError, StreamConnector, StreamFunc},
 		AsyncReadWrite, BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
 use http::{header, Request, StatusCode};
+use tokio::io::BufReader;
 
 // ------------------------------------------------------------------
 //                               Builder
@@ -173,7 +174,7 @@ impl Settings {
 		} else {
 			Box::new(AsyncReadExt::chain(std::io::Cursor::new(leftover), rh))
 		};
-		Ok(BufBytesStream::from_raw(rh, wh))
+		Ok(BufBytesStream::new(Box::new(BufReader::new(rh)), wh))
 	}
 }
 

@@ -231,7 +231,7 @@ impl<D: Decode> CodecReadHelper<D> {
 }
 
 #[derive(Debug)]
-enum FrameReadState {
+enum State {
 	/// This means reader is polling the internal [`CodecReadHelper`].
 	ReadingDecoding,
 	/// This means the internal [`CodecReadHelper`] has successfully
@@ -249,14 +249,14 @@ enum FrameReadState {
 /// and process it with [`Decode`].
 ///
 /// To access the original [`AsyncRead`], just use the `r` field directly.
-pub struct FrameReader<D: Decode, R: AsyncRead + Unpin> {
+pub struct FrameReadHalf<D: Decode, R: AsyncRead + Unpin> {
 	pub r: R,
 	codec_reader: CodecReadHelper<D>,
-	state: FrameReadState,
+	state: State,
 	buf: Vec<u8>,
 }
 
-impl<D, R> FrameReader<D, R>
+impl<D, R> FrameReadHalf<D, R>
 where
 	D: Decode,
 	R: AsyncRead + Unpin,
@@ -271,97 +271,33 @@ where
 			r,
 			buf: Vec::with_capacity(cap),
 			codec_reader: CodecReadHelper::new(decoder),
-			state: FrameReadState::ReadingDecoding,
+			state: State::ReadingDecoding,
 		}
 	}
 }
 
-impl<D, R> AsyncRead for FrameReader<D, R>
+impl<D, R> AsyncRead for FrameReadHalf<D, R>
 where
 	D: Decode,
 	R: AsyncRead + Unpin,
 {
 	fn poll_read(
-		self: Pin<&mut Self>,
+		mut self: Pin<&mut Self>,
 		cx: &mut Context<'_>,
 		read_buf: &mut ReadBuf<'_>,
 	) -> Poll<io::Result<()>> {
-		// Because CodecReadHelper does not provide its own buffer,
-		// data needs to be read into `self.buf`, then written into `read_buf`.
+		// Try to fill internal buffer before copying data to read_buf.
+		// Unlike BufReader's implementation, filling internal buffer cannot be skipped.
+		let data = ready!(self.as_mut().poll_fill_buf(cx))?;
 
-		// If any error occurred, the state must be changed into Closed.
-
-		// In theory you can just use `read_buf` instead of `self.buf`
-		// so that there is less copying, but `read_buf` might not be large
-		// enough for decoder.
-
-		// Maybe in the future make CodecReadHelper public and implement AsyncRead,
-		// but panic or return error ReadBuf is not large enough for decoder.
-		// And you can choose to use FrameReader ( with Vec<u8> as internal buffer )
-		// or CodecReadHelper ( with no buffer ).
-		let me = self.get_mut();
-		loop {
-			trace!("FrameReader read state: {:?}", me.state);
-			match &mut me.state {
-				FrameReadState::ReadingDecoding => {
-					if let Err(e) = ready!(me.codec_reader.poll_read_decode(
-						Pin::new(&mut me.r),
-						cx,
-						&mut me.buf
-					)) {
-						me.state = FrameReadState::Closed;
-						return Err(e).into();
-					}
-
-					// Empty buf means EOF.
-					if me.buf.is_empty() {
-						me.state = FrameReadState::Closed;
-						// Release memory.
-						me.buf = Vec::new();
-						return Ok(()).into();
-					}
-
-					// Next starts buffering.
-					me.state = FrameReadState::Buffering { pos: 0 };
-				}
-				FrameReadState::Buffering { pos } => {
-					if read_buf.remaining() == 0 {
-						return Err(io::Error::new(
-							io::ErrorKind::InvalidData,
-							"read_buf has no remaining",
-						))
-						.into();
-					}
-
-					let buf_len = me.buf.len();
-					let remaining = &me.buf[*pos..];
-					let len = std::cmp::min(read_buf.remaining(), remaining.len());
-
-					read_buf.put_slice(&remaining[..len]);
-
-					*pos += len;
-
-					debug_assert!(*pos <= buf_len);
-					if *pos == buf_len {
-						// All buffered bytes are consumed,
-						// go to ReadingDecoding next.
-						me.state = FrameReadState::ReadingDecoding;
-					}
-					return Ok(()).into();
-				}
-				FrameReadState::Closed => {
-					return Err(io::Error::new(
-						io::ErrorKind::BrokenPipe,
-						"ReadHelper already closed.",
-					))
-					.into()
-				}
-			}
-		}
+		let amt = std::cmp::min(data.len(), read_buf.remaining());
+		read_buf.put_slice(&data[..amt]);
+		self.as_mut().consume(amt);
+		Poll::Ready(Ok(()))
 	}
 }
 
-impl<D, R> AsyncBufRead for FrameReader<D, R>
+impl<D, R> AsyncBufRead for FrameReadHalf<D, R>
 where
 	D: Decode,
 	R: AsyncRead + Unpin,
@@ -369,52 +305,47 @@ where
 	fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
 		let me = self.get_mut();
 		loop {
+			trace!("FrameReadHalf poll_fill_buf with state {:?}", me.state);
 			match &mut me.state {
-				FrameReadState::ReadingDecoding => {
+				State::ReadingDecoding => {
 					if let Err(e) = ready!(me.codec_reader.poll_read_decode(
 						Pin::new(&mut me.r),
 						cx,
 						&mut me.buf
 					)) {
-						me.state = FrameReadState::Closed;
+						me.state = State::Closed;
 						return Err(e).into();
 					}
 					// Empty buf means EOF.
 					if me.buf.is_empty() {
-						me.state = FrameReadState::Closed;
+						me.state = State::Closed;
 						// Release memory.
 						me.buf = Vec::new();
 						return Ok(me.buf.as_slice()).into();
 					}
 					// Next starts buffering.
-					me.state = FrameReadState::Buffering { pos: 0 };
+					me.state = State::Buffering { pos: 0 };
 				}
-				FrameReadState::Buffering { pos } => {
+				State::Buffering { pos } => {
 					if *pos == me.buf.len() {
 						// Buffer empty, try to fill it.
-						me.state = FrameReadState::ReadingDecoding;
+						me.state = State::ReadingDecoding;
 					} else {
 						return Ok(&me.buf[*pos..]).into();
 					}
-				},
-				FrameReadState::Closed => {
-					return Err(io::Error::new(
-						io::ErrorKind::BrokenPipe,
-						"ReadHelper already closed.",
-					))
-					.into();
 				}
+				State::Closed => return Err(io::ErrorKind::BrokenPipe.into()).into(),
 			}
 		}
 	}
 
 	fn consume(self: Pin<&mut Self>, amt: usize) {
 		let me = self.get_mut();
-		if let FrameReadState::Buffering { pos } = &mut me.state {
+		if let State::Buffering { pos } = &mut me.state {
 			*pos += amt;
 			debug_assert!(*pos <= me.buf.len());
 			if *pos == me.buf.len() {
-				me.state = FrameReadState::ReadingDecoding;
+				me.state = State::ReadingDecoding;
 			}
 		} else {
 			panic!("Cannot consume when FrameReadState is not Buffering. poll_fill_buf must be polled first.");
