@@ -19,8 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	utils::{
-		encode_auth, get_version, insert_headers, put_http_headers, put_request_head, read_http,
-		ReadError,
+		encode_auth, get_version, insert_headers, put_http_headers, put_request_head, ReadError,
 	},
 	PROTOCOL_NAME,
 };
@@ -31,13 +30,14 @@ use crate::{
 		outbound::Error as OutboundError,
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
+	proxy::http::MAX_BUFFER_SIZE,
 };
 use http::{header, uri::Scheme, Method, StatusCode, Uri};
 use std::{
 	collections::{HashMap, HashSet},
 	io,
 };
-use tokio::io::BufReader;
+use tokio::io::{AsyncBufRead, BufReader};
 
 // ------------------------------------------------------------------
 //                               Builder
@@ -149,16 +149,17 @@ impl StreamAcceptor for Settings {
 	#[inline]
 	async fn accept_stream<'a>(
 		&'a self,
-		mut stream: Box<dyn AsyncReadWrite>,
+		stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
 	) -> Result<Handshake<'a>, AcceptError> {
-		let (mut req, leftover) = match read_request(&mut stream).await {
+		let (r, mut w) = stream.split();
+		let mut r = BufReader::new(r);
+		let mut req = match read_request(&mut r).await {
 			Ok(r) => r,
 			Err(ReadError::Io(e)) => return Err(AcceptError::Io(e)),
-			Err(ReadError::BadRequest(e)) => {
-				return write_err_response(&mut stream, StatusCode::BAD_REQUEST, e).await;
+			Err(ReadError::BadRequest(e) | ReadError::Protocol(e)) => {
+				return write_err_response(&mut w, StatusCode::BAD_REQUEST, e).await;
 			}
-			Err(ReadError::Protocol(e)) => return Err(AcceptError::new_silent_drop(stream, e)),
 			Err(ReadError::Partial) => {
 				debug!("Only partial HTTP request is read.");
 				return Err(AcceptError::Io(io::Error::new(
@@ -173,14 +174,14 @@ impl StreamAcceptor for Settings {
 				"HTTP authentication failed with error ({}) and status code {}",
 				e, status
 			);
-			return write_err_response(&mut stream, status, e).await;
+			return write_err_response(&mut w, status, e).await;
 		}
 
 		let dst = match url_to_addr(req.uri()) {
 			Ok(addr) => addr,
 			Err(e) => {
 				debug!("Cannot convert uri '{}' into SocksAddr", req.uri());
-				return write_err_response(&mut stream, StatusCode::BAD_REQUEST, e).await;
+				return write_err_response(&mut w, StatusCode::BAD_REQUEST, e).await;
 			}
 		};
 
@@ -196,7 +197,10 @@ impl StreamAcceptor for Settings {
 			}
 		}
 
-		let handshake = HandshakeFinisher::new(stream, req, leftover);
+		let handshake = HttpHandshake {
+			stream: BufBytesStream { r: Box::new(r), w },
+			req,
+		};
 		Ok(Handshake::Stream(Box::new(handshake), dst))
 	}
 }
@@ -211,26 +215,66 @@ async fn write_err_response<T, W: AsyncWrite + Unpin>(
 	Err(AcceptError::Io(io::Error::new(io::ErrorKind::Other, e)))
 }
 
-struct HandshakeFinisher {
-	stream: Box<dyn AsyncReadWrite>,
-	req: http::Request<()>,
-	leftover: Vec<u8>,
+struct CustomReadHalf<R: AsyncBufRead + Unpin> {
+	inner: R,
+	buf: Option<bytes::Bytes>,
 }
 
-impl HandshakeFinisher {
-	fn new(stream: Box<dyn AsyncReadWrite>, req: http::Request<()>, leftover: Vec<u8>) -> Self {
-		Self {
-			stream,
-			req,
-			leftover,
+impl<R: AsyncBufRead + Unpin> AsyncRead for CustomReadHalf<R> {
+	fn poll_read(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+		dst: &mut tokio::io::ReadBuf<'_>,
+	) -> std::task::Poll<io::Result<()>> {
+		let me = self.get_mut();
+		if let Some(buf) = &mut me.buf {
+			let len = std::cmp::min(buf.remaining(), dst.remaining());
+			dst.put_slice(&buf[..len]);
+			buf.advance(len);
+			if buf.remaining() == 0 {
+				me.buf = None;
+			}
+			Ok(()).into()
+		} else {
+			Pin::new(&mut me.inner).poll_read(cx, dst)
 		}
 	}
 }
 
+impl<R: AsyncBufRead + Unpin> AsyncBufRead for CustomReadHalf<R> {
+	fn poll_fill_buf(
+		self: Pin<&mut Self>,
+		cx: &mut std::task::Context<'_>,
+	) -> std::task::Poll<io::Result<&[u8]>> {
+		let me = self.get_mut();
+		if let Some(buf) = &me.buf {
+			Ok(buf.chunk()).into()
+		} else {
+			Pin::new(&mut me.inner).poll_fill_buf(cx)
+		}
+	}
+
+	fn consume(self: Pin<&mut Self>, amt: usize) {
+		let me = self.get_mut();
+		if let Some(buf) = &mut me.buf {
+			buf.advance(amt);
+			if buf.remaining() == 0 {
+				me.buf = None;
+			}
+		} else {
+			Pin::new(&mut me.inner).consume(amt);
+		}
+	}
+}
+
+struct HttpHandshake {
+	stream: BufBytesStream,
+	req: http::Request<()>,
+}
+
 #[async_trait]
-impl Finish for HandshakeFinisher {
+impl Finish for HttpHandshake {
 	async fn finish(mut self: Box<Self>) -> Result<BufBytesStream, HandshakeError> {
-		let mut sent_buf = Vec::new();
 		let mut client_stream = self.stream;
 		let request = self.req;
 
@@ -239,7 +283,9 @@ impl Finish for HandshakeFinisher {
 			// get a status code to send back to client.
 			trace!("HTTP inbound using CONNECT method");
 			write_simple_response(&mut client_stream, StatusCode::OK).await?;
+			Ok(client_stream)
 		} else {
+			let mut sent_buf = Vec::new();
 			// For methods other than connect,
 			// put request into buffer and send to server.
 
@@ -262,15 +308,15 @@ impl Finish for HandshakeFinisher {
 			if let Ok(buf) = std::str::from_utf8(&sent_buf) {
 				trace!("HTTP inbound buffer: {}", buf);
 			}
+
+			Ok(BufBytesStream {
+				r: Box::new(CustomReadHalf {
+					inner: client_stream.r,
+					buf: Some(sent_buf.into()),
+				}),
+				w: client_stream.w,
+			})
 		}
-
-		// Put leftover bytes into buffer to send to server
-		sent_buf.extend(&self.leftover);
-
-		let (r, w) = client_stream.split();
-		let r = Box::new(AsyncReadExt::chain(io::Cursor::new(sent_buf), r));
-
-		Ok(BufBytesStream::new(Box::new(BufReader::new(r)), w))
 	}
 
 	async fn finish_err(self: Box<Self>, err: &OutboundError) -> Result<(), HandshakeError> {
@@ -405,22 +451,21 @@ fn put_response<B: BufMut>(buf: &mut B, response: &http::Response<()>) {
 	buf.put_slice(CRLF);
 }
 
-async fn read_request<IO>(stream: &mut IO) -> Result<(http::Request<()>, Vec<u8>), ReadError>
+async fn read_request<IO>(r: &mut IO) -> Result<http::Request<()>, ReadError>
 where
-	IO: AsyncRead + Unpin,
+	IO: AsyncBufRead + Unpin,
 {
 	trace!("Reading HTTP request");
-	read_http(stream, parse_request).await
-}
+	let mut buf = [0u8; MAX_BUFFER_SIZE];
+	let len = super::utils::read_until(r, CRLF_2, &mut buf)
+		.await?
+		.ok_or(ReadError::Partial)?;
+	let buf = &buf[..len];
 
-/// Try to parse bytes in `buf` as an HTTP request.
-///
-/// Returns an HTTP request and the number of bytes parsed if successful.
-fn parse_request(buf: &[u8]) -> Result<(http::Request<()>, usize), ReadError> {
-	let mut headers = [httparse::EMPTY_HEADER; 32];
+	let mut headers = [httparse::EMPTY_HEADER; super::utils::MAX_HEADERS_NUM];
 	let mut parsed_req = httparse::Request::new(&mut headers);
 
-	let len = match parsed_req
+	let _len = match parsed_req
 		.parse(buf)
 		.map_err(|e| ReadError::Protocol(e.into()))?
 	{
@@ -452,7 +497,7 @@ fn parse_request(buf: &[u8]) -> Result<(http::Request<()>, usize), ReadError> {
 	insert_headers(req.headers_mut(), parsed_req.headers)?;
 
 	trace!("HTTP request read: {:?}", req);
-	Ok((req, len))
+	Ok(req)
 }
 
 #[cfg(test)]

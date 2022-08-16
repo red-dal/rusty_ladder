@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::{
-	utils::{encode_auth, get_version, insert_headers, put_request_head, read_http, ReadError},
+	utils::{encode_auth, get_version, insert_headers, put_request_head, ReadError},
 	PROTOCOL_NAME,
 };
 use crate::{
@@ -29,7 +29,7 @@ use crate::{
 	},
 };
 use http::{header, Request, StatusCode};
-use tokio::io::BufReader;
+use tokio::io::{AsyncBufRead, BufReader};
 
 // ------------------------------------------------------------------
 //                               Builder
@@ -103,13 +103,16 @@ impl Settings {
 	/// Connect to `stream` after it's connected on a transport layer.
 	async fn priv_connect<'a>(
 		&'a self,
-		mut stream: Box<dyn AsyncReadWrite>,
+		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
 	) -> Result<BufBytesStream, OutboundError> {
 		debug!(
 			"Creating HTTP proxy connection to '{}', dst: '{}'",
 			self.addr, dst
 		);
+
+		let (r, mut w) = stream.split();
+		let mut r = BufReader::new(r);
 
 		// Making HTTP request
 		let dst_str = dst.to_string();
@@ -138,10 +141,10 @@ impl Settings {
 		let mut buf = Vec::with_capacity(512);
 		// Send HTTP request to remote server
 		put_request_head(&mut buf, &req);
-		stream.write_all(&buf).await?;
+		w.write_all(&buf).await?;
 
 		// Read response from remote server
-		let (response, leftover) = read_response(&mut stream).await.map_err(|e| match e {
+		let response = read_response(&mut r).await.map_err(|e| match e {
 			ReadError::Io(e) => OutboundError::Io(e),
 			ReadError::Protocol(e) | ReadError::BadRequest(e) => OutboundError::Protocol(e),
 			ReadError::Partial => OutboundError::Protocol("incomplete HTTP response".into()),
@@ -167,14 +170,7 @@ impl Settings {
 				))
 			}
 		}
-
-		let (rh, wh) = stream.split();
-		let rh = if leftover.is_empty() {
-			rh
-		} else {
-			Box::new(AsyncReadExt::chain(std::io::Cursor::new(leftover), rh))
-		};
-		Ok(BufBytesStream::new(Box::new(BufReader::new(rh)), wh))
+		Ok(BufBytesStream { r: Box::new(r), w })
 	}
 }
 
@@ -245,21 +241,20 @@ impl crate::protocol::DisplayInfo for SettingsBuilder {
 	}
 }
 
-async fn read_response<IO: AsyncRead + Unpin>(
-	stream: &mut IO,
-) -> Result<(http::Response<()>, Vec<u8>), ReadError> {
+async fn read_response<IO: AsyncBufRead + Unpin>(
+	r: &mut IO,
+) -> Result<http::Response<()>, ReadError> {
 	trace!("Reading HTTP response");
-	read_http(stream, parse_response).await
-}
+	let mut buf = [0u8; super::MAX_BUFFER_SIZE];
+	let len = super::utils::read_until(r, CRLF_2, &mut buf)
+		.await?
+		.ok_or(ReadError::Partial)?;
+	let buf = &buf[..len];
 
-/// Try to parse bytes in `buf` as an HTTP response.
-///
-/// Returns an HTTP response and the number of bytes parsed if successful.
-fn parse_response(buf: &[u8]) -> Result<(http::Response<()>, usize), ReadError> {
-	let mut headers = [httparse::EMPTY_HEADER; 32];
+	let mut headers = [httparse::EMPTY_HEADER; super::utils::MAX_HEADERS_NUM];
 	let mut parsed_resp = httparse::Response::new(&mut headers);
 
-	let len = match parsed_resp
+	let _len = match parsed_resp
 		.parse(buf)
 		.map_err(|e| ReadError::Protocol(e.into()))?
 	{
@@ -288,7 +283,7 @@ fn parse_response(buf: &[u8]) -> Result<(http::Response<()>, usize), ReadError> 
 	insert_headers(resp.headers_mut(), parsed_resp.headers)?;
 
 	trace!("HTTP response read: {:?}", resp);
-	Ok((resp, len))
+	Ok(resp)
 }
 
 #[cfg(test)]

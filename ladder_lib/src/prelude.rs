@@ -40,3 +40,5 @@ pub type BoxStdErr = Box<dyn StdErr + Send + Sync>;
 
 #[allow(dead_code)]
 pub const CRLF: &[u8] = b"\r\n";
+#[allow(dead_code)]
+pub const CRLF_2: &[u8] = b"\r\n\r\n";
