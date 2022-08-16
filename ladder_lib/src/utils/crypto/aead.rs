@@ -42,8 +42,8 @@ impl Algorithm {
 	#[allow(dead_code)]
 	pub fn key_size(self) -> NonZeroU8 {
 		match self {
-			Self::Aes128Gcm => *non_zeros::U8_16,
-			Self::Aes256Gcm | Self::ChaCha20Poly1305 => *non_zeros::U8_32,
+			Self::Aes128Gcm => non_zeros::u8!(16),
+			Self::Aes256Gcm | Self::ChaCha20Poly1305 => non_zeros::u8!(32),
 		}
 	}
 }

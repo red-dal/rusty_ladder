@@ -149,7 +149,7 @@ impl codec::Decode for Decoder {
 			ReadState::Salt { key: _ } => Some(self.algo.key_size().into()),
 			ReadState::Decrypt { dec: _, state } => match state {
 				// Length part is always ( 2 + TAG_LEN (16 bytes) = 18 bytes ).
-				DecodeState::Length => Some((*non_zeros::U8_18).into()),
+				DecodeState::Length => Some((non_zeros::u8!(18)).into()),
 				DecodeState::Payload(len) => {
 					Some(NonZeroUsize::new(aead::TAG_LEN + usize::from(len.get())).unwrap())
 				}

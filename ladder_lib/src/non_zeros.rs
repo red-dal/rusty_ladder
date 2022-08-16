@@ -17,63 +17,36 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use lazy_static::lazy_static;
-use std::num::{NonZeroU16, NonZeroU8};
-
-macro_rules! make_nonzero {
-	($t:ty, $name:ident, $val:literal) => {
-		lazy_static! {
-			pub static ref $name: $t = <$t>::new($val).unwrap();
-		}
-	};
+macro_rules! u8 {
+	($val:expr) => {{
+		use std::num::NonZeroU8;
+		const __VAL: NonZeroU8 = match NonZeroU8::new($val) {
+			Some(v) => v,
+			// Ugly hack to make compiler report error,
+			// because compile time panic is not supported.
+			#[deny(const_err)]
+			None => [][($val == 0) as usize],
+		};
+		__VAL
+	}};
 }
-
-macro_rules! make_u8 {
-	($name:ident, $val:literal) => {
-		make_nonzero!(NonZeroU8, $name, $val);
-	};
-}
-
-macro_rules! make_u16 {
-	($name:ident, $val:literal) => {
-		make_nonzero!(NonZeroU16, $name, $val);
-	};
-}
-
-make_u8!(U8_1, 1_u8);
-make_u8!(U8_2, 2_u8);
-make_u8!(U8_4, 4_u8);
-make_u8!(U8_6, 6_u8);
-make_u8!(U8_8, 8_u8);
-make_u8!(U8_10, 10_u8);
-make_u8!(U8_12, 12_u8);
-make_u8!(U8_16, 16_u8);
-make_u8!(U8_18, 18_u8);
-make_u8!(U8_32, 32_u8);
-make_u8!(U8_64, 64_u8);
-make_u8!(U8_128, 128_u8);
-
-make_u16!(U16_256, 256_u16);
-make_u16!(U16_512, 512_u16);
 
 #[cfg(test)]
-mod tests {
+mod test {
 	use super::*;
+	use std::num::NonZeroU8;
 
 	#[test]
-	fn test_nums() {
-		assert_eq!(U8_1.get(), 1_u8);
-		assert_eq!(U8_2.get(), 2_u8);
-		assert_eq!(U8_4.get(), 4_u8);
-		assert_eq!(U8_6.get(), 6_u8);
-		assert_eq!(U8_8.get(), 8_u8);
-		assert_eq!(U8_10.get(), 10_u8);
-		assert_eq!(U8_12.get(), 12_u8);
-		assert_eq!(U8_16.get(), 16_u8);
-		assert_eq!(U8_18.get(), 18_u8);
-		assert_eq!(U8_32.get(), 32_u8);
-		assert_eq!(U8_64.get(), 64_u8);
-		assert_eq!(U16_256.get(), 256_u16);
-		assert_eq!(U16_512.get(), 512_u16);
+	fn test_u8() {
+		assert_eq!(NonZeroU8::new(16).unwrap(), u8!(16));
+		assert_eq!(NonZeroU8::new(1).unwrap(), u8!(1));
+		assert_eq!(NonZeroU8::new(255).unwrap(), u8!(255));
+		// This will cause compile error.
+		// assert_eq!(NonZeroU8::new(0).unwrap(), u8!(0));
+
+		// This will also cause compile error.
+		// assert_eq!(NonZeroU8::new(256).unwrap(), u8!(256));
 	}
 }
+
+pub(crate) use u8;
