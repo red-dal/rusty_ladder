@@ -84,7 +84,7 @@ impl Server {
 				#[cfg(feature = "use-udp")]
 				let udp_session_timeout = self.global.udp_session_timeout;
 				serve_inbound(inbound.clone(), inbound_ind, monitor.clone(), move |args| {
-					handle_incomming(
+					handle_incoming(
 						args,
 						server.clone(),
 						#[cfg(feature = "use-udp")]
@@ -249,7 +249,7 @@ where
 	}
 }
 
-async fn handle_incomming(
+async fn handle_incoming(
 	args: CallbackArgs,
 	server: Arc<Server>,
 	#[cfg(feature = "use-udp")] udp_session_timeout: std::time::Duration,

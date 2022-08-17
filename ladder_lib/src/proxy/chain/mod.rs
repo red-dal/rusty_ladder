@@ -22,7 +22,7 @@ use crate::protocol::outbound::udp::{Connector, GetConnector};
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, StreamConnector},
+		outbound::{Error as OutboundError, StreamConnector, StreamFunc},
 		AsyncReadWrite, BufBytesStream, GetConnectorError, GetProtocolName, ProxyContext,
 	},
 };
@@ -230,14 +230,14 @@ mod tests {
 			}
 		}
 
-		struct DummpContext {
+		struct DummyContext {
 			first: DummyProxy,
 			second: DummyProxy,
 			third: DummyProxy,
 		}
 
 		#[async_trait]
-		impl ProxyContext for DummpContext {
+		impl ProxyContext for DummyContext {
 			async fn lookup_host(&self, _domain: &str, _port: u16) -> io::Result<Vec<SocketAddr>> {
 				unreachable!()
 			}
@@ -263,7 +263,7 @@ mod tests {
 			}
 		}
 
-		let context = DummpContext {
+		let context = DummyContext {
 			first: DummyProxy {
 				tag: "first".into(),
 				addr: "127.0.0.1:2222".parse().unwrap(),

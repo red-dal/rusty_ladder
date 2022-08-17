@@ -215,12 +215,19 @@ async fn write_err_response<T, W: AsyncWrite + Unpin>(
 	Err(AcceptError::Io(io::Error::new(io::ErrorKind::Other, e)))
 }
 
-struct CustomReadHalf<R: AsyncBufRead + Unpin> {
+/// HTTP read half.
+///
+/// Data in `buf` will be read first before polling `inner`.
+///
+/// This is used so ugly things like
+/// `Box::new(BufRead::new(io::chian(Cursor::new(buf), inner)))`
+/// can be avoided.
+struct ChainedReadHalf<R: AsyncBufRead + Unpin> {
 	inner: R,
 	buf: Option<bytes::Bytes>,
 }
 
-impl<R: AsyncBufRead + Unpin> AsyncRead for CustomReadHalf<R> {
+impl<R: AsyncBufRead + Unpin> AsyncRead for ChainedReadHalf<R> {
 	fn poll_read(
 		self: Pin<&mut Self>,
 		cx: &mut std::task::Context<'_>,
@@ -241,7 +248,7 @@ impl<R: AsyncBufRead + Unpin> AsyncRead for CustomReadHalf<R> {
 	}
 }
 
-impl<R: AsyncBufRead + Unpin> AsyncBufRead for CustomReadHalf<R> {
+impl<R: AsyncBufRead + Unpin> AsyncBufRead for ChainedReadHalf<R> {
 	fn poll_fill_buf(
 		self: Pin<&mut Self>,
 		cx: &mut std::task::Context<'_>,
@@ -276,21 +283,20 @@ struct HttpHandshake {
 impl Finish for HttpHandshake {
 	async fn finish(mut self: Box<Self>) -> Result<BufBytesStream, HandshakeError> {
 		let mut client_stream = self.stream;
-		let request = self.req;
+		let req = self.req;
 
-		if request.method() == Method::CONNECT {
-			// For connect method,
-			// get a status code to send back to client.
+		if req.method() == Method::CONNECT {
+			// Send status back to client
 			trace!("HTTP inbound using CONNECT method");
 			write_simple_response(&mut client_stream, StatusCode::OK).await?;
 			Ok(client_stream)
 		} else {
+			trace!("HTTP inbound not using CONNECT method ({})", req.method());
+			// For non-CONNECT method, the request is proxied to dst.
+			// Write the request into `sent_buf` and chain it before stream's read half.
 			let mut sent_buf = Vec::new();
-			// For methods other than connect,
-			// put request into buffer and send to server.
 
-			// Break down request
-			let (mut req_parts, _) = request.into_parts();
+			let (mut req_parts, _) = req.into_parts();
 			let uri_parts = req_parts.uri.into_parts();
 
 			// New url only keep query path
@@ -300,17 +306,15 @@ impl Finish for HttpHandshake {
 				Uri::from_parts(new_uri_parts).expect("Cannot make new HTTP URI from parts");
 			req_parts.uri = new_uri;
 
-			// Reform request
 			let req = http::Request::from_parts(req_parts, ());
 
-			trace!("HTTP inbound not using CONNECT method ({})", req.method());
 			put_request_head(&mut sent_buf, &req);
 			if let Ok(buf) = std::str::from_utf8(&sent_buf) {
 				trace!("HTTP inbound buffer: {}", buf);
 			}
 
 			Ok(BufBytesStream {
-				r: Box::new(CustomReadHalf {
+				r: Box::new(ChainedReadHalf {
 					inner: client_stream.r,
 					buf: Some(sent_buf.into()),
 				}),

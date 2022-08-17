@@ -608,7 +608,7 @@ mod config {
 	impl Log {
 		/// Initialize logger.
 		///
-		/// DO NOT call this funtion more than once!
+		/// DO NOT call this function more than once!
 		pub fn init_logger(&self) -> Result<(), BoxStdErr> {
 			if let Some(output) = &self.output {
 				let time_format = time::format_description::parse(
