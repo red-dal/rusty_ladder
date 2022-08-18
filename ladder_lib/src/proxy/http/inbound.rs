@@ -21,7 +21,7 @@ use super::{
 	utils::{
 		encode_auth, get_version, insert_headers, put_http_headers, put_request_head, ReadError,
 	},
-	PROTOCOL_NAME,
+	MAX_USERNAME_SIZE, PROTOCOL_NAME,
 };
 use crate::{
 	prelude::*,
@@ -67,7 +67,7 @@ impl SettingsBuilder {
 			.users
 			.iter()
 			.map(|(user, pass)| (user.as_str(), pass.as_str()));
-		Ok(Settings::new(users))
+		Settings::new(users)
 	}
 
 	/// Parse a URL with the following format:
@@ -127,13 +127,27 @@ pub struct Settings {
 }
 
 impl Settings {
+	/// Creates a new [`Settings`].
+	///
+	/// - `users` a list of (username, password)
+	///
+	/// # Errors
+	///
+	/// Return an error if any username and
+	/// password in `users` is longer than 128 bytes.
 	#[inline]
-	pub fn new<'a>(users: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
-		let auths = users
-			.into_iter()
-			.map(|(user, pass)| encode_auth(user, pass))
-			.collect();
-		Self { auths }
+	pub fn new<'a>(users: impl IntoIterator<Item = (&'a str, &'a str)>) -> Result<Self, BoxStdErr> {
+		let mut auths = HashSet::new();
+		for (user, pass) in users {
+			if user.len() > MAX_USERNAME_SIZE {
+				return Err("username too long".into());
+			}
+			if pass.len() > MAX_USERNAME_SIZE {
+				return Err("password too long".into());
+			}
+			auths.insert(encode_auth(user, pass));
+		}
+		Ok(Self { auths })
 	}
 }
 
@@ -152,13 +166,15 @@ impl StreamAcceptor for Settings {
 		stream: Box<dyn AsyncReadWrite>,
 		_info: SessionInfo,
 	) -> Result<Handshake<'a>, AcceptError> {
-		let (r, mut w) = stream.split();
+		let (r, w) = stream.split();
 		let mut r = BufReader::new(r);
-		let mut req = match read_request(&mut r).await {
+		let mut wh = HttpWriteHelper::new(w);
+
+		let req = match read_request(&mut r).await {
 			Ok(r) => r,
 			Err(ReadError::Io(e)) => return Err(AcceptError::Io(e)),
 			Err(ReadError::BadRequest(e) | ReadError::Protocol(e)) => {
-				return write_err_response(&mut w, StatusCode::BAD_REQUEST, e).await;
+				return wh.write_response_err(StatusCode::BAD_REQUEST, e).await;
 			}
 			Err(ReadError::Partial) => {
 				debug!("Only partial HTTP request is read.");
@@ -168,51 +184,114 @@ impl StreamAcceptor for Settings {
 				)));
 			}
 		};
-
-		if let Err((e, status)) = check_update_auth(&mut req, &self.auths) {
-			debug!(
-				"HTTP authentication failed with error ({}) and status code {}",
-				e, status
-			);
-			return write_err_response(&mut w, status, e).await;
+		match check_auth(&req, &self.auths) {
+			StatusCode::OK => {
+				// Do nothing
+			}
+			StatusCode::PROXY_AUTHENTICATION_REQUIRED => {
+				debug!("Responding to client and wait for proper authentication...");
+				wh.write_response(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
+					.await?;
+				wh.w.shutdown().await?;
+				return Err(AcceptError::Protocol("HTTP authentication failed".into()));
+			}
+			other => {
+				return wh
+					.write_response_err(
+						other,
+						format!("HTTP authentication failed (status code {})", other),
+					)
+					.await;
+			}
 		}
 
 		let dst = match url_to_addr(req.uri()) {
 			Ok(addr) => addr,
 			Err(e) => {
 				debug!("Cannot convert uri '{}' into SocksAddr", req.uri());
-				return write_err_response(&mut w, StatusCode::BAD_REQUEST, e).await;
+				return wh.write_response_err(StatusCode::BAD_REQUEST, e).await;
 			}
 		};
 
-		if req.method() == Method::CONNECT {
-			// On connect method,
-			// do nothing.
-		} else {
-			// On any other method,
-			// remove all proxy related headers.
+		let req = {
+			let mut req = req;
 			let headers = req.headers_mut();
+			headers.remove(header::PROXY_AUTHORIZATION);
 			if let Some(val) = headers.remove("proxy-connection") {
 				headers.insert(header::CONNECTION, val);
 			}
-		}
+			req
+		};
 
+		// It's possible that outbound fails,
+		// so response to client in `finish`.
 		let handshake = HttpHandshake {
-			stream: BufBytesStream { r: Box::new(r), w },
+			stream: BufBytesStream {
+				r: Box::new(r),
+				w: wh.w,
+			},
 			req,
 		};
 		Ok(Handshake::Stream(Box::new(handshake), dst))
 	}
 }
 
-async fn write_err_response<T, W: AsyncWrite + Unpin>(
-	w: &mut W,
-	status: StatusCode,
-	e: BoxStdErr,
-) -> Result<T, AcceptError> {
-	write_simple_response(w, status).await?;
-	w.shutdown().await?;
-	Err(AcceptError::Io(io::Error::new(io::ErrorKind::Other, e)))
+struct HttpWriteHelper<W: AsyncWrite + Unpin> {
+	pub w: W,
+	// 512 bytes should be enough for writing simple responses.
+	buf: [u8; 512],
+}
+
+impl<W: AsyncWrite + Unpin> HttpWriteHelper<W> {
+	fn new(w: W) -> Self {
+		Self { w, buf: [0u8; 512] }
+	}
+
+	fn put_response(buf: &mut impl BufMut, response: &http::Response<()>) -> usize {
+		let original_remaining = buf.remaining_mut();
+		// Line 0
+		buf.put_slice(b"HTTP/1.1 ");
+		buf.put_slice(response.status().as_str().as_bytes());
+		buf.put_slice(b" ");
+		if let Some(reason) = response.status().canonical_reason() {
+			buf.put_slice(reason.as_bytes());
+		}
+		// End of line 0
+		buf.put_slice(CRLF);
+
+		put_http_headers(buf, response.headers());
+
+		// End of response
+		buf.put_slice(CRLF);
+		original_remaining - buf.remaining_mut()
+	}
+
+	async fn write_response(&mut self, status: StatusCode) -> io::Result<()> {
+		let mut builder = http::Response::builder().status(status);
+		if StatusCode::PROXY_AUTHENTICATION_REQUIRED == status {
+			builder = builder.header(http::header::PROXY_AUTHENTICATE, "Basic realm=\"proxy\"");
+		}
+		let response = builder
+			.body(())
+			.expect("Cannot build HTTP response with status code");
+		let len = Self::put_response(&mut self.buf.as_mut(), &response);
+		debug!("Writing HTTP response: {response:?}");
+		self.w.write_all(&self.buf[..len]).await?;
+		self.w.flush().await
+	}
+
+	async fn write_response_err<T>(
+		mut self,
+		status: StatusCode,
+		e: impl Into<BoxStdErr>,
+	) -> Result<T, AcceptError> {
+		self.write_response(status).await?;
+		self.w.shutdown().await?;
+		Err(AcceptError::Io(io::Error::new(
+			io::ErrorKind::Other,
+			e.into(),
+		)))
+	}
 }
 
 /// HTTP read half.
@@ -288,7 +367,9 @@ impl Finish for HttpHandshake {
 		if req.method() == Method::CONNECT {
 			// Send status back to client
 			trace!("HTTP inbound using CONNECT method");
-			write_simple_response(&mut client_stream, StatusCode::OK).await?;
+			HttpWriteHelper::new(&mut client_stream)
+				.write_response(StatusCode::OK)
+				.await?;
 			Ok(client_stream)
 		} else {
 			trace!("HTTP inbound not using CONNECT method ({})", req.method());
@@ -331,7 +412,9 @@ impl Finish for HttpHandshake {
 			StatusCode::BAD_GATEWAY
 		};
 		debug!("Outbound error occurred when finishing HTTP inbound handshake. Sending response with status code {}", status);
-		write_simple_response(&mut client_stream, status).await?;
+		HttpWriteHelper::new(&mut client_stream)
+			.write_response(status)
+			.await?;
 		client_stream.shutdown().await?;
 		Ok(())
 	}
@@ -341,10 +424,7 @@ impl Finish for HttpHandshake {
 ///
 /// # Error
 /// If authentication failed, an `Err` and a status code other than 200 will be returned.
-fn check_update_auth(
-	req: &mut http::Request<()>,
-	auths: &HashSet<String>,
-) -> Result<(), (BoxStdErr, StatusCode)> {
+fn check_auth(req: &http::Request<()>, auths: &HashSet<String>) -> StatusCode {
 	if !auths.is_empty() {
 		if let Some(auth) = req.headers().get(header::PROXY_AUTHORIZATION) {
 			if let Ok(auth_str) = auth.to_str() {
@@ -353,45 +433,40 @@ fn check_update_auth(
 				let auth_type = if let Some(auth_type) = parts.next() {
 					auth_type
 				} else {
-					let msg = format!("wrong HTTP authentication format '{}'", auth_str);
-					return Err((msg.into(), StatusCode::UNAUTHORIZED));
+					debug!("wrong HTTP authentication format '{}'", auth_str);
+					return StatusCode::NOT_FOUND;
 				};
 				let auth_code = if let Some(auth_code) = parts.next() {
 					auth_code
 				} else {
-					let msg = format!("wrong HTTP authentication format '{}'", auth_str);
-					return Err((msg.into(), StatusCode::UNAUTHORIZED));
+					debug!("wrong HTTP authentication format '{}'", auth_str);
+					return StatusCode::NOT_FOUND;
 				};
 
 				// Authentication value must be ascii
 				if !auth_type.eq_ignore_ascii_case("basic") {
-					let msg = format!(
+					debug!(
 						"wrong HTTP authentication type '{}', only 'Basic' is supported",
 						auth_type
 					);
-					return Err((msg.into(), StatusCode::UNAUTHORIZED));
+					return StatusCode::NOT_FOUND;
 				}
 
-				if auths.contains(auth_code) {
-					// Authentication succeeded, remove auth header.
-					req.headers_mut().remove(header::PROXY_AUTHORIZATION);
-				} else {
-					// Authentication failed
-					let msg = format!("HTTP authentication failed with auth '{}'", auth_str);
-					return Err((msg.into(), StatusCode::UNAUTHORIZED));
+				if !auths.contains(auth_code) {
+					debug!("HTTP authentication failed with auth '{}'", auth_str);
+					return StatusCode::NOT_FOUND;
 				}
 			} else {
-				// Authentication not valid UTF8
-				let msg = "HTTP authentication is not valid UTF8";
-				return Err((msg.into(), StatusCode::UNAUTHORIZED));
+				debug!("HTTP authentication is not valid UTF8");
+				return StatusCode::BAD_REQUEST;
 			}
 		} else {
 			// Authentication required, but request has none
-			let msg = "HTTP authentcation is required, but none provided";
-			return Err((msg.into(), StatusCode::PROXY_AUTHENTICATION_REQUIRED));
+			debug!("HTTP authentcation is required, but none provided");
+			return StatusCode::PROXY_AUTHENTICATION_REQUIRED;
 		}
 	}
-	Ok(())
+	StatusCode::OK
 }
 
 fn url_to_addr(url: &Uri) -> Result<SocksAddr, BoxStdErr> {
@@ -421,44 +496,7 @@ fn url_to_addr(url: &Uri) -> Result<SocksAddr, BoxStdErr> {
 	Ok(SocksAddr::new(dest, port))
 }
 
-async fn write_simple_response<W: AsyncWrite + Unpin>(
-	w: &mut W,
-	status: StatusCode,
-) -> io::Result<()> {
-	let mut buf = Vec::with_capacity(512);
-	let response = http::Response::builder()
-		.status(status)
-		.body(())
-		.expect("Cannot build HTTP response with status code");
-	put_response(&mut buf, &response);
-	w.write_all(&buf).await
-}
-
-fn put_response<B: BufMut>(buf: &mut B, response: &http::Response<()>) {
-	// Line 0
-	// Version
-	buf.put_slice(b"HTTP/1.1 ");
-	// Status code
-	buf.put_slice(response.status().as_str().as_bytes());
-	buf.put_slice(b" ");
-	// Reason, optional
-	if let Some(reason) = response.status().canonical_reason() {
-		buf.put_slice(reason.as_bytes());
-	}
-	// End of line 0
-	buf.put_slice(CRLF);
-
-	// Multiple lines for response headers
-	put_http_headers(buf, response.headers());
-
-	// End of response
-	buf.put_slice(CRLF);
-}
-
-async fn read_request<IO>(r: &mut IO) -> Result<http::Request<()>, ReadError>
-where
-	IO: AsyncBufRead + Unpin,
-{
+async fn read_request(r: impl AsyncBufRead + Unpin) -> Result<http::Request<()>, ReadError> {
 	trace!("Reading HTTP request");
 	let mut buf = [0u8; MAX_BUFFER_SIZE];
 	let len = super::utils::read_until(r, CRLF_2, &mut buf)
@@ -500,7 +538,7 @@ where
 
 	insert_headers(req.headers_mut(), parsed_req.headers)?;
 
-	trace!("HTTP request read: {:?}", req);
+	trace!("HTTP request: {:?}", req);
 	Ok(req)
 }
 

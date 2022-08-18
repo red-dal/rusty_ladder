@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	utils::{encode_auth, get_version, insert_headers, put_request_head, ReadError},
-	PROTOCOL_NAME,
+	MAX_USERNAME_SIZE, PROTOCOL_NAME,
 };
 use crate::{
 	prelude::*,
@@ -58,7 +58,7 @@ impl SettingsBuilder {
 	///
 	/// Returns an error if error occurred when building `self.transport`.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
-		Ok(Settings::new(&self.user, &self.pass, self.addr))
+		Settings::new(&self.user, &self.pass, self.addr)
 	}
 
 	/// Parse a URL with the following format:
@@ -138,10 +138,14 @@ impl Settings {
 		};
 		trace!("HTTP request: {:?}", req);
 
-		let mut buf = Vec::with_capacity(512);
-		// Send HTTP request to remote server
-		put_request_head(&mut buf, &req);
-		w.write_all(&buf).await?;
+		{
+			let mut buf = [0u8; 512];
+			let mut tmp_buf = buf.as_mut();
+			let original_remaining = tmp_buf.remaining_mut();
+			put_request_head(&mut tmp_buf, &req);
+			let len = original_remaining - tmp_buf.remaining_mut();
+			w.write_all(&buf[..len]).await?;
+		}
 
 		// Read response from remote server
 		let response = read_response(&mut r).await.map_err(|e| match e {
@@ -202,22 +206,33 @@ impl StreamConnector for Settings {
 }
 
 impl Settings {
+	/// Creates a new [`Settings`].
+	///
+	/// # Errors
+	///
+	/// Returns an error if `user` or `pass` is longer than 128 bytes.
 	#[inline]
-	#[must_use]
-	pub fn new(user: &str, pass: &str, addr: SocksAddr) -> Self {
+	pub fn new(user: &str, pass: &str, addr: SocksAddr) -> Result<Self, BoxStdErr> {
+		if user.len() > MAX_USERNAME_SIZE {
+			return Err("username too long".into());
+		}
+		if pass.len() > MAX_USERNAME_SIZE {
+			return Err("password too long".into());
+		}
 		let auth = if user.is_empty() && pass.is_empty() {
 			None
 		} else {
 			Some(encode_auth(user, pass))
 		};
 
-		Self { auth, addr }
+		Ok(Self { auth, addr })
 	}
 
+	#[allow(clippy::missing_panics_doc)]
 	#[inline]
 	#[must_use]
 	pub fn new_no_auth(addr: SocksAddr) -> Self {
-		Self::new("", "", addr)
+		Self::new("", "", addr).unwrap()
 	}
 }
 

@@ -27,7 +27,10 @@ pub mod outbound;
 pub use utils::Error;
 pub const PROTOCOL_NAME: &str = "http";
 
+/// Max size of an HTTP request/response.
 const MAX_BUFFER_SIZE: usize = 8 * 1024;
+/// Max length of username and password in settings.
+const MAX_USERNAME_SIZE: usize = 128;
 
 #[cfg(test)]
 #[cfg(feature = "http-inbound")]
@@ -40,7 +43,7 @@ mod tests {
 
 	#[test]
 	fn test_http() {
-		let inbound = InboundSettings::new(vec![]);
+		let inbound = InboundSettings::new(vec![]).unwrap();
 		run_proxy_test("http".into(), inbound, |in_addr| {
 			OutboundSettings::new_no_auth(in_addr)
 		});
@@ -55,9 +58,9 @@ mod tests {
 			("a", "b"),
 			("aa", "bb"),
 		];
-		let inbound = InboundSettings::new(users);
+		let inbound = InboundSettings::new(users).unwrap();
 		run_proxy_test("http-auth".into(), inbound, |in_addr| {
-			OutboundSettings::new("a", "b", in_addr)
+			OutboundSettings::new("a", "b", in_addr).unwrap()
 		});
 	}
 }
