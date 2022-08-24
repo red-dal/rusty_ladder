@@ -22,7 +22,7 @@ use crate::{
 	prelude::*,
 	protocol::{
 		outbound::{Connector, StreamConnector},
-		GetConnectorError, GetProtocolName, ProxyContext, SocksAddr, SocksDestination,
+		GetConnectorError, ProxyContext, SocksAddr, SocksDestination,
 	},
 };
 use std::{io, net::SocketAddr, time::Duration};
@@ -73,12 +73,7 @@ impl ProxyContext for Server {
 		let outbound = self
 			.get_outbound(tag)
 			.ok_or_else(|| GetConnectorError::UnknownTag(Tag::from(tag)))?;
-		outbound
-			.get_tcp_stream_connector()
-			.ok_or_else(|| GetConnectorError::NotSupported {
-				tag: Tag::from(tag),
-				type_name: outbound.protocol_name().into(),
-			})
+		Ok(outbound)
 	}
 }
 

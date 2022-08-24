@@ -22,7 +22,7 @@ use crate::protocol::outbound::udp;
 use crate::{
 	prelude::*,
 	protocol::{
-		outbound::{Error as OutboundError, StreamFunc, Connector, StreamConnector},
+		outbound::{Connector, Error as OutboundError, StreamConnector, StreamFunc},
 		BufBytesStream, GetProtocolName, ProxyContext,
 	},
 };
@@ -37,7 +37,7 @@ mod details {
 	use super::OutboundError;
 	use crate::{
 		protocol::{
-			outbound::{StreamFunc, StreamConnector},
+			outbound::{StreamConnector, StreamFunc},
 			BufBytesStream, GetProtocolName, ProxyContext, SocksAddr,
 		},
 		proxy,
@@ -88,12 +88,6 @@ mod details {
 	impl udp::GetConnector for Details {
 		#[implement]
 		fn get_udp_connector(&self) -> Option<udp::Connector<'_>> {}
-	}
-
-	impl Details {
-		#[must_use]
-		#[implement]
-		pub fn get_tcp_stream_connector(&self) -> Option<&dyn StreamConnector> {}
 	}
 }
 
@@ -166,11 +160,6 @@ pub struct Outbound {
 }
 
 impl Outbound {
-	#[must_use]
-	pub fn get_tcp_stream_connector(&self) -> Option<&dyn StreamConnector> {
-		self.settings.get_tcp_stream_connector()
-	}
-
 	pub(crate) async fn connect(
 		&self,
 		dst: &SocksAddr,
