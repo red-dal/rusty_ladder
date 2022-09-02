@@ -31,6 +31,7 @@ use crate::{
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	proxy::http::MAX_BUFFER_SIZE,
+	utils::ChainedReadHalf,
 };
 use http::{header, uri::Scheme, Method, StatusCode, Uri};
 use std::{
@@ -294,65 +295,6 @@ impl<W: AsyncWrite + Unpin> HttpWriteHelper<W> {
 	}
 }
 
-/// HTTP read half.
-///
-/// Data in `buf` will be read first before polling `inner`.
-///
-/// This is used so ugly things like
-/// `Box::new(BufRead::new(io::chian(Cursor::new(buf), inner)))`
-/// can be avoided.
-struct ChainedReadHalf<R: AsyncBufRead + Unpin> {
-	inner: R,
-	buf: Option<bytes::Bytes>,
-}
-
-impl<R: AsyncBufRead + Unpin> AsyncRead for ChainedReadHalf<R> {
-	fn poll_read(
-		self: Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
-		dst: &mut tokio::io::ReadBuf<'_>,
-	) -> std::task::Poll<io::Result<()>> {
-		let me = self.get_mut();
-		if let Some(buf) = &mut me.buf {
-			let len = std::cmp::min(buf.remaining(), dst.remaining());
-			dst.put_slice(&buf[..len]);
-			buf.advance(len);
-			if buf.remaining() == 0 {
-				me.buf = None;
-			}
-			Ok(()).into()
-		} else {
-			Pin::new(&mut me.inner).poll_read(cx, dst)
-		}
-	}
-}
-
-impl<R: AsyncBufRead + Unpin> AsyncBufRead for ChainedReadHalf<R> {
-	fn poll_fill_buf(
-		self: Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
-	) -> std::task::Poll<io::Result<&[u8]>> {
-		let me = self.get_mut();
-		if let Some(buf) = &me.buf {
-			Ok(buf.chunk()).into()
-		} else {
-			Pin::new(&mut me.inner).poll_fill_buf(cx)
-		}
-	}
-
-	fn consume(self: Pin<&mut Self>, amt: usize) {
-		let me = self.get_mut();
-		if let Some(buf) = &mut me.buf {
-			buf.advance(amt);
-			if buf.remaining() == 0 {
-				me.buf = None;
-			}
-		} else {
-			Pin::new(&mut me.inner).consume(amt);
-		}
-	}
-}
-
 struct HttpHandshake {
 	stream: BufBytesStream,
 	req: http::Request<()>,
@@ -395,10 +337,7 @@ impl Finish for HttpHandshake {
 			}
 
 			Ok(BufBytesStream {
-				r: Box::new(ChainedReadHalf {
-					inner: client_stream.r,
-					buf: Some(sent_buf.into()),
-				}),
+				r: Box::new(ChainedReadHalf::new(client_stream.r, sent_buf)),
 				w: client_stream.w,
 			})
 		}
@@ -499,10 +438,9 @@ fn url_to_addr(url: &Uri) -> Result<SocksAddr, BoxStdErr> {
 async fn read_request(r: impl AsyncBufRead + Unpin) -> Result<http::Request<()>, ReadError> {
 	trace!("Reading HTTP request");
 	let mut buf = [0u8; MAX_BUFFER_SIZE];
-	let len = super::utils::read_until(r, CRLF_2, &mut buf)
+	let buf = crate::utils::read_until(r, CRLF_2, &mut buf)
 		.await?
 		.ok_or(ReadError::Partial)?;
-	let buf = &buf[..len];
 
 	let mut headers = [httparse::EMPTY_HEADER; super::utils::MAX_HEADERS_NUM];
 	let mut parsed_req = httparse::Request::new(&mut headers);

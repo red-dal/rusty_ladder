@@ -261,10 +261,9 @@ async fn read_response<IO: AsyncBufRead + Unpin>(
 ) -> Result<http::Response<()>, ReadError> {
 	trace!("Reading HTTP response");
 	let mut buf = [0u8; super::MAX_BUFFER_SIZE];
-	let len = super::utils::read_until(r, CRLF_2, &mut buf)
+	let buf = crate::utils::read_until(r, CRLF_2, &mut buf)
 		.await?
 		.ok_or(ReadError::Partial)?;
-	let buf = &buf[..len];
 
 	let mut headers = [httparse::EMPTY_HEADER; super::utils::MAX_HEADERS_NUM];
 	let mut parsed_resp = httparse::Response::new(&mut headers);

@@ -208,3 +208,249 @@ pub(crate) fn fmt_iter<T: std::fmt::Display>(
 	}
 	Ok(())
 }
+
+mod read_until {
+	use std::io;
+	use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+
+	fn find_pat(src: &[u8], pat: &[u8]) -> Option<usize> {
+		if src.len() < pat.len() {
+			return None;
+		}
+		src.windows(pat.len()).position(|window| window == pat)
+	}
+
+	pub async fn read_until<'a>(
+		mut r: impl AsyncBufRead + Unpin,
+		pat: &[u8],
+		dst: &'a mut [u8],
+	) -> io::Result<Option<&'a [u8]>> {
+		let mut pos = 0;
+		assert!(pat.len() < dst.len());
+		assert!(!pat.is_empty());
+
+		while pos < dst.len() {
+			let data = r.fill_buf().await?;
+			// Reached EOF
+			if data.is_empty() {
+				return Err(io::ErrorKind::UnexpectedEof.into());
+			}
+
+			let dst_remaining = &mut dst[pos..];
+			let copy_len = std::cmp::min(dst_remaining.len(), data.len());
+			dst_remaining[..copy_len].copy_from_slice(&data[..copy_len]);
+
+			let start_pos = pos.saturating_sub(pat.len());
+			let curr_dst = &dst[start_pos..pos + copy_len];
+			if let Some(pat_pos) = find_pat(curr_dst, pat) {
+				let old_pos = pos;
+				pos = start_pos + pat_pos + pat.len();
+				r.consume(pos - old_pos);
+				return Ok(Some(&dst[..pos]));
+			}
+			pos += copy_len;
+			r.consume(copy_len);
+		}
+		Ok(None)
+	}
+
+	#[cfg(test)]
+	mod tests {
+		use super::*;
+		use tokio::io::{AsyncWriteExt, BufReader};
+
+		#[test]
+		fn test_find_pat() {
+			assert_eq!(find_pat(b"hello world!helloworld", b"hello"), Some(0));
+			assert_eq!(find_pat(b"hello world!helloworld", b"world"), Some(6));
+			assert_eq!(find_pat(b"hello world!helloworld", b"null"), None);
+		}
+
+		#[test]
+		fn test_read_until() {
+			let task = async move {
+				let (r, mut w) = tokio::io::duplex(1024);
+				let mut r = BufReader::new(r);
+				let mut dst = [0u8; 256];
+				w.write_all(b"HELLO WORLD\r\n\r\nextra").await.unwrap();
+				let buf = read_until(&mut r, b"\r\n\r\n", &mut dst)
+					.await
+					.unwrap()
+					.unwrap();
+				assert_eq!(buf, b"HELLO WORLD\r\n\r\n".as_ref());
+				let remaining = r.fill_buf().await.unwrap();
+				assert_eq!(remaining, b"extra");
+			};
+			tokio::runtime::Runtime::new().unwrap().block_on(task);
+		}
+
+		#[test]
+		fn test_read_until_steps() {
+			let task = async move {
+				let (r, mut w) = tokio::io::duplex(1024);
+				let mut r = BufReader::new(r);
+				let mut dst = [0u8; 256];
+
+				let write_task = async move {
+					w.write_all(b"HELLO WORLD").await.unwrap();
+					w.write_all(b"\r\n").await.unwrap();
+					w.write_all(b"\r\n").await.unwrap();
+					w.write_all(b"extra").await.unwrap();
+					w.shutdown().await.unwrap();
+				};
+
+				let read_task = async move {
+					let buf = read_until(&mut r, b"\r\n\r\n", &mut dst)
+						.await
+						.unwrap()
+						.unwrap();
+					assert_eq!(buf, b"HELLO WORLD\r\n\r\n".as_ref());
+					let remaining = r.fill_buf().await.unwrap();
+					assert_eq!(remaining, b"extra");
+				};
+
+				futures::future::join(write_task, read_task).await;
+			};
+			tokio::runtime::Runtime::new().unwrap().block_on(task);
+		}
+
+		#[test]
+		fn test_read_until_just_enough() {
+			let task = async move {
+				let (r, mut w) = tokio::io::duplex(1024);
+				let mut r = BufReader::new(r);
+				let mut dst = [0u8; 256];
+
+				let write_task = async move {
+					w.write_all(b"HELLO WORLD HELLO WORLD\r\n\r\n")
+						.await
+						.unwrap();
+					w.shutdown().await.unwrap();
+				};
+
+				let read_task = async move {
+					let buf = read_until(&mut r, b"\r\n\r\n", &mut dst)
+						.await
+						.unwrap()
+						.unwrap();
+					assert_eq!(buf, b"HELLO WORLD HELLO WORLD\r\n\r\n".as_ref());
+					let remaining = r.fill_buf().await.unwrap();
+					assert_eq!(remaining, b"");
+				};
+
+				futures::future::join(write_task, read_task).await;
+			};
+			tokio::runtime::Runtime::new().unwrap().block_on(task);
+		}
+
+		#[test]
+		fn test_read_until_not_found() {
+			println!("Testing not found");
+			let task = async move {
+				let (r, mut w) = tokio::io::duplex(1024);
+				let mut r = BufReader::new(r);
+				let mut dst = [0u8; 10];
+				w.write_all(b"HELLO WORLD HELLO WORLD\r\n\r\n")
+					.await
+					.unwrap();
+				w.shutdown().await.unwrap();
+				let len = read_until(&mut r, b"\r\n\r\n", &mut dst).await.unwrap();
+				assert_eq!(len, None);
+			};
+			tokio::runtime::Runtime::new().unwrap().block_on(task);
+		}
+
+		#[test]
+		fn test_read_until_fail_eof() {
+			println!("Testing not found");
+			let task = async move {
+				let (r, mut w) = tokio::io::duplex(1024);
+				let mut r = BufReader::new(r);
+				let mut dst = [0u8; 256];
+				w.write_all(b"HELLO WORLD\r\nextra").await.unwrap();
+				w.shutdown().await.unwrap();
+				let e = read_until(&mut r, b"\r\n\r\n", &mut dst).await.unwrap_err();
+				assert_eq!(e.kind(), io::ErrorKind::UnexpectedEof);
+			};
+			tokio::runtime::Runtime::new().unwrap().block_on(task);
+		}
+	}
+}
+
+pub(super) use read_until::read_until;
+
+mod chain_buf_read_half {
+	use bytes::{Buf, Bytes};
+	use std::{io, pin::Pin};
+	use tokio::io::{AsyncBufRead, AsyncRead};
+
+	/// HTTP read half.
+	///
+	/// Data in `buf` will be read first before polling `inner`.
+	///
+	/// This is used so ugly things like
+	/// `Box::new(BufRead::new(io::chian(Cursor::new(buf), inner)))`
+	/// can be avoided.
+	pub struct ChainedReadHalf<R: AsyncBufRead + Unpin> {
+		inner: R,
+		buf: Option<Bytes>,
+	}
+
+	impl<R: AsyncBufRead + Unpin> ChainedReadHalf<R> {
+		pub fn new(inner: R, buf: impl Into<Bytes>) -> Self {
+			Self {
+				inner,
+				buf: Some(buf.into()),
+			}
+		}
+	}
+
+	impl<R: AsyncBufRead + Unpin> AsyncRead for ChainedReadHalf<R> {
+		fn poll_read(
+			self: Pin<&mut Self>,
+			cx: &mut std::task::Context<'_>,
+			dst: &mut tokio::io::ReadBuf<'_>,
+		) -> std::task::Poll<io::Result<()>> {
+			let me = self.get_mut();
+			if let Some(buf) = &mut me.buf {
+				let len = std::cmp::min(buf.remaining(), dst.remaining());
+				dst.put_slice(&buf[..len]);
+				buf.advance(len);
+				if buf.remaining() == 0 {
+					me.buf = None;
+				}
+				Ok(()).into()
+			} else {
+				Pin::new(&mut me.inner).poll_read(cx, dst)
+			}
+		}
+	}
+
+	impl<R: AsyncBufRead + Unpin> AsyncBufRead for ChainedReadHalf<R> {
+		fn poll_fill_buf(
+			self: Pin<&mut Self>,
+			cx: &mut std::task::Context<'_>,
+		) -> std::task::Poll<io::Result<&[u8]>> {
+			let me = self.get_mut();
+			if let Some(buf) = &me.buf {
+				Ok(buf.chunk()).into()
+			} else {
+				Pin::new(&mut me.inner).poll_fill_buf(cx)
+			}
+		}
+
+		fn consume(self: Pin<&mut Self>, amt: usize) {
+			let me = self.get_mut();
+			if let Some(buf) = &mut me.buf {
+				buf.advance(amt);
+				if buf.remaining() == 0 {
+					me.buf = None;
+				}
+			} else {
+				Pin::new(&mut me.inner).consume(amt);
+			}
+		}
+	}
+}
+
+pub use chain_buf_read_half::ChainedReadHalf;

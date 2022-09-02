@@ -17,8 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use tokio::io::{AsyncBufRead, AsyncBufReadExt};
-
 use crate::{
 	prelude::*,
 	protocol::{inbound::HandshakeError, outbound::Error as OutboundError},
@@ -94,48 +92,6 @@ impl From<io::Error> for ReadError {
 }
 
 impl StdErr for ReadError {}
-
-fn find_pat(src: &[u8], pat: &[u8]) -> Option<usize> {
-	if src.len() < pat.len() {
-		return None;
-	}
-	src.windows(pat.len()).position(|window| window == pat)
-}
-
-pub(super) async fn read_until(
-	mut r: impl AsyncBufRead + Unpin,
-	pat: &[u8],
-	dst: &mut [u8],
-) -> io::Result<Option<usize>> {
-	let mut pos = 0;
-	assert!(pat.len() < dst.len());
-	assert!(!pat.is_empty());
-
-	while pos < dst.len() {
-		let data = r.fill_buf().await?;
-		println!("Get data ({} bytes)", data.len());
-		// Reached EOF
-		if data.is_empty() {
-			return Err(io::ErrorKind::UnexpectedEof.into());
-		}
-
-		let rem = &mut dst[pos..];
-		let copy_len = std::cmp::min(rem.len(), data.len());
-		rem[..copy_len].copy_from_slice(&data[..copy_len]);
-
-		let start_pos = pos.saturating_sub(pat.len());
-		let curr_dst = &dst[start_pos..pos + copy_len];
-		if let Some(pat_pos) = find_pat(curr_dst, pat) {
-			let old_pos = pos;
-			pos = start_pos + pat_pos + pat.len();
-			r.consume(pos - old_pos);
-			return Ok(Some(pos));
-		}
-		pos += copy_len;
-		r.consume(copy_len);
-	}
-	Ok(None)
-}
 
 pub(super) fn get_version(ver: u8) -> Result<http::Version, ReadError> {
 	Ok(match ver {
@@ -225,8 +181,6 @@ fn version_to_bytes(v: http::Version) -> Option<&'static [u8]> {
 
 #[cfg(test)]
 mod tests {
-	use tokio::io::{AsyncBufReadExt, BufReader};
-
 	use super::*;
 
 	#[test]
@@ -241,121 +195,5 @@ mod tests {
 			let result = encode_auth(username, password);
 			assert_eq!(&result, expected);
 		}
-	}
-
-	#[test]
-	fn test_find_pat() {
-		assert_eq!(find_pat(b"hello world!helloworld", b"hello"), Some(0));
-		assert_eq!(find_pat(b"hello world!helloworld", b"world"), Some(6));
-		assert_eq!(find_pat(b"hello world!helloworld", b"null"), None);
-	}
-
-	#[test]
-	fn test_read_until() {
-		let task = async move {
-			let (r, mut w) = tokio::io::duplex(1024);
-			let mut r = BufReader::new(r);
-			let mut dst = [0u8; 256];
-			w.write_all(b"HELLO WORLD\r\n\r\nextra").await.unwrap();
-			let len = read_until(&mut r, b"\r\n\r\n", &mut dst)
-				.await
-				.unwrap()
-				.unwrap();
-			assert_eq!(&dst[..len], b"HELLO WORLD\r\n\r\n".as_ref());
-			let remaining = r.fill_buf().await.unwrap();
-			assert_eq!(remaining, b"extra");
-		};
-		tokio::runtime::Runtime::new().unwrap().block_on(task);
-	}
-
-	#[test]
-	fn test_read_until_steps() {
-		let task = async move {
-			let (r, mut w) = tokio::io::duplex(1024);
-			let mut r = BufReader::new(r);
-			let mut dst = [0u8; 256];
-
-			let write_task = async move {
-				w.write_all(b"HELLO WORLD").await.unwrap();
-				w.write_all(b"\r\n").await.unwrap();
-				w.write_all(b"\r\n").await.unwrap();
-				w.write_all(b"extra").await.unwrap();
-				w.shutdown().await.unwrap();
-			};
-
-			let read_task = async move {
-				let len = read_until(&mut r, b"\r\n\r\n", &mut dst)
-					.await
-					.unwrap()
-					.unwrap();
-				assert_eq!(&dst[..len], b"HELLO WORLD\r\n\r\n".as_ref());
-				let remaining = r.fill_buf().await.unwrap();
-				assert_eq!(remaining, b"extra");
-			};
-
-			futures::future::join(write_task, read_task).await;
-		};
-		tokio::runtime::Runtime::new().unwrap().block_on(task);
-	}
-
-	#[test]
-	fn test_read_until_just_enough() {
-		let task = async move {
-			let (r, mut w) = tokio::io::duplex(1024);
-			let mut r = BufReader::new(r);
-			let mut dst = [0u8; 256];
-
-			let write_task = async move {
-				w.write_all(b"HELLO WORLD HELLO WORLD\r\n\r\n")
-					.await
-					.unwrap();
-				w.shutdown().await.unwrap();
-			};
-
-			let read_task = async move {
-				let len = read_until(&mut r, b"\r\n\r\n", &mut dst)
-					.await
-					.unwrap()
-					.unwrap();
-				assert_eq!(&dst[..len], b"HELLO WORLD HELLO WORLD\r\n\r\n".as_ref());
-				let remaining = r.fill_buf().await.unwrap();
-				assert_eq!(remaining, b"");
-			};
-
-			futures::future::join(write_task, read_task).await;
-		};
-		tokio::runtime::Runtime::new().unwrap().block_on(task);
-	}
-
-	#[test]
-	fn test_read_until_not_found() {
-		println!("Testing not found");
-		let task = async move {
-			let (r, mut w) = tokio::io::duplex(1024);
-			let mut r = BufReader::new(r);
-			let mut dst = [0u8; 10];
-			w.write_all(b"HELLO WORLD HELLO WORLD\r\n\r\n")
-				.await
-				.unwrap();
-			w.shutdown().await.unwrap();
-			let len = read_until(&mut r, b"\r\n\r\n", &mut dst).await.unwrap();
-			assert_eq!(len, None);
-		};
-		tokio::runtime::Runtime::new().unwrap().block_on(task);
-	}
-
-	#[test]
-	fn test_read_until_fail_eof() {
-		println!("Testing not found");
-		let task = async move {
-			let (r, mut w) = tokio::io::duplex(1024);
-			let mut r = BufReader::new(r);
-			let mut dst = [0u8; 256];
-			w.write_all(b"HELLO WORLD\r\nextra").await.unwrap();
-			w.shutdown().await.unwrap();
-			let e = read_until(&mut r, b"\r\n\r\n", &mut dst).await.unwrap_err();
-			assert_eq!(e.kind(), io::ErrorKind::UnexpectedEof);
-		};
-		tokio::runtime::Runtime::new().unwrap().block_on(task);
 	}
 }
