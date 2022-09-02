@@ -1,50 +1,4 @@
-/**********************************************************************
-
-Copyright (C) 2021 by reddal
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-**********************************************************************/
-
-/*!
-Implementation of the trojan protocol,
-see more at <https://trojan-gfw.github.io/trojan/protocol.html>
-
-But this implementation does not include a security layer such as TLS.
-DO NOT use this without a security layer over an unsecure network.
-
-Trojan request format:
-```not_rust
-+-----------------------+---------+----------------+---------+----------+
-| hex(SHA224(password)) |  CRLF   | Trojan Request |  CRLF   | Payload  |
-+-----------------------+---------+----------------+---------+----------+
-|          56           | X'0D0A' |    Variable    | X'0D0A' | Variable |
-+-----------------------+---------+----------------+---------+----------+
-```
-
-where target address is a SOCKS5 address:
-```not_rust
-+-----+------+----------+----------+
-| CMD | ATYP | DST.ADDR | DST.PORT |
-+-----+------+----------+----------+
-|  1  |  1   | Variable |    2     |
-+-----+------+----------+----------+
-```
-
-See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
-*/
-
+use super::{password_to_hex, Command, PROTOCOL_NAME};
 use crate::{
 	prelude::*,
 	protocol::{
@@ -54,10 +8,7 @@ use crate::{
 	utils::LazyWriteHalf,
 };
 use async_trait::async_trait;
-use sha2::{Digest, Sha224};
 use tokio::io::BufReader;
-
-pub const PROTOCOL_NAME: &str = "trojan";
 
 #[cfg_attr(test, derive(PartialEq, Eq))]
 #[derive(Debug)]
@@ -367,21 +318,6 @@ mod udp_impl {
 			}));
 		}
 	}
-}
-
-#[repr(u8)]
-enum Command {
-	Connect = 0x1,
-	#[cfg(feature = "use-udp")]
-	UdpAssociate = 0x3,
-}
-
-fn password_to_hex(password: &[u8], buf: &mut impl BufMut) {
-	let mut hasher = Sha224::new();
-	hasher.update(password);
-	let hash = hasher.finalize();
-	let hex = format!("{:056x}", hash);
-	buf.put_slice(hex.as_bytes());
 }
 
 #[cfg(test)]

@@ -57,7 +57,7 @@ mod details {
 		))]
 		Shadowsocks(Arc<proxy::shadowsocks::outbound::Settings>),
 		#[cfg(feature = "trojan-outbound")]
-		Trojan(Arc<proxy::trojan::Settings>),
+		Trojan(Arc<proxy::trojan::outbound::Settings>),
 		#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
 		Vmess(Arc<proxy::vmess::outbound::Settings>),
 		#[cfg(feature = "chain-outbound")]
@@ -116,7 +116,7 @@ mod details_builder {
 		))]
 		Shadowsocks(proxy::shadowsocks::outbound::SettingsBuilder),
 		#[cfg(feature = "trojan-outbound")]
-		Trojan(proxy::trojan::SettingsBuilder),
+		Trojan(proxy::trojan::outbound::SettingsBuilder),
 		#[cfg(any(feature = "vmess-outbound-openssl", feature = "vmess-outbound-ring"))]
 		Vmess(proxy::vmess::outbound::SettingsBuilder),
 		#[cfg(feature = "chain-outbound")]
@@ -322,7 +322,7 @@ impl Builder {
 		}
 		#[cfg(feature = "trojan-outbound")]
 		{
-			use proxy::trojan::{SettingsBuilder, PROTOCOL_NAME};
+			use proxy::trojan::{outbound::SettingsBuilder, PROTOCOL_NAME};
 			parse_url_map.insert(
 				PROTOCOL_NAME,
 				Box::new(|url| {

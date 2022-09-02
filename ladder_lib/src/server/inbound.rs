@@ -55,6 +55,8 @@ mod details {
 		Shadowsocks(proxy::shadowsocks::inbound::Settings),
 		#[cfg(any(feature = "vmess-inbound-openssl", feature = "vmess-inbound-ring"))]
 		Vmess(proxy::vmess::inbound::Settings),
+        #[cfg(feature = "trojan-inbound")]
+        Trojan(proxy::trojan::inbound::Settings),
 	}
 
 	impl GetProtocolName for Details {
@@ -122,6 +124,8 @@ mod details_builder {
 		Shadowsocks(proxy::shadowsocks::inbound::SettingsBuilder),
 		#[cfg(any(feature = "vmess-inbound-openssl", feature = "vmess-inbound-ring"))]
 		Vmess(proxy::vmess::inbound::SettingsBuilder),
+        #[cfg(feature = "trojan-inbound")]
+        Trojan(proxy::trojan::inbound::SettingsBuilder),
 	}
 
 	impl DetailsBuilder {

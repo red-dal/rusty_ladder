@@ -67,7 +67,7 @@ all-proxies-openssl = [
 	"http-proxy",
 	"shadowsocks-openssl",
 	"chain-outbound",
-	"trojan-outbound",
+	"trojan",
 	"vmess-openssl",
 ]
 all-proxies-ring = [
@@ -75,7 +75,7 @@ all-proxies-ring = [
 	"http-proxy",
 	"shadowsocks-ring",
 	"chain-outbound",
-	"trojan-outbound",
+	"trojan",
 	"vmess-ring",
 ]
 
@@ -110,9 +110,13 @@ vmess-ring = ["vmess-inbound-ring", "vmess-outbound-ring"]
 vmess-inbound-ring = ["ladder_lib/vmess-inbound-ring"]
 vmess-outbound-ring = ["ladder_lib/vmess-outbound-ring"]
 
+# ----------- Trojan ------------
+trojan = ["trojan-outbound", "trojan-inbound"]
+trojan-outbound = ["ladder_lib/trojan-outbound"]
+trojan-inbound = ["ladder_lib/trojan-inbound"]
+
 # ------------ Other proxies ------------
 chain-outbound = ["ladder_lib/chain-outbound"]
-trojan-outbound = ["ladder_lib/trojan-outbound"]
 
 [dependencies]
 ladder_lib = { version = "*", path = "../ladder_lib", default-features = false, features = [] }

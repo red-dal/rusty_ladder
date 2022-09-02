@@ -126,6 +126,8 @@ vmess-outbound-openssl = [
 ]
 
 chain-outbound = []
+
+trojan-inbound = ["sha2", "__transport-outbound"]
 trojan-outbound = ["sha2", "__transport-outbound"]
 
 # Enable local DNS server.
