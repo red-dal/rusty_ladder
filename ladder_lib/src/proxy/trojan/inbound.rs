@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::{collections::HashSet, convert::TryInto, net::SocketAddr};
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader};
 
+use super::{sha_then_hex, Command, Key};
 use crate::{
 	prelude::{BoxStdErr, CRLF},
 	protocol::{
@@ -10,8 +11,6 @@ use crate::{
 	},
 	utils::{read_until, ChainedReadHalf},
 };
-
-use super::{password_to_hex, Command};
 
 const REQUEST_BUFFER_SIZE: usize = 1024;
 
@@ -24,19 +23,23 @@ pub struct SettingsBuilder {
 }
 
 impl SettingsBuilder {
+	/// Return a [`Settings`].
+	///
+	/// # Errors
+	///
+	/// Return error if `passwords` is empty or contains empty string.
 	pub fn build(self) -> Result<Settings, BoxStdErr> {
 		if self.passwords.is_empty() {
 			return Err("must have at least one password".into());
 		}
-		let keys: Result<HashSet<Vec<u8>>, BoxStdErr> = self
+		let keys: Result<HashSet<Key>, BoxStdErr> = self
 			.passwords
 			.iter()
 			.map(|p| {
 				if p.is_empty() {
 					return Err("cannot have empty password".into());
 				}
-				let mut key = Vec::with_capacity(56);
-				password_to_hex(p.as_bytes(), &mut key);
+				let key = sha_then_hex(p.as_bytes());
 				Ok(key)
 			})
 			.collect();
@@ -48,7 +51,7 @@ impl SettingsBuilder {
 }
 
 pub struct Settings {
-	pub keys: HashSet<Vec<u8>>,
+	pub keys: HashSet<Key>,
 	pub redir_addr: SocketAddr,
 }
 
@@ -123,7 +126,7 @@ struct Request {
 	addr: SocksAddr,
 }
 
-fn try_parse_request(rb: &RequestBytes, keys: &HashSet<Vec<u8>>) -> Result<Request, BoxStdErr> {
+fn try_parse_request(rb: &RequestBytes, keys: &HashSet<Key>) -> Result<Request, BoxStdErr> {
 	// Key part
 	let key: &[u8; 56] = rb
 		.key
@@ -196,7 +199,7 @@ mod tests {
 	use crate::{
 		network::Addrs,
 		protocol::{CompositeBytesStream, SocksAddr},
-		proxy::trojan::{password_to_hex, Command},
+		proxy::trojan::{sha_then_hex, Command},
 	};
 	use std::str::FromStr;
 	use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -226,7 +229,7 @@ mod tests {
 			// Write request
 			{
 				let mut buf = Vec::new();
-				password_to_hex(PASSWORD.as_bytes(), &mut buf);
+				buf.extend_from_slice(sha_then_hex(PASSWORD.as_bytes()).as_ref());
 				buf.extend_from_slice(CRLF);
 				buf.push(Command::Connect as u8);
 				dst_addr.write_to(&mut buf);
@@ -300,7 +303,7 @@ mod tests {
 			// Write request
 			let req_buf = {
 				let mut buf = Vec::new();
-				password_to_hex(b"not the correct password", &mut buf);
+				buf.extend_from_slice(sha_then_hex(b"not the correct password").as_ref());
 				buf.extend_from_slice(CRLF);
 				buf.push(Command::Connect as u8);
 				dst_addr.write_to(&mut buf);

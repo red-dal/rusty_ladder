@@ -45,15 +45,15 @@ where target address is a SOCKS5 address:
 See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
 */
 
-use bytes::BufMut;
 use md5::Digest;
 use sha2::Sha224;
 
 pub const PROTOCOL_NAME: &str = "trojan";
 
+type Key = [u8; 56];
+
 #[cfg(feature = "trojan-outbound")]
 pub mod outbound;
-
 #[cfg(feature = "trojan-inbound")]
 pub mod inbound;
 
@@ -79,12 +79,26 @@ impl Command {
 	}
 }
 
-fn password_to_hex(password: &[u8], buf: &mut impl BufMut) {
+fn sha_then_hex(password: &[u8]) -> Key {
+	const TABLE: [u8; 16] = [
+		b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'a', b'b', b'c', b'd', b'e',
+		b'f',
+	];
+
 	let mut hasher = Sha224::new();
 	hasher.update(password);
-	let hash = hasher.finalize();
-	let hex = format!("{:056x}", hash);
-	buf.put_slice(hex.as_bytes());
+
+	let hash: [u8; 28] = hasher.finalize().into();
+	let mut result = [0u8; 56];
+
+	for (&b, out) in hash.iter().zip(result.chunks_mut(2)) {
+		let high = b >> 4;
+		let low = b & 0x0f;
+		out[0] = TABLE[high as usize];
+		out[1] = TABLE[low as usize];
+	}
+
+    result
 }
 
 #[cfg(feature = "trojan-outbound")]

@@ -1,4 +1,4 @@
-use super::{password_to_hex, Command, PROTOCOL_NAME};
+use super::{sha_then_hex, Command, PROTOCOL_NAME};
 use crate::{
 	prelude::*,
 	protocol::{
@@ -104,7 +104,7 @@ impl Settings {
 		// perform trojan handshake
 		let mut req_buf = Vec::with_capacity(1024);
 
-		password_to_hex(self.password.as_bytes(), &mut req_buf);
+		req_buf.put_slice(sha_then_hex(self.password.as_bytes()).as_ref());
 		req_buf.put_slice(CRLF);
 		req_buf.put_u8(Command::Connect as u8);
 		dst.write_to(&mut req_buf);
@@ -142,7 +142,7 @@ impl StreamConnector for Settings {
 
 #[cfg(feature = "use-udp")]
 mod udp_impl {
-	use super::{password_to_hex, Command, Settings};
+	use super::{sha_then_hex, Command, Settings};
 	use crate::{
 		prelude::*,
 		protocol::{
@@ -299,7 +299,7 @@ mod udp_impl {
 			_context: &'a dyn ProxyContext,
 		) -> Result<SocketOrTunnelStream, OutboundError> {
 			let mut req_buf = Vec::with_capacity(512);
-			password_to_hex(self.settings.password.as_bytes(), &mut req_buf);
+			req_buf.put_slice(sha_then_hex(self.settings.password.as_bytes()).as_ref());
 			req_buf.put_slice(CRLF);
 			req_buf.put_u8(Command::UdpAssociate as u8);
 			// dummy address
