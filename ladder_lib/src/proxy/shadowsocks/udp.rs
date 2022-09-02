@@ -165,7 +165,7 @@ impl WriteHelper {
 		enc.seal_inplace_append_tag(pos, buffer, EMPTY_AAD)
 			.expect("failed to encrypt datagram");
 
-		return writer.send_dst(&self.remote_addr, buffer).await;
+		writer.send_dst(&self.remote_addr, buffer).await
 	}
 }
 
@@ -267,7 +267,7 @@ impl PlainWriteHelper {
 	{
 		self.buffer.clear();
 		encode_payload(&mut self.buffer, dst, payload);
-		return writer.send_dst(&self.remote_addr, &self.buffer).await;
+		writer.send_dst(&self.remote_addr, &self.buffer).await
 	}
 }
 

@@ -56,7 +56,7 @@ impl Outbound {
 	where
 		IO: AsyncRead + AsyncWrite + Unpin,
 	{
-		return self.connector.connect(stream, addr).await;
+		self.connector.connect(stream, addr).await
 	}
 }
 

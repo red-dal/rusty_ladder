@@ -168,10 +168,18 @@ impl fmt::Display for AcceptError {
 		match self {
 			AcceptError::Io(e) => write!(f, "inbound handshake IO error ({})", e),
 			AcceptError::ProtocolSilentDrop(_, e) => {
-				write!(f, "inbound handshake protocol error ({})", e)
+				write!(
+					f,
+					"inbound handshake protocol error and drop the stream silently ({})",
+					e
+				)
 			}
-			AcceptError::ProtocolRedirect(_, _, e) => {
-				write!(f, "inbound handshake protocol error ({})", e)
+			AcceptError::ProtocolRedirect(_, redir_addr, e) => {
+				write!(
+					f,
+					"inbound handshake protocol error and redirect stream to {} ({})",
+					redir_addr, e
+				)
 			}
 			AcceptError::TcpNotAcceptable => write!(f, "inbound cannot accept TCP"),
 			AcceptError::UdpNotAcceptable => write!(f, "inbound cannot accept UDP"),

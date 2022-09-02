@@ -149,8 +149,10 @@ impl LengthReader for ShakeLengthReader {
 	fn read_length(&mut self, buf: &[u8]) -> Result<u16, BoxStdErr> {
 		let mask = self.update();
 		// ignore the padding
-		let (len_buf, _padding) = buf.split_at(2);
-		let len = (&*len_buf).get_u16();
+		let len = {
+			let (mut len_buf, _padding) = buf.split_at(2);
+			len_buf.get_u16()
+		};
 		let payload_len = len ^ mask;
 		Ok(payload_len)
 	}
@@ -216,8 +218,8 @@ impl LengthReader for PlainLengthReader {
 	}
 
 	#[inline]
-	fn read_length(&mut self, buf: &[u8]) -> Result<u16, BoxStdErr> {
-		let len = (&*buf).get_u16();
+	fn read_length(&mut self, mut buf: &[u8]) -> Result<u16, BoxStdErr> {
+		let len = buf.get_u16();
 		Ok(len)
 	}
 

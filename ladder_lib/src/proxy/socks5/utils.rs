@@ -38,7 +38,7 @@ pub(super) const AUTH_FAILED: u8 = 0xff;
 pub(super) const VAL_NO_AUTH: u8 = 0_u8;
 pub(super) const VAL_NO_USER_PASS: u8 = 2_u8;
 
-#[derive(Debug, TryFromPrimitive, PartialEq, Copy, Clone)]
+#[derive(Debug, TryFromPrimitive, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
 pub enum CommandCode {
 	Connect = 1,
@@ -64,7 +64,7 @@ pub enum AcceptableMethod {
 	UsernamePassword = VAL_NO_USER_PASS,
 }
 
-#[derive(Debug, TryFromPrimitive, PartialEq, Copy, Clone)]
+#[derive(Debug, TryFromPrimitive, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
 /// SOCKS5 reply code.
 ///

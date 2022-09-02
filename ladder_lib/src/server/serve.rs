@@ -441,7 +441,7 @@ impl<'a> StreamSession<'a> {
 		);
 		let in_stream = handshake_handler.finish().await?;
 		info!("{id} inbound handshake finished, relaying...");
-		return ProxyStreamHandler {
+		ProxyStreamHandler {
 			id: &id,
 			stat_handle: &self.stat_handle,
 			in_ps: in_stream,
@@ -449,7 +449,7 @@ impl<'a> StreamSession<'a> {
 			relay_timeout_secs: self.server.global.relay_timeout_secs,
 		}
 		.run()
-		.await;
+		.await
 	}
 }
 

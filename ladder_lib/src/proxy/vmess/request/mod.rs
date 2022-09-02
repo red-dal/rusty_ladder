@@ -29,7 +29,7 @@ use std::io;
 use thiserror::Error as ThisError;
 use uuid::Uuid;
 
-#[derive(Debug, PartialEq, Clone, Copy, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub struct OptionFlags(u8);
 
 macro_rules! impl_flag_option {

@@ -39,6 +39,6 @@ impl fmt::Display for BytesCount {
 				return write!(f, "{:.2} {}", res_num, base_name);
 			}
 		}
-		return write!(f, "{} B", num);
+		write!(f, "{} B", num)
 	}
 }
