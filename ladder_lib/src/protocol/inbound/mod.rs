@@ -43,7 +43,7 @@ pub trait StreamAcceptor: GetProtocolName {
 	///
 	/// # Examples
 	/// ```
-	/// use ladder_lib::protocol::{ 
+	/// use ladder_lib::protocol::{
 	///		inbound::{ StreamAcceptor, AcceptError, Handshake, SessionInfo },
 	///		CompositeBytesStream, AsyncReadWrite, GetProtocolName
 	///	};
@@ -65,7 +65,7 @@ pub trait StreamAcceptor: GetProtocolName {
 	///			&'a self,
 	///			stream: Box<dyn AsyncReadWrite>,
 	///			info: SessionInfo,
-	///		) -> Result<Handshake<'a>, AcceptError> { 
+	///		) -> Result<Handshake<'a>, AcceptError> {
 	///			// Try to determine destination from client request.
 	///			unimplemented!()
 	///		}
@@ -142,6 +142,7 @@ pub enum AcceptError {
 	Io(io::Error),
 	Protocol(BoxStdErr),
 	ProtocolSilentDrop(Box<dyn AsyncReadWrite>, BoxStdErr),
+	ProtocolRedirect(Box<dyn AsyncReadWrite>, SocketAddr, BoxStdErr),
 	TcpNotAcceptable,
 	UdpNotAcceptable,
 }
@@ -167,6 +168,9 @@ impl fmt::Display for AcceptError {
 		match self {
 			AcceptError::Io(e) => write!(f, "inbound handshake IO error ({})", e),
 			AcceptError::ProtocolSilentDrop(_, e) => {
+				write!(f, "inbound handshake protocol error ({})", e)
+			}
+			AcceptError::ProtocolRedirect(_, _, e) => {
 				write!(f, "inbound handshake protocol error ({})", e)
 			}
 			AcceptError::TcpNotAcceptable => write!(f, "inbound cannot accept TCP"),

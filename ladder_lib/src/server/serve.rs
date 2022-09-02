@@ -98,8 +98,8 @@ impl Server {
 			// Serving UDP
 			#[cfg(feature = "use-udp")]
 			{
-				use futures::future::{BoxFuture, FutureExt};
 				use crate::protocol::inbound::udp::DatagramStream;
+				use futures::future::{BoxFuture, FutureExt};
 				struct Callback {
 					inbound_ind: usize,
 					inbound_tag: Tag,
@@ -289,6 +289,12 @@ async fn handle_incoming(
 					};
 					return Err(HandshakeError::Protocol(e).into());
 				}
+				AcceptError::ProtocolRedirect(stream, addr, e) => {
+					if let ErrorHandlingPolicy::UnlimitedTimeout = inbound.err_policy {
+						redirect_and_forget(server.clone(), addr, stream);
+					}
+					return Err(HandshakeError::Protocol(e).into());
+				}
 				AcceptError::TcpNotAcceptable => {
 					return Err(HandshakeError::TcpNotAcceptable.into())
 				}
@@ -350,6 +356,26 @@ where
 				// done reading
 				return;
 			}
+		}
+	});
+}
+
+fn redirect_and_forget(
+	context: Arc<dyn crate::protocol::ProxyContext>,
+	addr: SocketAddr,
+	mut stream: Box<dyn AsyncReadWrite>,
+) {
+	tokio::spawn(async move {
+		let addr = SocksAddr::from(addr);
+		let mut out_stream = match context.dial_tcp(&addr).await {
+			Ok(stream) => stream,
+			Err(e) => {
+				warn!("Cannot connect to {addr} during redirect ({e})");
+				return;
+			}
+		};
+		if let Err(e) = tokio::io::copy_bidirectional(&mut stream, &mut out_stream).await {
+			warn!("Error during bidirectional copy to {addr} ({e})");
 		}
 	});
 }

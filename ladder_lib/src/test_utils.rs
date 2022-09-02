@@ -186,6 +186,10 @@ where
 					error!("{}", err);
 					Err(err.into())
 				}
+				AcceptError::ProtocolRedirect(_, _, e) => {
+					error!("{}", e);
+					Err(e)
+				}
 			}
 		}
 	};
