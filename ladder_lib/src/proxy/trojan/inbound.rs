@@ -103,13 +103,15 @@ impl StreamAcceptor for Settings {
 		match req.cmd {
 			Command::Connect => {
 				let stream = BufBytesStream { r: Box::new(r), w };
-				return Ok(Handshake::Stream(
+				Ok(Handshake::Stream(
 					Box::new(SimpleHandshake(stream)),
 					req.addr,
-				));
+				))
 			}
-			Command::UdpAssociate => todo!(),
-		};
+			Command::UdpAssociate => Err(AcceptError::Protocol(
+				"trojan udp inbound is not supported".into(),
+			)),
+		}
 	}
 }
 

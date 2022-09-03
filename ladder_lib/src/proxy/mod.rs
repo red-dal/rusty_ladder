@@ -31,7 +31,7 @@ pub mod http;
 pub mod shadowsocks;
 #[cfg(any(feature = "socks5-inbound", feature = "socks5-outbound"))]
 pub mod socks5;
-#[cfg(feature = "trojan-outbound")]
+#[cfg(any(feature = "trojan-inbound", feature = "trojan-outbound"))]
 pub mod trojan;
 pub mod tunnel;
 #[cfg(any(
