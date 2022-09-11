@@ -17,8 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use http::Uri;
-
 use super::tls;
 use crate::{
 	prelude::*,
@@ -28,11 +26,14 @@ use crate::{
 	},
 	utils::websocket::{self, Stream as WsStream},
 };
+use http::Uri;
 use std::{collections::HashMap, fmt::Write, io};
 
 pub type PlainStream<IO> = WsStream<IO>;
 pub type SecureClientStream<IO> = WsStream<tls::ClientStream<IO>>;
 pub type SecureServerStream<IO> = WsStream<tls::ServerStream<IO>>;
+
+const DEFAULT_ALPN: &str = "http/1.1";
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
@@ -348,7 +349,14 @@ impl OutboundBuilder {
 	///
 	/// Returns [`BuildError::Tls`] if there are any errors in TLS configuration.
 	pub fn build(self) -> Result<Outbound, BuildError> {
-		let tls = self.tls.map(tls::OutboundBuilder::build).transpose()?;
+		let tls = if let Some(mut tls) = self.tls {
+			if tls.alpns.is_empty() {
+				tls.alpns.push(DEFAULT_ALPN.into());
+			}
+			Some(tls.build()?)
+		} else {
+			None
+		};
 		let headers = {
 			let mut headers = http::HeaderMap::new();
 			for (key, value) in self.headers {

@@ -43,6 +43,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 const CLOSED: bool = true;
 const NOT_CLOSED: bool = !CLOSED;
 
+const DEFAULT_ALPN: &str = "h2";
+
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
 	#[error("domain '{0}' is invalid ({1})")]
@@ -168,7 +170,14 @@ impl OutboundBuilder {
 	///
 	/// Returns [`BuildError::Tls`] if there are any errors in TLS configuration.
 	pub fn build(self) -> Result<Outbound, BuildError> {
-		let tls = self.tls.map(tls::OutboundBuilder::build).transpose()?;
+		let tls = if let Some(mut tls) = self.tls {
+			if tls.alpns.is_empty() {
+				tls.alpns.push(DEFAULT_ALPN.into());
+			}
+			Some(tls.build()?)
+		} else {
+			None
+		};
 		let req_url = make_request_url(&self.path, &self.host, tls.is_some())?;
 		Ok(Outbound { req_url, tls })
 	}
