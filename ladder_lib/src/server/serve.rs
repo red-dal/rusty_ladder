@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #[cfg(feature = "use-udp")]
 use super::udp;
 use super::{
-	inbound::ErrorHandlingPolicy,
+	inbound::ErrorPolicy,
 	stat::{Id, Monitor, RegisterArgs, SessionHandle},
 	Error, Inbound, Outbound, Server,
 };
@@ -279,10 +279,10 @@ async fn handle_incoming(
 				AcceptError::Io(e) => return Err(HandshakeError::Io(e).into()),
 				AcceptError::ProtocolSilentDrop(stream, e) => {
 					match inbound.err_policy {
-						ErrorHandlingPolicy::Drop => {
+						ErrorPolicy::Drop => {
 							// do nothing
 						}
-						ErrorHandlingPolicy::UnlimitedTimeout => {
+						ErrorPolicy::SilentDrop => {
 							// keep reading until the client drops
 							silent_drop(stream);
 						}
@@ -290,7 +290,7 @@ async fn handle_incoming(
 					return Err(HandshakeError::Protocol(e).into());
 				}
 				AcceptError::ProtocolRedirect(stream, addr, e) => {
-					if let ErrorHandlingPolicy::UnlimitedTimeout = inbound.err_policy {
+					if let ErrorPolicy::SilentDrop = inbound.err_policy {
 						redirect_and_forget(server.clone(), addr, stream);
 					}
 					return Err(HandshakeError::Protocol(e).into());
@@ -365,6 +365,7 @@ fn redirect_and_forget(
 	addr: SocketAddr,
 	mut stream: Box<dyn AsyncReadWrite>,
 ) {
+	log::debug!("Redirecting to {addr}...");
 	tokio::spawn(async move {
 		let addr = SocksAddr::from(addr);
 		let mut out_stream = match context.dial_tcp(&addr).await {

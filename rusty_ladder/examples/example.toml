@@ -104,14 +104,14 @@ tag = "socks5-inbound"
 ## ```
 addr = "127.0.0.1:1080"
 ## What to do when there is an protocol error. Must be lowercase.
-## Optional. 'drop' will be used if empty.
+## Optional. 'silent_drop' will be by default.
 ##
 ## All valid options are:
 ## - 'drop': the connection will be dropped immediately.
 ##
-## - 'unlimited_timeout': do nothing util the remote dropped
-## the connection.
-err_policy = "drop"
+## - 'silent_drop': silently drop the remote connection 
+##   by redirecting to blackhole or another address.
+err_policy = "silent_drop"
 
 ## SOCKS5 inbound specific settings
 

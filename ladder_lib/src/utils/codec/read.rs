@@ -348,6 +348,7 @@ where
 				me.state = State::ReadingDecoding;
 			}
 		} else {
+            // TODO: Find out where this can happen.
 			panic!("Cannot consume when FrameReadState is not Buffering. poll_fill_buf must be polled first.");
 		}
 	}

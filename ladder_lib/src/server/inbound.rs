@@ -55,8 +55,8 @@ mod details {
 		Shadowsocks(proxy::shadowsocks::inbound::Settings),
 		#[cfg(any(feature = "vmess-inbound-openssl", feature = "vmess-inbound-ring"))]
 		Vmess(proxy::vmess::inbound::Settings),
-        #[cfg(feature = "trojan-inbound")]
-        Trojan(proxy::trojan::inbound::Settings),
+		#[cfg(feature = "trojan-inbound")]
+		Trojan(proxy::trojan::inbound::Settings),
 	}
 
 	impl GetProtocolName for Details {
@@ -124,8 +124,8 @@ mod details_builder {
 		Shadowsocks(proxy::shadowsocks::inbound::SettingsBuilder),
 		#[cfg(any(feature = "vmess-inbound-openssl", feature = "vmess-inbound-ring"))]
 		Vmess(proxy::vmess::inbound::SettingsBuilder),
-        #[cfg(feature = "trojan-inbound")]
-        Trojan(proxy::trojan::inbound::SettingsBuilder),
+		#[cfg(feature = "trojan-inbound")]
+		Trojan(proxy::trojan::inbound::SettingsBuilder),
 	}
 
 	impl DetailsBuilder {
@@ -149,16 +149,16 @@ pub use details_builder::DetailsBuilder;
 
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
-pub enum ErrorHandlingPolicy {
+pub enum ErrorPolicy {
 	#[cfg_attr(feature = "use_serde", serde(rename = "drop"))]
 	Drop,
-	#[cfg_attr(feature = "use_serde", serde(rename = "unlimited_timeout"))]
-	UnlimitedTimeout,
+	#[cfg_attr(feature = "use_serde", serde(rename = "silent_drop"))]
+	SilentDrop,
 }
 
-impl Default for ErrorHandlingPolicy {
+impl Default for ErrorPolicy {
 	fn default() -> Self {
-		Self::Drop
+		Self::SilentDrop
 	}
 }
 
@@ -169,7 +169,7 @@ impl Default for ErrorHandlingPolicy {
 pub struct Inbound {
 	pub tag: Tag,
 	pub network: network::Config,
-	pub err_policy: ErrorHandlingPolicy,
+	pub err_policy: ErrorPolicy,
 	settings: Details,
 	transport: crate::transport::Inbound,
 }
@@ -283,7 +283,7 @@ pub struct Builder {
 	#[cfg_attr(feature = "use_serde", serde(flatten))]
 	pub settings: DetailsBuilder,
 	#[cfg_attr(feature = "use_serde", serde(default))]
-	pub err_policy: ErrorHandlingPolicy,
+	pub err_policy: ErrorPolicy,
 	#[cfg_attr(feature = "use_serde", serde(default))]
 	pub network_type: NetworkType,
 	#[cfg_attr(feature = "use_serde", serde(default))]
