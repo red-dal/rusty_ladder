@@ -147,6 +147,16 @@ impl SubAssign<CounterValue> for CounterValue {
 	}
 }
 
+impl std::iter::Sum<CounterValue> for CounterValue {
+    fn sum<I: Iterator<Item = CounterValue>>(iter: I) -> Self {
+        let mut result = CounterValue::new();
+        for v in iter {
+            result += v;
+        }
+        result
+    }
+}
+
 pub(super) enum SessionState {
 	Handshaking,
 	Connecting(OutboundInfo),

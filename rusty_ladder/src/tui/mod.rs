@@ -25,9 +25,8 @@ mod renderer;
 use super::BoxStdErr;
 use crossterm::{cursor, execute, terminal};
 use data_manager::DataManager;
-use display_helper::SecondsCount;
 use events::{Event, EventManager, InputEvent};
-use ladder_lib::server::stat::{CounterValue, Id, Monitor, Snapshot};
+use ladder_lib::server::stat::{Id, Monitor, Snapshot};
 use log::trace;
 use renderer::Renderer;
 use std::{collections::HashMap, convert::TryFrom, io, sync::mpsc, time::Duration};
@@ -111,13 +110,9 @@ pub fn run(
 
 	let events = EventManager::new(stop_receiver, update_interval);
 
-	// let mut last_update_time = Instant::now();
-
 	let mut renderer = Renderer::new();
 	let mut data_manager = DataManager::new(rt, monitor);
-
 	let mut sort_column: Option<ColumnIndex> = None;
-
 	let mut row_manager = SelectedRowManager::default();
 
 	loop {
@@ -150,12 +145,10 @@ pub fn run(
 					renderer
 						.set_selected_row(row_manager.curr_row_index(), row_manager.is_following());
 				}
-
 				if options.chart {
-					let total_speed = sum_speed(data_manager.snapshots().map(Snapshot::speed));
+					let total_speed = data_manager.snapshots().map(Snapshot::speed).sum();
 					renderer.update_speed_chart(&total_speed);
 				}
-
 				if options.table_text {
 					renderer.update_table(data_manager.snapshots());
 				}
@@ -251,14 +244,6 @@ fn handle_input(
 		}
 	};
 	UpdateResult::Update(options)
-}
-
-fn sum_speed(speeds: impl Iterator<Item = CounterValue>) -> CounterValue {
-	let mut res = CounterValue::new();
-	for s in speeds {
-		res += s;
-	}
-	res
 }
 
 #[derive(Clone, Copy)]
