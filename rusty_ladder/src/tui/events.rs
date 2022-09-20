@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crossterm::event::{self, Event as RawEvent, KeyCode, KeyModifiers};
 use event::KeyEvent;
-use std::{sync::mpsc, thread, time::Duration};
+use std::{num::NonZeroUsize, sync::mpsc, thread, time::Duration};
 
 const KEYS_QUIT: &[KeyEvent] = &[
 	KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
@@ -39,7 +39,7 @@ const KEY_FOLLOWING_2: KeyEvent = KeyEvent::new(KeyCode::Char('F'), KeyModifiers
 #[derive(Debug)]
 pub enum Event {
 	Update,
-	Input(InputEvent, usize),
+	Input(InputEvent, NonZeroUsize),
 	Stop,
 	Resize { width: u16, height: u16 },
 }
@@ -118,9 +118,9 @@ impl PeekableEventReader {
 	}
 
 	fn peek(&mut self) -> crossterm::Result<Option<&RawEvent>> {
-        if self.buf.is_some() {
-            return Ok(self.buf.as_ref());
-        }
+		if self.buf.is_some() {
+			return Ok(self.buf.as_ref());
+		}
 		if event::poll(Duration::from_secs(0))? {
 			let e = event::read()?;
 			self.buf = Some(e);
@@ -138,7 +138,8 @@ fn read_events(sender: &mpsc::Sender<Event>) -> crossterm::Result<()> {
 			RawEvent::Key(key_event) => {
 				if let Some(ie) = InputEvent::from_key_event(&key_event) {
 					let additional_count = try_read_duplicate_events(&mut stream, &key_event)?;
-					Some(Event::Input(ie, 1 + additional_count))
+					let count = NonZeroUsize::new(1 + additional_count).unwrap();
+					Some(Event::Input(ie, count))
 				} else {
 					None
 				}
