@@ -137,19 +137,28 @@ mod conn_table {
 
 	use crate::tui::display_helper::SecondsCount;
 
+    /// A wrapping index that can only be within 
+    /// `[None, 0, 1, ..., limit - 1]`.
 	struct WrappingIndex {
 		ind: Option<usize>,
-		max: NonZeroUsize,
+		limit: NonZeroUsize,
 	}
 
 	impl WrappingIndex {
-		fn new(max: NonZeroUsize) -> Self {
-			Self { ind: None, max }
+		fn new(limit: NonZeroUsize) -> Self {
+			Self { ind: None, limit }
 		}
 
+        /// Move to next value of the following:
+        ///
+        ///```no_rust
+        ///  +-> None -> 0 -> ... -> limit - 1 -+
+        ///  |                                  | 
+        ///  +----------------------------------+
+        /// ```
 		fn go_next(&mut self) {
 			self.ind = if let Some(ind) = self.ind {
-				if ind >= self.max.get() {
+				if ind >= self.limit.get() - 1 {
 					None
 				} else {
 					Some(ind + 1)
@@ -159,6 +168,7 @@ mod conn_table {
 			}
 		}
 
+        /// Same with [`go_next`] but reverse.
 		fn go_prev(&mut self) {
 			self.ind = if let Some(ind) = self.ind {
 				if ind == 0 {
@@ -167,7 +177,7 @@ mod conn_table {
 					Some(ind - 1)
 				}
 			} else {
-				Some(self.max.get() - 1)
+				Some(self.limit.get() - 1)
 			}
 		}
 
@@ -184,6 +194,110 @@ mod conn_table {
 		width: u16,
 		format_func: Box<FormatFunc>,
 		compare_func: Box<CompareFunc>,
+	}
+
+	impl Column {
+		fn new_id() -> Self {
+			Self {
+				name: "ID",
+				width: 3,
+				format_func: Box::new(|s, output| {
+					format_to!(output, "{:x}", s.id());
+				}),
+				compare_func: Box::new(|a, b| cmp_with(a, b, |i| &i.basic.conn_id).reverse()),
+			}
+		}
+
+		fn new_inbound() -> Self {
+			Column {
+				name: "INBOUND",
+				width: 4,
+				format_func: Box::new(|s, output| {
+					output.push_str(&s.basic.inbound_tag);
+				}),
+				compare_func: Box::new(|a, b| cmp_with(a, b, |i| &i.basic.inbound_tag)),
+			}
+		}
+
+		fn new_outbound() -> Self {
+			Column {
+				name: "OUTBOUND",
+				width: 4,
+				format_func: Box::new(|s, output| {
+					if let Some(tag) = s.outbound_tag() {
+						output.push_str(tag);
+					}
+				}),
+				compare_func: Box::new(|a, b| {
+					cmp_with(a, b, |i| i.outbound_tag().map_or("", SmolStr::as_str))
+				}),
+			}
+		}
+
+		fn new_dst() -> Self {
+			Column {
+				name: "DST",
+				width: 12,
+				format_func: Box::new(|s, output| {
+					if let Some(dst) = s.to() {
+						format_to!(output, "{}", dst);
+					}
+				}),
+				compare_func: Box::new(|a, b| cmp_with(a, b, Snapshot::to)),
+			}
+		}
+
+		fn new_recv() -> Self {
+			Column {
+				name: "RECV",
+				width: 4,
+				format_func: Box::new(|s, output| {
+					format_to!(output, "{}", s.recv());
+				}),
+				compare_func: Box::new(|a, b| cmp_with(a, b, Snapshot::recv)),
+			}
+		}
+
+		fn new_send() -> Self {
+			Column {
+				name: "SEND",
+				width: 4,
+				format_func: Box::new(|s, output| {
+					format_to!(output, "{}", s.send());
+				}),
+				compare_func: Box::new(|a, b| cmp_with(a, b, Snapshot::send)),
+			}
+		}
+
+		fn new_lasted() -> Self {
+			Column {
+				name: "LASTED",
+				width: 4,
+				format_func: Box::new(get_lasted),
+				compare_func: Box::new(cmp_lasted),
+			}
+		}
+
+		fn new_state() -> Self {
+			Column {
+				name: "STATE",
+				width: 4,
+				format_func: Box::new(get_state),
+				compare_func: Box::new(|a, b| {
+					cmp_with(a, b, |i| match &i.state {
+						snapshot::State::Handshaking => 0,
+						snapshot::State::Connecting(_) => 1,
+						snapshot::State::Proxying {
+							out: _,
+							recv: _,
+							send: _,
+							recv_speed: _,
+							send_speed: _,
+						} => 2,
+					})
+				}),
+			}
+		}
 	}
 
 	pub(super) struct Config {
@@ -218,87 +332,15 @@ mod conn_table {
 	impl ConnTable {
 		pub fn new() -> Self {
 			let cols = vec![
-				Column {
-					name: "ID",
-					width: 3,
-					format_func: Box::new(|s, output| {
-						let id = s.basic.conn_id as u16;
-						format_to!(output, "{:x}", id);
-					}),
-					compare_func: Box::new(|a, b| cmp_with(a, b, |i| &i.basic.conn_id).reverse()),
-				},
-				Column {
-					name: "INBOUND",
-					width: 4,
-					format_func: Box::new(|s, output| {
-						output.push_str(&s.basic.inbound_tag);
-					}),
-					compare_func: Box::new(|a, b| cmp_with(a, b, |i| &i.basic.inbound_tag)),
-				},
-				Column {
-					name: "OUTBOUND",
-					width: 4,
-					format_func: Box::new(|s, output| {
-						if let Some(tag) = s.outbound_tag() {
-							output.push_str(tag);
-						}
-					}),
-					compare_func: Box::new(|a, b| {
-						cmp_with(a, b, |i| i.outbound_tag().map_or("", SmolStr::as_str))
-					}),
-				},
-				Column {
-					name: "DST",
-					width: 12,
-					format_func: Box::new(|s, output| {
-						if let Some(dst) = s.to() {
-							format_to!(output, "{}", dst);
-						}
-					}),
-					compare_func: Box::new(|a, b| cmp_with(a, b, Snapshot::to)),
-				},
-				Column {
-					name: "RECV",
-					width: 4,
-					format_func: Box::new(|s, output| {
-						format_to!(output, "{}", s.recv());
-					}),
-					compare_func: Box::new(|a, b| cmp_with(a, b, Snapshot::recv)),
-				},
-				Column {
-					name: "SEND",
-					width: 4,
-					format_func: Box::new(|s, output| {
-						format_to!(output, "{}", s.send());
-					}),
-					compare_func: Box::new(|a, b| cmp_with(a, b, Snapshot::send)),
-				},
-				Column {
-					name: "LASTED",
-					width: 4,
-					format_func: Box::new(get_lasted),
-					compare_func: Box::new(cmp_lasted),
-				},
-				Column {
-					name: "STATE",
-					width: 4,
-					format_func: Box::new(get_state),
-					compare_func: Box::new(|a, b| {
-						cmp_with(a, b, |i| match &i.state {
-							snapshot::State::Handshaking => 0,
-							snapshot::State::Connecting(_) => 1,
-							snapshot::State::Proxying {
-								out: _,
-								recv: _,
-								send: _,
-								recv_speed: _,
-								send_speed: _,
-							} => 2,
-						})
-					}),
-				},
+				Column::new_id(),
+				Column::new_state(),
+				Column::new_inbound(),
+				Column::new_outbound(),
+				Column::new_dst(),
+				Column::new_recv(),
+				Column::new_send(),
+				Column::new_lasted(),
 			];
-
 			let widths = {
 				let total: u16 = cols.iter().map(|x| x.width).sum();
 				cols.iter()
@@ -383,7 +425,7 @@ mod conn_table {
 			let next_ind = if let Some(row_count) = NonZeroUsize::new(self.row_data.len()) {
 				let mut ind = WrappingIndex {
 					ind: self.selected_row(),
-					max: row_count,
+					limit: row_count,
 				};
 				for _ in 0..count.get() {
 					move_func(&mut ind);
@@ -396,11 +438,11 @@ mod conn_table {
 		}
 
 		pub fn set_selected_row_prev(&mut self, count: NonZeroUsize) {
-			self.move_selected_row(|ind| ind.go_prev(), count);
+			self.move_selected_row(WrappingIndex::go_prev, count);
 		}
 
 		pub fn set_selected_row_next(&mut self, count: NonZeroUsize) {
-			self.move_selected_row(|ind| ind.go_next(), count);
+			self.move_selected_row(WrappingIndex::go_next, count);
 		}
 
 		#[inline]
@@ -615,12 +657,12 @@ mod conn_table {
 		}
 
 		pub fn get(&self, ind: usize) -> Option<&str> {
-			let end = *self.end_pos.get(ind)?;
+			let curr_end = *self.end_pos.get(ind)?;
 			Some(if ind == 0 {
-				&self.buf[..end]
+				&self.buf[..curr_end]
 			} else {
 				let prev_end = self.end_pos[ind - 1];
-				&self.buf[prev_end..end]
+				&self.buf[prev_end..curr_end]
 			})
 		}
 	}
@@ -673,6 +715,7 @@ mod conn_table {
 	#[cfg(test)]
 	mod tests {
 		use super::*;
+		use std::convert::TryInto;
 
 		#[test]
 		fn wrapping_index_go_next() {
@@ -707,7 +750,77 @@ mod conn_table {
 		}
 
 		#[test]
-		fn wrapping_index_clear() {}
+		fn string_list_push() {
+			let mut sl = StringList::default();
+			assert!(sl.buf.is_empty());
+			assert!(sl.end_pos.is_empty());
+			sl.push("hello");
+			assert_eq!(sl.buf, "hello");
+			assert_eq!(sl.end_pos, vec![5]);
+			sl.push("world");
+			assert_eq!(sl.buf, "helloworld");
+			assert_eq!(sl.end_pos, vec![5, 10]);
+			sl.push("another");
+			assert_eq!(sl.buf, "helloworldanother");
+			assert_eq!(sl.end_pos, vec![5, 10, 17]);
+			sl.push("word");
+			assert_eq!(sl.buf, "helloworldanotherword");
+			assert_eq!(sl.end_pos, vec![5, 10, 17, 21]);
+		}
+
+		#[test]
+		fn string_list_clear() {
+			let mut sl = StringList::default();
+			assert!(sl.buf.is_empty());
+			assert!(sl.end_pos.is_empty());
+			sl.push("hello");
+			sl.push("hello");
+			sl.push("hello");
+			sl.push("hello");
+			sl.clear();
+			assert!(sl.buf.is_empty());
+			assert!(sl.end_pos.is_empty());
+		}
+
+		#[test]
+		fn string_list_iter() {
+			let mut sl = StringList::default();
+			assert!(sl.buf.is_empty());
+			assert!(sl.end_pos.is_empty());
+			assert_eq!(sl.iter().collect::<Vec<&str>>(), Vec::<&str>::new());
+			sl.push("Hello");
+			assert_eq!(sl.iter().collect::<Vec<_>>(), vec!["Hello"]);
+			sl.push("World");
+			assert_eq!(sl.iter().collect::<Vec<_>>(), vec!["Hello", "World"]);
+			sl.push("test");
+			assert_eq!(
+				sl.iter().collect::<Vec<_>>(),
+				vec!["Hello", "World", "test"]
+			);
+			sl.push("test");
+			assert_eq!(
+				sl.iter().collect::<Vec<_>>(),
+				vec!["Hello", "World", "test", "test"]
+			);
+		}
+
+		#[test]
+		fn string_list_get() {
+			let mut sl = StringList::default();
+			assert!(sl.buf.is_empty());
+			assert!(sl.end_pos.is_empty());
+
+			sl.push("Hello");
+			sl.push("World");
+			assert_eq!(sl.get(0), Some("Hello"));
+			assert_eq!(sl.get(1), Some("World"));
+			assert_eq!(sl.get(2), None);
+
+			sl.push("test");
+			assert_eq!(sl.get(1), Some("World"));
+			assert_eq!(sl.get(2), Some("test"));
+			assert_eq!(sl.get(3), None);
+		}
 	}
 }
 use conn_table::ConnTable;
