@@ -124,7 +124,10 @@ impl View {
 }
 
 mod conn_table {
-	use ladder_lib::server::stat::{snapshot, Id, Snapshot};
+	use ladder_lib::{
+		server::stat::{snapshot, Id, Snapshot},
+		BytesCount,
+	};
 	use smol_str::SmolStr;
 	use std::{cmp::Ordering, convert::TryInto, fmt::Write, num::NonZeroUsize};
 	use tui::{
@@ -137,8 +140,8 @@ mod conn_table {
 
 	use crate::tui::display_helper::SecondsCount;
 
-    /// A wrapping index that can only be within 
-    /// `[None, 0, 1, ..., limit - 1]`.
+	/// A wrapping index that can only be within
+	/// `[None, 0, 1, ..., limit - 1]`.
 	struct WrappingIndex {
 		ind: Option<usize>,
 		limit: NonZeroUsize,
@@ -149,13 +152,13 @@ mod conn_table {
 			Self { ind: None, limit }
 		}
 
-        /// Move to next value of the following:
-        ///
-        ///```no_rust
-        ///  +-> None -> 0 -> ... -> limit - 1 -+
-        ///  |                                  | 
-        ///  +----------------------------------+
-        /// ```
+		/// Move to next value of the following:
+		///
+		///```no_rust
+		///  +-> None -> 0 -> ... -> limit - 1 -+
+		///  |                                  |
+		///  +----------------------------------+
+		/// ```
 		fn go_next(&mut self) {
 			self.ind = if let Some(ind) = self.ind {
 				if ind >= self.limit.get() - 1 {
@@ -168,7 +171,7 @@ mod conn_table {
 			}
 		}
 
-        /// Same with [`go_next`] but reverse.
+		/// Same with [`go_next`] but reverse.
 		fn go_prev(&mut self) {
 			self.ind = if let Some(ind) = self.ind {
 				if ind == 0 {
@@ -187,7 +190,7 @@ mod conn_table {
 	}
 
 	type FormatFunc = dyn Fn(&Snapshot, &mut String);
-	type CompareFunc = dyn Fn(&Snapshot, &Snapshot) -> std::cmp::Ordering;
+	type CompareFunc = dyn Fn(&Snapshot, &Snapshot) -> Ordering;
 
 	struct Column {
 		name: &'static str,
@@ -252,7 +255,10 @@ mod conn_table {
 				name: "RECV",
 				width: 4,
 				format_func: Box::new(|s, output| {
-					format_to!(output, "{}", s.recv());
+					format_to!(output, "{}", BytesCount(s.speed().recv));
+					if !s.is_dead() {
+						output.push_str("/s");
+					}
 				}),
 				compare_func: Box::new(|a, b| cmp_with(a, b, Snapshot::recv)),
 			}
@@ -263,7 +269,10 @@ mod conn_table {
 				name: "SEND",
 				width: 4,
 				format_func: Box::new(|s, output| {
-					format_to!(output, "{}", s.send());
+					format_to!(output, "{}", BytesCount(s.speed().send));
+					if !s.is_dead() {
+						output.push_str("/s");
+					}
 				}),
 				compare_func: Box::new(|a, b| cmp_with(a, b, Snapshot::send)),
 			}
@@ -314,6 +323,12 @@ mod conn_table {
 			let ind = ind % self.outbounds_style.len();
 			&self.outbounds_style[ind]
 		}
+	}
+
+	enum SelectState {
+		None,
+		Selecting(usize),
+		Following(Id),
 	}
 
 	pub struct ConnTable {
@@ -390,31 +405,45 @@ mod conn_table {
 		}
 
 		/// Sort `self.row_data` and change selected row if necessary.
-		fn sort_row_data(&mut self, followed_id: Option<Id>) {
+		fn sort_row_data(&mut self) {
 			if let Some(ind) = self.sort_column.value() {
 				let compare_func = &self.conf.cols[ind].compare_func;
-				self.row_data
-					.sort_unstable_by(|a, b| (compare_func)(&a.s, &b.s));
+				self.row_data.sort_unstable_by(|a, b| {
+					let res = cmp_alive_dead(a, b);
+					if res != Ordering::Equal {
+						return res;
+					}
+					(compare_func)(&a.s, &b.s)
+				});
 			} else {
-				self.row_data.sort_unstable_by(cmp_default);
+				self.row_data.sort_unstable_by(|a, b| {
+					let res = cmp_alive_dead(a, b);
+					if res != Ordering::Equal {
+						return res;
+					}
+					cmp_default(a, b)
+				});
 			}
 			self.needs_redraw = true;
-
-			self.select_row(
-				followed_id.and_then(|id| self.row_data.iter().position(|rd| rd.s.id() == id)),
-			);
 		}
 
-		pub fn followed_id(&self) -> Option<Id> {
-			if self.following_row {
-				self.selected_row().map(|index| self.row_data[index].s.id())
+		fn get_select_state(&self) -> SelectState {
+			if let Some(ind) = self.selected_row() {
+				if self.following_row {
+					SelectState::Following(self.row_data[ind].s.id())
+				} else {
+					SelectState::Selecting(ind)
+				}
 			} else {
-				None
+				SelectState::None
 			}
 		}
+
+		// --------------- row operation --------------
 
 		pub fn toggle_following(&mut self) {
 			self.following_row = !self.following_row;
+			self.needs_redraw = true;
 		}
 
 		fn move_selected_row(
@@ -453,23 +482,35 @@ mod conn_table {
 		#[inline]
 		pub fn select_row(&mut self, index: Option<usize>) {
 			self.table_state.select(index);
+			self.needs_redraw = true;
+		}
+
+		// --------------- column operations --------------
+
+		fn handle_column_change(&mut self) {
+			let prev_select_state = self.get_select_state();
+			self.sort_row_data();
+			if let SelectState::Following(id) = prev_select_state {
+				self.select_row(self.row_data.iter().position(|rd| rd.s.id() == id));
+			}
 		}
 
 		#[inline]
 		pub fn set_sort_column_prev(&mut self) {
 			self.sort_column.go_prev();
-			self.sort_row_data(self.followed_id());
+			self.handle_column_change();
 		}
 
 		#[inline]
 		pub fn set_sort_column_next(&mut self) {
 			self.sort_column.go_next();
-			self.sort_row_data(self.followed_id());
+			self.handle_column_change();
 		}
 
+		// ---------------- draw & update ----------------
+
 		pub fn update<'a>(&mut self, snapshots: impl IntoIterator<Item = &'a Snapshot>) {
-			let prev_followed_id = self.followed_id();
-			let selected_index = self.selected_row();
+			let prev_select_state = self.get_select_state();
 			// Fill `row_data`
 			{
 				let curr_len = self.row_data.len();
@@ -488,14 +529,21 @@ mod conn_table {
 				}
 				self.row_data.truncate(count);
 			}
+			self.sort_row_data();
 			// Fix selected row index after update.
-			if let Some(ind) = selected_index {
-				if !self.following_row && ind >= self.row_data.len() {
-					self.select_row(None);
+			let new_ind = match prev_select_state {
+				SelectState::None => None,
+				SelectState::Selecting(ind) => {
+					if ind >= self.row_data.len() {
+						None
+					} else {
+						Some(ind)
+					}
 				}
-			}
+				SelectState::Following(id) => self.row_data.iter().position(|rd| rd.s.id() == id),
+			};
+			self.select_row(new_ind);
 			// Keep following previous id.
-			self.sort_row_data(prev_followed_id);
 			self.needs_redraw = true;
 		}
 
@@ -589,14 +637,22 @@ mod conn_table {
 		format_to!(output, "{}", SecondsCount(lasted));
 	}
 
+	fn cmp_alive_dead(a: &RowData, b: &RowData) -> Ordering {
+		match (a.s.end_time, b.s.end_time) {
+			(None, Some(_)) => Ordering::Less,
+			(Some(_), None) => Ordering::Greater,
+			_ => Ordering::Equal,
+		}
+	}
+
 	fn cmp_default(a: &RowData, b: &RowData) -> Ordering {
+		let res = cmp_alive_dead(a, b);
+		if res != Ordering::Equal {
+			return res;
+		}
+
 		let a = &a.s;
 		let b = &b.s;
-		match (a.end_time, b.end_time) {
-			(Some(_), None) => return std::cmp::Ordering::Less,
-			(None, Some(_)) => return std::cmp::Ordering::Greater,
-			_ => {}
-		};
 		a.basic.start_time.cmp(&b.basic.start_time).reverse()
 	}
 
