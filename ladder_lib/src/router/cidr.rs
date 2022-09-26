@@ -180,7 +180,7 @@ impl Cidr {
 			Cidr4::new([10, 0, 0, 0], 8).into(),
 			Cidr4::new([100, 64, 0, 0], 10).into(),
 			Cidr4::new([172, 16, 0, 0], 12).into(),
-			Cidr4::new([192, 168, 0, 0], 24).into(),
+			Cidr4::new([192, 168, 0, 0], 16).into(),
 			// IPv6
 			Cidr6::new([0xfe80, 0, 0, 0, 0, 0, 0, 0], 10).into(),
 		]

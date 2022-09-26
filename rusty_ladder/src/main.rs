@@ -123,13 +123,13 @@ pub struct AppOptions {
 
 	/// Block request to these addresees (separated by ',')
 	///
-	/// Each address can be either an IP (like "127.0.0.1") or a subnet (like "127.0.0.0/8").
+	/// Each address can be either an IP or a subnet (like "127.0.0.1" or "127.0.0.0/8").
 	///
-	/// Some special addresses are reserved:
-	/// - "@lan": private network like 192.168.0.0/16
-	/// - "@localloop": local loop like 127.0.0.0/8
+	/// Special values:
+	/// - "@lan": 192.168.0.0/16, 172.16.0.0/12, 10.0.0.0/8, 100.64.0.0/10
+	/// - "@localhost": 127.0.0.0/8
 	///
-	/// "@lan,@localloop" will be used if not set.
+	/// "@lan,@localhost" will be used if not set.
 	///
 	/// Set to "" to use an empty block list.
 	///
@@ -316,11 +316,10 @@ mod parse_url_impl {
 
 	fn make_blocklist(block_str: Option<&str>) -> Result<Vec<router::PlainRule>, Error> {
 		const LAN_STR: &str = "@lan";
-		const LOCALLOOP_STR: &str = "@localloop";
+		const LOCALHOST_STR: &str = "@localhost";
 
-		let mut dsts: Vec<router::Destination> = Vec::new();
 		let block = block_str.map_or_else(
-			|| Cow::Owned(format!("{},{}", LAN_STR, LOCALLOOP_STR)),
+			|| Cow::Owned(format!("{},{}", LAN_STR, LOCALHOST_STR)),
 			Cow::Borrowed,
 		);
 
@@ -329,6 +328,7 @@ mod parse_url_impl {
 			return Ok(Vec::new());
 		}
 
+		let mut dsts: Vec<router::Destination> = Vec::new();
 		for part in block.split(',') {
 			match part {
 				LAN_STR => dsts.extend(
@@ -336,7 +336,7 @@ mod parse_url_impl {
 						.into_iter()
 						.map(router::Destination::Cidr),
 				),
-				LOCALLOOP_STR => {
+				LOCALHOST_STR => {
 					dsts.push(router::Destination::Cidr(router::Cidr4::LOCALLOOP.into()));
 					dsts.push(router::Destination::Cidr(router::Cidr6::LOCALLOOP.into()));
 				}
