@@ -21,19 +21,42 @@ mod display_helper;
 mod events;
 mod view;
 
+use self::view::View;
 use super::BoxStdErr;
 use crossterm::{cursor, execute, terminal};
 use events::{Event, EventManager, InputEvent};
-use ladder_lib::server::stat::{Monitor, Snapshot};
+use ladder_lib::{
+	server::stat::{Monitor, Snapshot},
+	Server,
+};
 use log::trace;
-use view::View;
 use std::{io, sync::mpsc, time::Duration};
 use tui::{backend::CrosstermBackend, Terminal};
 
 /// Default interval between each TUI update
 pub const DEFAULT_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 
-pub fn run(
+pub struct Tui {
+	view: View,
+}
+
+impl Tui {
+	pub fn new(s: &Server) -> Self {
+		Self { view: View::new(s) }
+	}
+
+	pub fn run(
+		mut self,
+		stop_receiver: mpsc::Receiver<()>,
+		update_interval: Duration,
+		monitor: &Monitor,
+	) -> Result<(), BoxStdErr> {
+		run(&mut self.view, stop_receiver, update_interval, monitor)
+	}
+}
+
+fn run(
+	view: &mut View,
 	stop_receiver: mpsc::Receiver<()>,
 	update_interval: Duration,
 	monitor: &Monitor,
@@ -49,7 +72,6 @@ pub fn run(
 	setup_terminal()?;
 
 	let events_receiver = EventManager::new(stop_receiver, update_interval);
-	let mut view = View::new();
 	let mut snapshots = Vec::new();
 
 	loop {

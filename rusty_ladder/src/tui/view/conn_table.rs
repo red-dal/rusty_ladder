@@ -68,8 +68,8 @@ impl WrappingIndex {
 	}
 }
 
-type FormatFunc = dyn Fn(&Snapshot, &mut String);
-type CompareFunc = dyn Fn(&Snapshot, &Snapshot) -> Ordering;
+type FormatFunc = dyn Send + Sync + Fn(&Snapshot, &mut String);
+type CompareFunc = dyn Send + Sync + Fn(&Snapshot, &Snapshot) -> Ordering;
 
 struct Column {
 	name: &'static str,
@@ -210,6 +210,33 @@ enum SelectState {
 	Following(Id),
 }
 
+#[allow(clippy::struct_excessive_bools)]
+pub struct ColumnOptions {
+	pub id: bool,
+	pub state: bool,
+	pub inbound: bool,
+	pub outbound: bool,
+	pub dst: bool,
+	pub recv: bool,
+	pub send: bool,
+	pub lasted: bool,
+}
+
+impl Default for ColumnOptions {
+	fn default() -> Self {
+		Self {
+			id: true,
+			state: true,
+			inbound: true,
+			outbound: true,
+			dst: true,
+			recv: true,
+			send: true,
+			lasted: true,
+		}
+	}
+}
+
 pub struct ConnTable {
 	// Row related
 	pub following_row: bool,
@@ -224,17 +251,39 @@ pub struct ConnTable {
 }
 
 impl ConnTable {
-	pub fn new() -> Self {
-		let cols = vec![
-			Column::new_id(),
-			Column::new_state(),
-			Column::new_inbound(),
-			Column::new_outbound(),
-			Column::new_dst(),
-			Column::new_recv(),
-			Column::new_send(),
-			Column::new_lasted(),
-		];
+	pub fn new(opts: &ColumnOptions) -> Self {
+		let cols = {
+			let mut cols = Vec::new();
+			if opts.id {
+				cols.push(Column::new_id());
+			}
+			if opts.state {
+				cols.push(Column::new_state());
+			}
+			if opts.inbound {
+				cols.push(Column::new_inbound());
+			}
+			if opts.outbound {
+				cols.push(Column::new_outbound());
+			}
+			if opts.dst {
+				cols.push(Column::new_dst());
+			}
+			if opts.recv {
+				cols.push(Column::new_recv());
+			}
+			if opts.send {
+				cols.push(Column::new_send());
+			}
+			if opts.lasted {
+				cols.push(Column::new_lasted());
+			}
+			cols
+		};
+		if cols.is_empty() {
+			panic!("Must have at least one column in conn_table");
+		}
+
 		let widths = {
 			let total: u16 = cols.iter().map(|x| x.width).sum();
 			cols.iter()
@@ -288,20 +337,13 @@ impl ConnTable {
 		if let Some(ind) = self.sort_column.value() {
 			let compare_func = &self.conf.cols[ind].compare_func;
 			self.row_data.sort_unstable_by(|a, b| {
-				let res = cmp_alive_dead(a, b);
-				if res != Ordering::Equal {
-					return res;
-				}
-				(compare_func)(&a.s, &b.s)
+				cmp_alive_dead(a, b)
+					.then_with(|| (compare_func)(&a.s, &b.s))
+					.then_with(|| cmp_start_time(a, b))
 			});
 		} else {
-			self.row_data.sort_unstable_by(|a, b| {
-				let res = cmp_alive_dead(a, b);
-				if res != Ordering::Equal {
-					return res;
-				}
-				cmp_default(a, b)
-			});
+			self.row_data
+				.sort_unstable_by(|a, b| cmp_alive_dead(a, b).then_with(|| cmp_start_time(a, b)));
 		}
 		self.needs_redraw = true;
 	}
@@ -524,22 +566,18 @@ fn cmp_alive_dead(a: &RowData, b: &RowData) -> Ordering {
 	}
 }
 
-fn cmp_default(a: &RowData, b: &RowData) -> Ordering {
-	let res = cmp_alive_dead(a, b);
-	if res != Ordering::Equal {
-		return res;
-	}
-
-	let a = &a.s;
-	let b = &b.s;
-	a.basic.start_time.cmp(&b.basic.start_time).reverse()
+fn cmp_start_time(a: &RowData, b: &RowData) -> Ordering {
+	// Reverse because later (larger) start_time should come first.
+	cmp_with(&a.s, &b.s, |i| i.basic.start_time).reverse()
 }
 
 fn cmp_lasted(a: &Snapshot, b: &Snapshot) -> Ordering {
 	match (a.end_time, b.end_time) {
-		(None, None) => cmp_with(a, b, |i| i.basic.start_time),
+		// Both alive, compare who comes later.
+		(None, None) => cmp_with(a, b, |i| i.basic.start_time).reverse(),
 		(None, Some(_)) => Ordering::Less,
 		(Some(_), None) => Ordering::Greater,
+		// Both dead, compare how long they lasted.
 		(Some(a_end_time), Some(b_end_time)) => {
 			let a_lasted = a_end_time
 				.duration_since(a.basic.start_time)

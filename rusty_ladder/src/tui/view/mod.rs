@@ -18,7 +18,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::BoxStdErr;
-use ladder_lib::server::stat::{CounterValue, Snapshot};
+use ladder_lib::{
+	server::stat::{CounterValue, Snapshot},
+	Server,
+};
 use tui::{
 	backend::Backend,
 	layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -36,10 +39,16 @@ pub(super) struct View {
 }
 
 impl View {
-	pub fn new() -> Self {
+	pub fn new(s: &Server) -> Self {
+		let opts = ColumnOptions {
+			// Enable in/outbounds only if there are more than one
+			inbound: s.inbounds.len() > 1,
+			outbound: s.outbounds.len() > 1,
+			..Default::default()
+		};
 		Self {
 			style_hint: Style::default().bg(Color::White).fg(Color::Black),
-			conn_table: ConnTable::new(),
+			conn_table: ConnTable::new(&opts),
 			speed_chart: SpeedChart::new(),
 		}
 	}
@@ -118,7 +127,7 @@ impl View {
 }
 
 mod conn_table;
-use conn_table::ConnTable;
+use conn_table::{ColumnOptions, ConnTable};
 
 mod speed_chart;
 use speed_chart::SpeedChart;
