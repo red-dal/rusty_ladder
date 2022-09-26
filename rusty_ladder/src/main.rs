@@ -490,6 +490,7 @@ mod tui_utils {
 
 		if use_tui {
 			use futures::FutureExt;
+			let tui = tui::Tui::new(&server);
 			let (tui_sender, tui_receiver) = mpsc::channel();
 			let (monitor, mon_task) = Monitor::new();
 			// Abort the serve task if gui says so.
@@ -500,16 +501,13 @@ mod tui_utils {
 			};
 			let (serve_task, abort_handle) = abortable(task);
 
-			let handle = rt.handle().clone();
 			// Spawn a thread to handle TUI
-			let tui_thread = {
-				thread::spawn(move || {
-					let res = tui::run(tui_receiver, tui::DEFAULT_UPDATE_INTERVAL, monitor, handle);
-					// This error is caused by server thread panicking, so it's safe to ignore.
-					abort_handle.abort();
-					res
-				})
-			};
+			let tui_thread = thread::spawn(move || {
+				let res = tui.run(tui_receiver, tui::DEFAULT_UPDATE_INTERVAL, &monitor);
+				// This error is caused by server thread panicking, so it's safe to ignore.
+				abort_handle.abort();
+				res
+			});
 
 			// Handling serve result
 			let rt = Arc::new(rt);

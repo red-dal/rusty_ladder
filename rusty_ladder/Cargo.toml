@@ -128,16 +128,17 @@ log = { version = "0.4", default-features = false, features = [
     "serde",
 ] }
 tokio = { version = "1.0" }
-tui = { version = "0.18", optional = true }
-crossterm = { version = "0.23", optional = true }
 futures =  { version = "0.3", default-features = false, features = [
     "std",
 	"async-await"
 ] }
-lazy_static = "1.4"
 thiserror = "1.0"
 smol_str = "0.1"
 url = { version = "2" }
+
+# TUI
+tui = { version = "0.19", optional = true }
+crossterm = { version = "0.25", optional = true }
 
 # Logging
 fern = { version = "0.6", features = ["colored"] }

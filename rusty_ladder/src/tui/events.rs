@@ -19,66 +19,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use crossterm::event::{self, Event as RawEvent, KeyCode, KeyModifiers};
 use event::KeyEvent;
-use lazy_static::lazy_static;
-use std::{collections::HashMap, sync::mpsc, thread, time::Duration};
+use std::{num::NonZeroUsize, sync::mpsc, thread, time::Duration};
 
-const KEYS_QUIT: &[&KeyEvent] = &[
-	&KeyEvent {
-		code: KeyCode::Char('q'),
-		modifiers: KeyModifiers::NONE,
-	},
-	&KeyEvent {
-		code: KeyCode::Char('Q'),
-		modifiers: KeyModifiers::NONE,
-	},
-	&KeyEvent {
-		code: KeyCode::Char('c'),
-		modifiers: KeyModifiers::CONTROL,
-	},
-	&KeyEvent {
-		code: KeyCode::Char('C'),
-		modifiers: KeyModifiers::CONTROL,
-	},
-	&KeyEvent {
-		code: KeyCode::Esc,
-		modifiers: KeyModifiers::NONE,
-	},
+const KEYS_QUIT: &[KeyEvent] = &[
+	KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+	KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::NONE),
+	KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+	KeyEvent::new(KeyCode::Char('C'), KeyModifiers::CONTROL),
+	KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
 ];
 
-const KEY_UP: KeyEvent = KeyEvent {
-	code: KeyCode::Up,
-	modifiers: KeyModifiers::NONE,
-};
-
-const KEY_DOWN: KeyEvent = KeyEvent {
-	code: KeyCode::Down,
-	modifiers: KeyModifiers::NONE,
-};
-
-const KEY_LEFT: KeyEvent = KeyEvent {
-	code: KeyCode::Left,
-	modifiers: KeyModifiers::NONE,
-};
-
-const KEY_RIGHT: KeyEvent = KeyEvent {
-	code: KeyCode::Right,
-	modifiers: KeyModifiers::NONE,
-};
-
-const KEY_FOLLOWING: KeyEvent = KeyEvent {
-	code: KeyCode::Char('f'),
-	modifiers: KeyModifiers::NONE,
-};
-
-const KEY_FOLLOWING_2: KeyEvent = KeyEvent {
-	code: KeyCode::Char('F'),
-	modifiers: KeyModifiers::NONE,
-};
+const KEY_UP: KeyEvent = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+const KEY_DOWN: KeyEvent = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+const KEY_LEFT: KeyEvent = KeyEvent::new(KeyCode::Left, KeyModifiers::NONE);
+const KEY_RIGHT: KeyEvent = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
+const KEY_FOLLOWING: KeyEvent = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE);
+const KEY_FOLLOWING_2: KeyEvent = KeyEvent::new(KeyCode::Char('F'), KeyModifiers::NONE);
 
 #[derive(Debug)]
 pub enum Event {
 	Update,
-	Input(InputEvent, usize),
+	Input(InputEvent, NonZeroUsize),
 	Stop,
 	Resize { width: u16, height: u16 },
 }
@@ -131,24 +92,19 @@ impl EventManager {
 
 fn try_read_duplicate_events(
 	stream: &mut PeekableEventReader,
-	key_event: &KeyEvent,
+	curr: &KeyEvent,
 ) -> crossterm::Result<usize> {
 	let mut count = 0;
-	loop {
-		let next_event = if let Some(e) = stream.peek()? {
-			let _next = stream.read()?;
-			e
-		} else {
-			return Ok(count);
-		};
-		if let RawEvent::Key(e) = &next_event {
-			if e == key_event {
+	while let Some(next) = stream.peek()? {
+		if let RawEvent::Key(next) = &next {
+			if next == curr {
 				count += 1;
 				continue;
 			}
 		}
-		return Ok(count);
+		break;
 	}
+	Ok(count)
 }
 
 #[derive(Default)]
@@ -161,17 +117,16 @@ impl PeekableEventReader {
 		self.buf.take().map_or_else(event::read, Ok)
 	}
 
-	fn peek(&mut self) -> crossterm::Result<Option<RawEvent>> {
-		if let Some(e) = &self.buf {
-			Ok(Some(*e))
-		} else if event::poll(Duration::from_secs(0))? {
-			event::read().map(|e| {
-				self.buf = Some(e);
-				Some(e)
-			})
-		} else {
-			Ok(None)
+	fn peek(&mut self) -> crossterm::Result<Option<&RawEvent>> {
+		if self.buf.is_some() {
+			return Ok(self.buf.as_ref());
 		}
+		if event::poll(Duration::from_secs(0))? {
+			let e = event::read()?;
+			self.buf = Some(e);
+			return Ok(self.buf.as_ref());
+		}
+		Ok(None)
 	}
 }
 
@@ -183,16 +138,14 @@ fn read_events(sender: &mpsc::Sender<Event>) -> crossterm::Result<()> {
 			RawEvent::Key(key_event) => {
 				if let Some(ie) = InputEvent::from_key_event(&key_event) {
 					let additional_count = try_read_duplicate_events(&mut stream, &key_event)?;
-					Some(Event::Input(ie, 1 + additional_count))
+					let count = NonZeroUsize::new(1 + additional_count).unwrap();
+					Some(Event::Input(ie, count))
 				} else {
 					None
 				}
 			}
-			RawEvent::Mouse(_) => {
-				// No mouse event is captured, so do nothing.
-				None
-			}
 			RawEvent::Resize(width, height) => Some(Event::Resize { width, height }),
+			_ => None,
 		};
 		if let Some(event) = event {
 			if let Err(err) = sender.send(event) {
@@ -234,30 +187,23 @@ pub enum InputEvent {
 }
 
 impl InputEvent {
-	pub fn from_key_event(key_event: &KeyEvent) -> Option<Self> {
-		lazy_static! {
-			static ref MAP: HashMap<KeyEvent, InputEvent> = {
-				let mut map: HashMap<KeyEvent, InputEvent> = [
-					(KEY_UP, InputEvent::MoveUp),
-					(KEY_DOWN, InputEvent::MoveDown),
-					(KEY_LEFT, InputEvent::MoveLeft),
-					(KEY_RIGHT, InputEvent::MoveRight),
-					(KEY_FOLLOWING, InputEvent::ToggleFollowing),
-					(KEY_FOLLOWING_2, InputEvent::ToggleFollowing),
-				]
-				.iter()
-				.copied()
-				.collect();
-				for key in KEYS_QUIT {
-					assert!(
-						map.insert(**key, InputEvent::Quit).is_none(),
-						"KeyEvent {:?} already exists",
-						key
-					);
-				}
-				map
-			};
+	pub fn from_key_event(e: &KeyEvent) -> Option<Self> {
+		if KEYS_QUIT.contains(e) {
+			return Some(Self::Quit);
 		}
-		MAP.get(key_event).copied()
+		let e = *e;
+		Some(if e == KEY_UP {
+			Self::MoveUp
+		} else if e == KEY_DOWN {
+			Self::MoveDown
+		} else if e == KEY_LEFT {
+			Self::MoveLeft
+		} else if e == KEY_RIGHT {
+			Self::MoveRight
+		} else if e == KEY_FOLLOWING_2 || e == KEY_FOLLOWING {
+			Self::ToggleFollowing
+		} else {
+			return None;
+		})
 	}
 }

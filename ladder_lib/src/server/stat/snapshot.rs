@@ -71,6 +71,7 @@ pub struct Snapshot {
 
 impl Snapshot {
 	#[must_use]
+    #[inline]
 	pub fn id(&self) -> u64 {
 		self.basic.conn_id
 	}
