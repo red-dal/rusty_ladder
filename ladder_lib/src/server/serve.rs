@@ -54,6 +54,7 @@ impl Server {
 		// Serving Web API
 		#[cfg(feature = "use-webapi")]
 		if let super::Api::WebApi { addr, secret } = &self.api {
+            use futures::FutureExt;
 			#[allow(clippy::option_if_let_else)]
 			let mon_ref = if let Some(m) = &mut monitor {
 				m

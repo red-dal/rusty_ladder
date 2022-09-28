@@ -688,6 +688,7 @@ mod config {
 	}
 
 	#[allow(clippy::unnecessary_wraps)]
+    #[allow(dead_code)]
 	fn default_output() -> Option<LogOutput> {
 		Some(LogOutput::Stdout)
 	}

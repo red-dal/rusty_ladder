@@ -1,7 +1,3 @@
-use async_trait::async_trait;
-use std::{collections::HashSet, convert::TryInto, net::SocketAddr};
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader};
-
 use super::{sha_then_hex, Command, Key};
 use crate::{
 	prelude::{BoxStdErr, CRLF},
@@ -11,6 +7,13 @@ use crate::{
 	},
 	utils::{read_until, ChainedReadHalf},
 };
+use async_trait::async_trait;
+use std::{
+	collections::HashSet,
+	convert::{TryFrom, TryInto},
+	net::SocketAddr,
+};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader};
 
 const REQUEST_BUFFER_SIZE: usize = 1024;
 
@@ -108,6 +111,7 @@ impl StreamAcceptor for Settings {
 					req.addr,
 				))
 			}
+			#[cfg(feature = "use-udp")]
 			Command::UdpAssociate => Err(AcceptError::Protocol(
 				"trojan udp inbound is not supported".into(),
 			)),
@@ -143,8 +147,8 @@ fn try_parse_request(rb: &RequestBytes, keys: &HashSet<Key>) -> Result<Request, 
 		return Err("slice too small for trojan request".into());
 	}
 
-	let cmd = Command::from_u8(rb.req[0])
-		.ok_or_else(|| format!("unknown command value {}", rb.req[0]))?;
+	let cmd = Command::try_from(rb.req[0])
+		.map_err(|_e| "unknown value {} for command in trojan request")?;
 
 	let addr_buf = &rb.req[1..];
 	let (addr, len) = SocksAddr::read_from_bytes(addr_buf)?;

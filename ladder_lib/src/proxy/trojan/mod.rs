@@ -45,38 +45,23 @@ where target address is a SOCKS5 address:
 See more about SOCKS5 address at <https://tools.ietf.org/html/rfc1928#section-5>
 */
 
-use md5::Digest;
-use sha2::Sha224;
+use sha2::{Digest, Sha224};
 
 pub const PROTOCOL_NAME: &str = "trojan";
 
 type Key = [u8; 56];
 
-#[cfg(feature = "trojan-outbound")]
-pub mod outbound;
 #[cfg(feature = "trojan-inbound")]
 pub mod inbound;
+#[cfg(feature = "trojan-outbound")]
+pub mod outbound;
 
 #[repr(u8)]
+#[derive(num_enum::TryFromPrimitive)]
 enum Command {
 	Connect = 0x1,
 	#[cfg(feature = "use-udp")]
 	UdpAssociate = 0x3,
-}
-
-impl Command {
-	fn from_u8(v: u8) -> Option<Self> {
-		const CONNECT: u8 = Command::Connect as u8;
-		#[cfg(feature = "use-udp")]
-		const UDP_ASSOCIATE: u8 = Command::UdpAssociate as u8;
-
-		Some(match v {
-			CONNECT => Command::Connect,
-			#[cfg(feature = "use-udp")]
-			UDP_ASSOCIATE => Command::UdpAssociate,
-			_ => return None,
-		})
-	}
 }
 
 fn sha_then_hex(password: &[u8]) -> Key {
@@ -98,7 +83,7 @@ fn sha_then_hex(password: &[u8]) -> Key {
 		out[1] = TABLE[low as usize];
 	}
 
-    result
+	result
 }
 
 #[cfg(feature = "trojan-outbound")]

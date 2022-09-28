@@ -220,6 +220,7 @@ mod read_until {
 		src.windows(pat.len()).position(|window| window == pat)
 	}
 
+    #[allow(dead_code)]
 	pub async fn read_until<'a>(
 		mut r: impl AsyncBufRead + Unpin,
 		pat: &[u8],
@@ -377,6 +378,7 @@ mod read_until {
 	}
 }
 
+#[allow(unused_imports)]
 pub(super) use read_until::read_until;
 
 mod chain_buf_read_half {
@@ -397,6 +399,7 @@ mod chain_buf_read_half {
 	}
 
 	impl<R: AsyncBufRead + Unpin> ChainedReadHalf<R> {
+        #[allow(dead_code)]
 		pub fn new(inner: R, buf: impl Into<Bytes>) -> Self {
 			Self {
 				inner,

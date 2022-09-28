@@ -50,6 +50,7 @@ pub enum AddrType {
 	Ipv6 = 3,
 }
 
+#[cfg_attr(feature = "parse-url", allow(dead_code))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 #[cfg_attr(feature = "use_serde", derive(serde::Deserialize))]
