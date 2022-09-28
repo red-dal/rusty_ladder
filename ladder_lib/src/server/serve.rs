@@ -54,7 +54,7 @@ impl Server {
 		// Serving Web API
 		#[cfg(feature = "use-webapi")]
 		if let super::Api::WebApi { addr, secret } = &self.api {
-            use futures::FutureExt;
+			use futures::FutureExt;
 			#[allow(clippy::option_if_let_else)]
 			let mon_ref = if let Some(m) = &mut monitor {
 				m
@@ -250,6 +250,7 @@ where
 	}
 }
 
+// Handle a single incoming connection.
 async fn handle_incoming(
 	args: CallbackArgs,
 	server: Arc<Server>,
@@ -273,7 +274,16 @@ async fn handle_incoming(
 	let server = server.clone();
 	#[cfg(feature = "use-udp")]
 	let udp_session_timeout = udp_session_timeout;
-	let accept_res = match inbound.accept_stream(args.stream, info).await {
+	// TODO: Add timeout here.
+
+	let accept_res = tokio::time::timeout(
+		server.global.inbound_handshake_timeout,
+		inbound.accept_stream(args.stream, info),
+	)
+	.await
+	.map_err(|_e| Error::Other("{id} inbound handshake timeout".into()))?;
+
+	let accept_res = match accept_res {
 		Ok(res) => res,
 		Err(e) => {
 			match e {

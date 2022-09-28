@@ -24,8 +24,8 @@ const fn default_dial_tcp_timeout_ms() -> u64 {
 	10_000
 }
 
-const fn default_outbound_handshake_timeout_ms() -> u64 {
-	20_000
+const fn default_timeout_ms() -> u64 {
+	7500
 }
 
 const fn default_relay_timeout_secs() -> usize {
@@ -40,6 +40,7 @@ const fn default_udp_session_timeout_ms() -> u64 {
 pub struct Global {
 	/// TCP connection will be dropped if it cannot be established within this amount of time.
 	pub dial_tcp_timeout: Duration,
+    pub inbound_handshake_timeout: Duration,
 	pub outbound_handshake_timeout: Duration,
 	pub relay_timeout_secs: usize,
 	#[cfg(feature = "use-udp")]
@@ -65,21 +66,35 @@ pub struct Builder {
 	/// Default: 10000
 	#[cfg_attr(feature = "use_serde", serde(default = "default_dial_tcp_timeout_ms"))]
 	pub dial_tcp_timeout_ms: u64,
+
 	/// Outbound handshake will be dropped if it cannot be completed within
 	/// this amount of time.
 	///
 	/// Default: 20000
 	#[cfg_attr(
 		feature = "use_serde",
-		serde(default = "default_outbound_handshake_timeout_ms")
+		serde(default = "default_timeout_ms")
+	)]
+	pub inbound_handshake_timeout_ms: u64,
+    
+
+	/// Outbound handshake will be dropped if it cannot be completed within
+	/// this amount of time.
+	///
+	/// Default: 20000
+	#[cfg_attr(
+		feature = "use_serde",
+		serde(default = "default_timeout_ms")
 	)]
 	pub outbound_handshake_timeout_ms: u64,
+    
 	/// Session will be dropped if there are no bytes transferred within
 	/// this amount of time.
 	///
 	/// Defaults: 300
 	#[cfg_attr(feature = "use_serde", serde(default = "default_relay_timeout_secs"))]
 	pub relay_timeout_secs: usize,
+    
 	/// Udp socket/tunnel session will be dropped if there is no read or write for more than
 	/// this amount of time.
 	///
@@ -105,6 +120,7 @@ impl Builder {
 		check_zero(self.udp_session_timeout_ms, "udp_session_timeout_ms")?;
 		Ok(Global {
 			dial_tcp_timeout: Duration::from_millis(self.dial_tcp_timeout_ms),
+            inbound_handshake_timeout: Duration::from_millis(self.inbound_handshake_timeout_ms),
 			outbound_handshake_timeout: Duration::from_millis(self.outbound_handshake_timeout_ms),
 			relay_timeout_secs: self.relay_timeout_secs,
 			#[cfg(feature = "use-udp")]
@@ -117,7 +133,8 @@ impl Default for Builder {
 	fn default() -> Self {
 		Self {
 			dial_tcp_timeout_ms: default_dial_tcp_timeout_ms(),
-			outbound_handshake_timeout_ms: default_outbound_handshake_timeout_ms(),
+            inbound_handshake_timeout_ms: default_timeout_ms(),
+			outbound_handshake_timeout_ms: default_timeout_ms(),
 			relay_timeout_secs: default_relay_timeout_secs(),
 			#[cfg(feature = "use-udp")]
 			udp_session_timeout_ms: default_udp_session_timeout_ms(),

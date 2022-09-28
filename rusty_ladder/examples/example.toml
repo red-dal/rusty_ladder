@@ -6,12 +6,17 @@
     ## Default: 10000
     dial_tcp_timeout_ms = 10000
 
-    ## Outbound handshake will be dropped if it cannot be completed within
-    ## this amount of time. 
-    ## Optional.
+	## Timeout for inbound handshake.
+	## Optional.
+    ## 
+	## Default: 7500
+	inbound_handshake_timeout_ms = 7500
+
+    ## Timeout for outbound handshake.
+	## Optional.
     ##
-    ## Default: 20000
-    outbound_handshake_timeout_ms = 20000
+    ## Default: 7500
+    outbound_handshake_timeout_ms = 7500
 
     ## Session will be dropped if there are no bytes transferred within
     ## this amount of time.
