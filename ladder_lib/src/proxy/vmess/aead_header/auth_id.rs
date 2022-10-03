@@ -266,7 +266,7 @@ mod guarded_container {
 		/// If `item` already exists, return `Some(old_time)`.
 		///
 		/// If `item` does not exist, return `None`.
-		pub async fn insert(&self, item: AuthId, curr_time: i64) -> Option<i64> {
+		pub fn insert(&self, item: AuthId, curr_time: i64) -> Option<i64> {
 			let mut c = self.0.lock();
 			// The container is not initialized before calling insert.
 			match &*c {

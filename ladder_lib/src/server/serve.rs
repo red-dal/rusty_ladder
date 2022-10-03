@@ -203,7 +203,7 @@ where
 		let ar = acceptor.accept().await?;
 		let monitor = monitor.clone();
 		// randomly generated connection ID
-		let conn_id = rand::thread_rng().next_u64();
+		let conn_id = Id::new();
 		let inbound = inbound.clone();
 		tokio::spawn(async move {
 			let stream = ar.stream;
@@ -230,12 +230,12 @@ where
 				let in_proto = inbound.protocol_name();
 				if let Error::Inactive(secs) = &e {
 					warn!(
-						"[{conn_id:x}] connection closed in \
+						"[{conn_id}] connection closed in \
                             'in_tag'|{in_proto} session due to inactivity for {secs} secs."
 					);
 				} else {
 					error!(
-						"[{conn_id:x}] error occurred in \
+						"[{conn_id}] error occurred in \
                             '{in_tag}'|{in_proto} session: {e} ",
 						in_tag = inbound.tag,
 					);
@@ -256,7 +256,7 @@ async fn handle_incoming(
 	server: Arc<Server>,
 	#[cfg(feature = "use-udp")] udp_session_timeout: std::time::Duration,
 ) -> Result<(), Error> {
-	let id = format!("[{:x}]", args.conn_id);
+    let id = args.conn_id;
 	// ------ handshake ------
 	// Source (peer) of the current stream.
 	let src = args.addr.get_peer();
@@ -396,7 +396,7 @@ struct StreamSession<'a> {
 	server: &'a Server,
 	inbound: &'a Inbound,
 	inbound_ind: usize,
-	id: String,
+	id: Id,
 	stat_handle: Option<SessionHandle>,
 	src: &'a SocketAddr,
 	handshake_handler: Box<dyn Finish + 'a>,
@@ -454,7 +454,7 @@ impl<'a> StreamSession<'a> {
 		let in_stream = handshake_handler.finish().await?;
 		info!("{id} inbound handshake finished, relaying...");
 		ProxyStreamHandler {
-			id: &id,
+			id,
 			stat_handle: &self.stat_handle,
 			in_ps: in_stream,
 			out_ps: out_stream,
@@ -466,7 +466,7 @@ impl<'a> StreamSession<'a> {
 }
 
 struct ProxyStreamHandler<'a> {
-	id: &'a str,
+	id: Id,
 	stat_handle: &'a Option<SessionHandle>,
 	in_ps: BufBytesStream,
 	out_ps: BufBytesStream,

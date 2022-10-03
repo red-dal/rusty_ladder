@@ -22,6 +22,7 @@ use std::sync::{
 	Arc,
 };
 
+/// Wrapper for `Arc<AtomicU64>`.
 #[derive(Clone)]
 pub struct Counter(pub Arc<AtomicU64>);
 

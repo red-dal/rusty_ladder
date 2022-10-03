@@ -22,7 +22,7 @@ mod stream_copier;
 
 pub use atomic_values::Counter;
 
-use crate::prelude::*;
+use crate::{prelude::*, server::stat::Id};
 use atomic_values::Switch;
 use futures::{
 	future::{self, Either},
@@ -30,7 +30,7 @@ use futures::{
 };
 use std::{io, time::Duration};
 use stream_copier::StreamCopier;
-use tokio::{time::timeout, io::AsyncBufRead};
+use tokio::{io::AsyncBufRead, time::timeout};
 
 const OTHER_TASK_TIMEOUT: Duration = Duration::from_millis(2000);
 
@@ -41,45 +41,25 @@ const ACTIVE: bool = true;
 const NOT_ACTIVE: bool = !ACTIVE;
 
 const TICK_INTERVAL: Duration = Duration::from_secs(1);
-const DEFAULT_TIMEOUT_SECS: usize = 300;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("{0}")]
-    Io(#[from] io::Error),
-    #[error("inactive for {0} secs")]
-    Inactive(usize),
+	#[error("{0}")]
+	Io(#[from] io::Error),
+	#[error("inactive for {0} secs")]
+	Inactive(usize),
 }
 
-pub struct Relay<'a> {
-	pub conn_id: &'a str,
+pub struct Relay {
+	pub conn_id: Id,
 	pub recv: Option<Counter>,
 	pub send: Option<Counter>,
 	pub timeout_secs: usize,
 }
 
-impl<'a> Relay<'a> {
-	#[inline]
-	pub fn new(conn_id: &'a str) -> Self {
-		Self {
-			conn_id,
-			recv: None,
-			send: None,
-			timeout_secs: DEFAULT_TIMEOUT_SECS,
-		}
-	}
-}
-
-impl Default for Relay<'static> {
-	#[inline]
-	fn default() -> Self {
-		Self::new("")
-	}
-}
-
-impl Relay<'_> {
+impl Relay {
 	pub async fn relay_stream<IR, IW, OR, OW>(
-		&self,
+		self,
 		ir: IR,
 		iw: IW,
 		or: OR,
@@ -122,10 +102,9 @@ impl Relay<'_> {
 			is_active: is_active.clone(),
 		}
 		.run();
-        let timeout_secs = self.timeout_secs;
-		let guard_task = guard_is_active(is_active, timeout_secs).map(|_| {
-			Err::<(IR, IW, OR, OW), _>(Error::Inactive(timeout_secs))
-		});
+		let timeout_secs = self.timeout_secs;
+		let guard_task = guard_is_active(is_active, timeout_secs)
+			.map(|_| Err::<(IR, IW, OR, OW), _>(Error::Inactive(timeout_secs)));
 
 		let relay_task = async move {
 			futures::pin_mut!(recv_task);
@@ -245,7 +224,8 @@ mod tests {
 			let res = Relay {
 				recv: Some(recv.clone()),
 				send: Some(send.clone()),
-				..Relay::default()
+				conn_id: Id::new(),
+				timeout_secs: 10,
 			}
 			.relay_stream(in_reader, in_writer, out_reader, out_writer)
 			.await;

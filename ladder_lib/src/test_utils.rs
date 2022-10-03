@@ -24,6 +24,7 @@ use crate::{
 		outbound::{Connector, StreamConnector},
 		AsyncReadWrite, BufBytesStream, GetConnectorError, ProxyContext,
 	},
+	server::stat::Id,
 	utils::relay::{Counter, Relay},
 };
 use async_trait::async_trait;
@@ -212,10 +213,10 @@ where
 			let send = Counter::new(0);
 
 			Relay {
-				conn_id: "test_conn_id",
+				conn_id: Id::new(),
 				recv: Some(recv.clone()),
 				send: Some(send.clone()),
-				..Relay::default()
+				timeout_secs: 10,
 			}
 			.relay_stream(in_stream.r, in_stream.w, out_stream.r, out_stream.w)
 			.await?;

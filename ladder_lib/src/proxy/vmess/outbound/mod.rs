@@ -182,7 +182,7 @@ impl Settings {
 		}
 	}
 
-	async fn priv_connect<'a>(
+	fn priv_connect<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
@@ -262,7 +262,7 @@ impl StreamConnector for Settings {
 		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
 		let stream = stream_func(self.addr.clone(), context).await?;
-		self.priv_connect(stream, &dst).await
+	    self.priv_connect(stream, &dst)
 	}
 }
 

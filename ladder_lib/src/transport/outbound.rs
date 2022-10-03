@@ -149,6 +149,7 @@ impl Empty {
 	}
 
 	#[inline]
+	#[allow(clippy::unused_async)]
 	pub async fn connect_stream<IO>(&self, stream: IO, _addr: &SocksAddr) -> io::Result<IO>
 	where
 		IO: AsyncRead + AsyncWrite + Unpin,

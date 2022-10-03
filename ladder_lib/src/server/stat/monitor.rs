@@ -148,7 +148,7 @@ impl Internal {
 
 		assert!(
 			!self.conns.contains_key(&conn_id),
-			"Connection[{:x}] already in the monitor",
+			"Connection[{}] already in the monitor",
 			conn_id
 		);
 
@@ -168,7 +168,7 @@ impl Internal {
 		outbound_tag: Tag,
 		to: SocksAddr,
 	) {
-		trace!("set connecting for conn {:x}", conn_id);
+		trace!("set connecting for conn {}", conn_id);
 		if let Some(c) = self.conns.get_mut(&conn_id) {
 			if let SessionState::Handshaking = c.state {
 				c.state = SessionState::Connecting(OutboundInfo {
@@ -180,12 +180,12 @@ impl Internal {
 				panic!("invalid state transition {} -> connecting", c.state.name());
 			}
 		} else {
-			panic!("Connection[{:x}] is not registered", conn_id);
+			panic!("Connection[{}] is not registered", conn_id);
 		}
 	}
 
 	fn set_proxying(&mut self, conn_id: Id, recv: Counter, send: Counter) {
-		trace!("set proxying for conn {:x}", conn_id);
+		trace!("set proxying for conn {}", conn_id);
 		if let Some(c) = self.conns.get_mut(&conn_id) {
 			c.state = if let SessionState::Connecting(out) = &c.state {
 				SessionState::Proxying {
@@ -197,12 +197,12 @@ impl Internal {
 				panic!("invalid state transition {} -> proxying", c.state.name());
 			};
 		} else {
-			panic!("Connection[{:x}] is not registered", conn_id);
+			panic!("Connection[{}] is not registered", conn_id);
 		}
 	}
 
 	fn set_dead(&mut self, conn_id: Id, end_time: SystemTime) {
-		log::trace!("set dead for conn {conn_id:x}");
+		log::trace!("set dead for conn {}", conn_id);
 
 		if let Some(c) = self.conns.remove(&conn_id) {
 			if self.dead_conns.len() >= DEAD_CONNS_BUFFER_SIZE {
@@ -211,7 +211,7 @@ impl Internal {
 			let dead = c.into_dead(end_time);
 			self.dead_conns.push_back(dead);
 		} else {
-			log::error!("Connection[{conn_id:x}] is not registered or already dead");
+			log::error!("Connection[{conn_id}] is not registered or already dead");
 		}
 	}
 

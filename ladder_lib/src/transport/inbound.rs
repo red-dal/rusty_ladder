@@ -130,6 +130,7 @@ impl Builder {
 #[allow(clippy::unnecessary_wraps)]
 impl Empty {
 	#[inline]
+	#[allow(clippy::unused_async)]
 	pub async fn accept<IO>(&self, stream: IO) -> io::Result<Box<dyn AsyncReadWrite>>
 	where
 		IO: 'static + Into<Box<dyn AsyncReadWrite>>,

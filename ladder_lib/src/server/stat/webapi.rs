@@ -80,7 +80,7 @@ GET /connections?inbounds=socks,http&outbounds=vmess
 ```
 */
 
-use super::Monitor;
+use super::{Monitor, Id};
 use crate::prelude::{BoxStdErr, Tag};
 use smol_str::SmolStr;
 use std::{net::SocketAddr, str::FromStr};
@@ -90,11 +90,11 @@ pub(super) mod serde_conn_id {
 	use serde::Serializer;
 
 	#[allow(clippy::trivially_copy_pass_by_ref)]
-	pub fn serialize<S>(id: &u64, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(id: &super::Id, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
-		let val = format!("{:#x}", id);
+		let val = id.to_string();
 		serializer.serialize_str(&val)
 	}
 }
@@ -161,7 +161,7 @@ fn get_connections(
 		if let Some(ids_str) = &params.ids {
 			let mut ids = Vec::new();
 			for val in ids_str.split(',') {
-				let id = u64::from_str(val).map_err(|_| {
+				let id = Id::from_str(val).map_err(|_| {
 					log::error!("query 'ids' ('{}') contains invalid id", ids_str);
 					warp::reject()
 				})?;

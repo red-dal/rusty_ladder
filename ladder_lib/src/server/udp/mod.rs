@@ -215,7 +215,7 @@ impl Dispatcher {
 					sess.dst
 				);
 				// Session tunnel not exists, create one
-				let sess_id = rand::random::<Id>();
+				let sess_id = Id::new();
 
 				let sess_handle = self.monitor.as_ref().map(|m| {
 					let h = m.register_udp_session(RegisterArgs {

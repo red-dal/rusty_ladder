@@ -30,7 +30,7 @@ use super::{
 use crate::{
 	prelude::*,
 	protocol::{
-		inbound::{AcceptError, Handshake, SimpleHandshake, SessionInfo, StreamAcceptor},
+		inbound::{AcceptError, Handshake, SessionInfo, SimpleHandshake, StreamAcceptor},
 		AsyncReadWrite, BufBytesStream, GetProtocolName,
 	},
 	utils::{crypto::aead::Algorithm, timestamp_now},
@@ -106,12 +106,12 @@ pub struct Settings {
 
 impl Settings {
 	#[inline]
-	async fn check_auth_aead(&self, auth_id: &AuthId) -> Option<UserInfo> {
+	fn check_auth_aead(&self, auth_id: &AuthId) -> Option<UserInfo> {
 		// Select users using AEAD header.
 		let cmd_keys_iter = self.users.iter().map(|u| (&u.id, &u.cmd_key));
 		let curr_time = timestamp_now();
 		// Detect replay.
-		if let Some(old_time) = self.container.insert(*auth_id, curr_time).await {
+		if let Some(old_time) = self.container.insert(*auth_id, curr_time) {
 			error!(
 				"auth_id already received at UNIX time {} (current: {})! This could be a replay attack!",
 				old_time, curr_time,
@@ -137,9 +137,8 @@ impl Settings {
 	}
 
 	#[inline]
-	async fn get_user_from_auth(&self, auth: &AuthId) -> Option<(UserInfo, HeaderMode)> {
+	fn get_user_from_auth(&self, auth: &AuthId) -> Option<(UserInfo, HeaderMode)> {
 		self.check_auth_aead(auth)
-			.await
 			.map(|info| (info, HeaderMode::Aead))
 	}
 }
@@ -165,7 +164,7 @@ impl StreamAcceptor for Settings {
 		stream.read_exact(&mut auth_id).await?;
 
 		trace!("Checking client VMess auth_id");
-		let (info, mode) = if let Some((info, mode)) = self.get_user_from_auth(&auth_id).await {
+		let (info, mode) = if let Some((info, mode)) = self.get_user_from_auth(&auth_id) {
 			(info, mode)
 		} else {
 			return invalid_request(stream, "invalid request auth for both legacy and AEAD");

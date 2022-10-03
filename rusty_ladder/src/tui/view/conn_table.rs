@@ -84,7 +84,7 @@ impl Column {
 			name: "ID",
 			width: 3,
 			format_func: Box::new(|s, output| {
-				format_to!(output, "{:x}", s.id());
+				format_to!(output, "{}", s.id());
 			}),
 			compare_func: Box::new(|a, b| cmp_with(a, b, |i| &i.basic.conn_id).reverse()),
 		}

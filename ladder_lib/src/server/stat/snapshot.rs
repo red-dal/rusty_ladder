@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use super::{
 	data::{self, CounterValue},
-	SessionBasicInfo, Tag,
+	Id, SessionBasicInfo, Tag,
 };
 use crate::protocol::SocksAddr;
 use std::time::SystemTime;
@@ -71,8 +71,8 @@ pub struct Snapshot {
 
 impl Snapshot {
 	#[must_use]
-    #[inline]
-	pub fn id(&self) -> u64 {
+	#[inline]
+	pub fn id(&self) -> Id {
 		self.basic.conn_id
 	}
 

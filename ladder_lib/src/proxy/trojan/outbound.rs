@@ -89,11 +89,11 @@ impl Settings {
 		Some(self)
 	}
 
-	async fn priv_connect<'a>(
+	fn priv_connect<'a>(
 		&'a self,
 		stream: Box<dyn AsyncReadWrite>,
 		dst: &'a SocksAddr,
-	) -> Result<BufBytesStream, OutboundError> {
+	) -> BufBytesStream {
 		debug!(
 			"Creating Trojan connection to '{}', target: '{}'",
 			&self.addr, dst
@@ -114,10 +114,10 @@ impl Settings {
 
 		let (rh, wh) = stream.split();
 		let wh = LazyWriteHalf::new(wh, req_buf);
-		Ok(BufBytesStream::new(
+		BufBytesStream::new(
 			Box::new(BufReader::new(rh)),
 			Box::new(wh),
-		))
+		)
 	}
 }
 
@@ -136,7 +136,7 @@ impl StreamConnector for Settings {
 		context: &'a dyn ProxyContext,
 	) -> Result<BufBytesStream, OutboundError> {
 		let stream = stream_func(self.addr.clone(), context).await?;
-		self.priv_connect(stream, &dst).await
+		Ok(self.priv_connect(stream, &dst))
 	}
 }
 
