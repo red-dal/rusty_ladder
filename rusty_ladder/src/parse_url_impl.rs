@@ -1,6 +1,24 @@
+/**********************************************************************
 
-use super::{config, Config, Error, FromStr};
-use crate::ActionCommons;
+Copyright (C) 2021 by reddal
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+**********************************************************************/
+
+use std::str::FromStr;
+use super::{config, Config, Error, args::ActionCommons};
 use ladder_lib::{router, server};
 use log::LevelFilter;
 use url::Url;
@@ -11,8 +29,8 @@ const DEFAULT_LOG_LEVEL: LevelFilter = LevelFilter::Info;
 pub(super) fn make_config_from_args(
 	in_url: &str,
 	out_url: &str,
-    allow_lan: bool,
-    block_list: &[String],
+	allow_lan: bool,
+	block_list: &[String],
 	coms: ActionCommons,
 ) -> Result<Config, Error> {
 	let rules = make_blocklist(allow_lan, block_list.iter().map(String::as_str))?;

@@ -23,9 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![allow(clippy::default_trait_access)]
 
 // TODO: log to TUI
-use config::{Config, LogOutput};
-use std::{io, str::FromStr, sync::Arc};
-use structopt::StructOpt;
+use config::Config;
+use std::{io, sync::Arc};
 use tokio::runtime::Runtime;
 
 type BoxStdErr = Box<dyn std::error::Error + Send + Sync>;
@@ -79,161 +78,188 @@ const FEATURES: &[&str] = &[
 #[cfg(all(not(feature = "parse-url"), not(feature = "parse-config")))]
 compile_error!("At least one of the features ['parse-url', 'parse-config'] must be enabled");
 
+fn main() -> Result<(), BoxStdErr> {
+	let action = args::AppOptions::new_from_args().into_action()?;
+	match action {
+		args::Action::CheckVersion => {
+			println!("{}", format_version());
+		}
+		args::Action::Serve(act) => {
+			serve(act)?;
+		}
+	};
+	Ok(())
+}
+
 #[cfg(feature = "use-tui")]
 mod tui;
-
-#[derive(StructOpt)]
-#[structopt(name = "rusty_ladder")]
-pub struct AppOptions {
-	/// Enable TUI.
-	#[structopt(long)]
-	tui: bool,
-
-	/// Set the format of the config file. Can be 'toml' (default) or 'json'.
-	#[cfg(feature = "parse-config")]
-	#[structopt(short, long, name = "CONF_FORMAT")]
-	format: Option<ConfigFormat>,
-
-	/// Read config from file.
-	#[cfg(feature = "parse-config")]
-	#[structopt(short, long, name = "CONF_PATH")]
-	config: Option<String>,
-
-	/// Print version.
-	#[structopt(long)]
-	version: bool,
-
-	/// Set inbound URL.
-	#[cfg(feature = "parse-url")]
-	#[structopt(short, long, name = "INBOUND_URL")]
-	inbound: Option<String>,
-
-	/// Set outbound URL.
-	#[cfg(feature = "parse-url")]
-	#[structopt(short, long, name = "OUTBOUND_URL")]
-	outbound: Option<String>,
-
-	#[cfg(feature = "parse-url")]
-	/// Block an IP, network (x.x.x.x/xx) or domain.
-	#[structopt(short, long, verbatim_doc_comment, name = "BLOCK_LIST")]
-	block: Vec<String>,
-
-	#[cfg(feature = "parse-url")]
-	/// Allow access to LAN and local IPs, which is forbidden by default.
-	#[structopt(long)]
-	allow_lan: bool,
-
-	/// Set the log level. Must be one of ["debug", "info", "warn" (default), "error"]
-	#[structopt(long, name = "LOG_LEVEL")]
-	log: Option<log::LevelFilter>,
-
-	/// Set the output file for log.
-	#[structopt(long, name = "LOG_FILE")]
-	log_out: Option<String>,
-}
-
-impl AppOptions {
-	fn into_action(self) -> Result<Action, BoxStdErr> {
-		if self.version {
-			return Ok(Action::CheckVersion);
-		}
-
-		let log_out = if let Some(log_out) = self.log_out {
-			LogOutput::from_str(&log_out)
-		} else if self.tui {
-			None
-		} else {
-			Some(LogOutput::Stdout)
-		};
-
-		let coms = ActionCommons {
-			use_tui: self.tui,
-			log: self.log,
-			log_out,
-		};
-
-		if !cfg!(feature = "use-tui") && coms.use_tui {
-			return Err("feature 'use-tui' not enabled".into());
-		}
-
-		#[cfg(feature = "parse-url")]
-		match (self.inbound, self.outbound) {
-			(None, None) => {
-				// Do nothing
-			}
-			(Some(_), None) => return Err("missing --outbound".into()),
-			(None, Some(_)) => return Err("missing --inbound".into()),
-			(Some(in_url), Some(out_url)) => {
-				#[cfg(feature = "parse-config")]
-				if self.config.is_some() {
-					return Err("option --inbound and --outbound incompatible with --config".into());
-				}
-				return Ok(Action::Serve(ServeAction::Url {
-					coms,
-					in_url,
-					out_url,
-					block_list: self.block,
-					allow_lan: self.allow_lan,
-				}));
-			}
-		}
-
-		#[cfg(feature = "parse-config")]
-		if let Some(path) = self.config {
-			let path = std::path::PathBuf::from(path);
-			let format = self.format.unwrap_or_else(|| {
-				let mut format = ConfigFormat::default();
-				if let Some(ext) = path.extension() {
-					if ext.eq_ignore_ascii_case("toml") {
-						format = ConfigFormat::Toml;
-					}
-				}
-				format
-			});
-			return Ok(Action::Serve(ServeAction::File { coms, path, format }));
-		}
-
-		Err("missing arguments".into())
-	}
-}
-
-enum Action {
-	CheckVersion,
-	Serve(ServeAction),
-}
-
-struct ActionCommons {
-	use_tui: bool,
-	log: Option<log::LevelFilter>,
-	log_out: Option<LogOutput>,
-}
-
-enum ServeAction {
-	#[cfg(feature = "parse-config")]
-	File {
-		coms: ActionCommons,
-		path: std::path::PathBuf,
-		format: ConfigFormat,
-	},
-	#[cfg(feature = "parse-url")]
-	Url {
-		coms: ActionCommons,
-		in_url: String,
-		out_url: String,
-		block_list: Vec<String>,
-		allow_lan: bool,
-	},
-}
 
 #[cfg(feature = "parse-config")]
 mod parse_config_impl;
 #[cfg(feature = "parse-config")]
-use parse_config_impl::{make_config, ConfigFormat};
+use parse_config_impl::make_config;
 
 #[cfg(feature = "parse-url")]
 mod parse_url_impl;
 #[cfg(feature = "parse-url")]
 use parse_url_impl::make_config_from_args;
+
+mod args {
+	use super::{config::LogOutput, BoxStdErr};
+	use structopt::StructOpt;
+
+	#[cfg(feature = "parse-config")]
+	use super::config::Format;
+
+	#[derive(StructOpt)]
+	#[structopt(name = "rusty_ladder")]
+	pub struct AppOptions {
+		/// Enable TUI.
+		#[structopt(long)]
+		tui: bool,
+
+		/// Set the format of the config file. Can be 'toml' (default) or 'json'.
+		#[cfg(feature = "parse-config")]
+		#[structopt(short, long, name = "CONF_FORMAT")]
+		format: Option<Format>,
+
+		/// Read config from file.
+		#[cfg(feature = "parse-config")]
+		#[structopt(short, long, name = "CONF_PATH")]
+		config: Option<String>,
+
+		/// Print version.
+		#[structopt(long)]
+		version: bool,
+
+		/// Set inbound URL.
+		#[cfg(feature = "parse-url")]
+		#[structopt(short, long, name = "INBOUND_URL")]
+		inbound: Option<String>,
+
+		/// Set outbound URL.
+		#[cfg(feature = "parse-url")]
+		#[structopt(short, long, name = "OUTBOUND_URL")]
+		outbound: Option<String>,
+
+		#[cfg(feature = "parse-url")]
+		/// Block an IP, network (x.x.x.x/xx) or domain.
+		#[structopt(short, long, verbatim_doc_comment, name = "BLOCK_LIST")]
+		block: Vec<String>,
+
+		#[cfg(feature = "parse-url")]
+		/// Allow access to LAN and local IPs, which is forbidden by default.
+		#[structopt(long)]
+		allow_lan: bool,
+
+		/// Set the log level. Must be one of ["debug", "info", "warn" (default), "error"]
+		#[structopt(long, name = "LOG_LEVEL")]
+		log: Option<log::LevelFilter>,
+
+		/// Set the output file for log.
+		#[structopt(long, name = "LOG_FILE")]
+		log_out: Option<String>,
+	}
+
+	impl AppOptions {
+		pub fn new_from_args() -> Self {
+			Self::from_args()
+		}
+
+		pub fn into_action(self) -> Result<Action, BoxStdErr> {
+			if self.version {
+				return Ok(Action::CheckVersion);
+			}
+
+			let log_out = if let Some(log_out) = self.log_out {
+				LogOutput::from_str(&log_out)
+			} else if self.tui {
+				None
+			} else {
+				Some(LogOutput::Stdout)
+			};
+
+			let coms = ActionCommons {
+				use_tui: self.tui,
+				log: self.log,
+				log_out,
+			};
+
+			if !cfg!(feature = "use-tui") && coms.use_tui {
+				return Err("feature 'use-tui' not enabled".into());
+			}
+
+			#[cfg(feature = "parse-url")]
+			match (self.inbound, self.outbound) {
+				(None, None) => {
+					// Do nothing
+				}
+				(Some(_), None) => return Err("missing --outbound".into()),
+				(None, Some(_)) => return Err("missing --inbound".into()),
+				(Some(in_url), Some(out_url)) => {
+					#[cfg(feature = "parse-config")]
+					if self.config.is_some() {
+						return Err(
+							"option --inbound and --outbound incompatible with --config".into()
+						);
+					}
+					return Ok(Action::Serve(ServeAction::Url {
+						coms,
+						in_url,
+						out_url,
+						block_list: self.block,
+						allow_lan: self.allow_lan,
+					}));
+				}
+			}
+
+			#[cfg(feature = "parse-config")]
+			if let Some(path) = self.config {
+				let path = std::path::PathBuf::from(path);
+				let format = self.format.unwrap_or_else(|| {
+					let mut format = Format::default();
+					if let Some(ext) = path.extension() {
+						if ext.eq_ignore_ascii_case("toml") {
+							format = Format::Toml;
+						}
+					}
+					format
+				});
+				return Ok(Action::Serve(ServeAction::File { coms, path, format }));
+			}
+
+			Err("missing arguments".into())
+		}
+	}
+
+	pub enum Action {
+		CheckVersion,
+		Serve(ServeAction),
+	}
+
+	pub struct ActionCommons {
+		pub use_tui: bool,
+		pub log: Option<log::LevelFilter>,
+		pub log_out: Option<LogOutput>,
+	}
+
+	pub enum ServeAction {
+		#[cfg(feature = "parse-config")]
+		File {
+			coms: ActionCommons,
+			path: std::path::PathBuf,
+			format: Format,
+		},
+		#[cfg(feature = "parse-url")]
+		Url {
+			coms: ActionCommons,
+			in_url: String,
+			out_url: String,
+			block_list: Vec<String>,
+			allow_lan: bool,
+		},
+	}
+}
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -262,27 +288,37 @@ impl Error {
 	}
 }
 
-fn serve(act: ServeAction) -> Result<(), Error> {
+fn serve(act: args::ServeAction) -> Result<(), Error> {
 	#[cfg(feature = "use-tui")]
 	let mut use_tui = false;
 
 	let conf = match act {
 		#[cfg(feature = "parse-config")]
-		ServeAction::File { coms, path, format } => {
+		args::ServeAction::File { coms, path, format } => {
 			use std::io::Read;
 			#[cfg(feature = "use-tui")]
 			if coms.use_tui {
 				use_tui = true;
 			}
-			let mut conf_str = String::new();
-			std::fs::File::open(path)
-				.map_err(Error::config)?
+			let mut conf_str = String::with_capacity(512);
+			std::fs::File::open(&path)
+				.map_err(|e| {
+					Error::config(format!(
+						"cannot open file '{}' ({e})",
+						path.to_string_lossy(),
+					))
+				})?
 				.read_to_string(&mut conf_str)
-				.map_err(Error::config)?;
+				.map_err(|e| {
+					Error::config(format!(
+						"cannot read from file '{}' ({e})",
+						path.to_string_lossy()
+					))
+				})?;
 			make_config(format, &conf_str, coms)?
 		}
 		#[cfg(feature = "parse-url")]
-		ServeAction::Url {
+		args::ServeAction::Url {
 			coms,
 			in_url,
 			out_url,
@@ -337,19 +373,6 @@ fn format_version() -> String {
 		features_msg.push_str(feature);
 	}
 	format!("{}\nFeatures: {}", VERSION, features_msg)
-}
-
-fn main() -> Result<(), BoxStdErr> {
-	let action = AppOptions::from_args().into_action()?;
-	match action {
-		Action::CheckVersion => {
-			println!("{}", format_version());
-		}
-		Action::Serve(act) => {
-			serve(act)?;
-		}
-	};
-	Ok(())
 }
 
 #[cfg(feature = "use-tui")]
@@ -437,6 +460,34 @@ mod config {
 	use fern::colors::{Color, ColoredLevelConfig};
 	use ladder_lib::ServerBuilder;
 	use log::{Level, LevelFilter};
+	use std::{borrow::Cow, str::FromStr};
+
+	#[allow(dead_code)]
+	#[derive(Clone, Copy)]
+	pub enum Format {
+		Toml,
+		Json,
+	}
+
+	impl FromStr for Format {
+		type Err = Cow<'static, str>;
+
+		fn from_str(s: &str) -> Result<Self, Self::Err> {
+			let mut s = s.to_string();
+			s.make_ascii_lowercase();
+			Ok(match s.as_str() {
+				"toml" => Self::Toml,
+				"json" => Self::Json,
+				_ => return Err("must be either 'toml' or 'json'".into()),
+			})
+		}
+	}
+
+	impl Default for Format {
+		fn default() -> Self {
+			Format::Toml
+		}
+	}
 
 	// ------------------- Logging -------------------
 	const STR_STDOUT: &str = "@stdout";

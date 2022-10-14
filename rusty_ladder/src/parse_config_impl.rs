@@ -17,47 +17,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use super::{Config, Error, FromStr};
-use crate::ActionCommons;
-use std::borrow::Cow;
-
-#[derive(Clone, Copy)]
-pub(super) enum ConfigFormat {
-	Toml,
-	Json,
-}
-
-impl FromStr for ConfigFormat {
-	type Err = Cow<'static, str>;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		let mut s = s.to_string();
-		s.make_ascii_lowercase();
-		Ok(match s.as_str() {
-			"toml" => Self::Toml,
-			"json" => Self::Json,
-			_ => return Err("must be either 'toml' or 'json'".into()),
-		})
-	}
-}
-
-impl Default for ConfigFormat {
-	fn default() -> Self {
-		ConfigFormat::Toml
-	}
-}
+use super::{config::Format, Config, Error};
+use crate::args::ActionCommons;
 
 #[cfg(feature = "parse-config")]
 pub(super) fn make_config(
-	format: ConfigFormat,
+	format: Format,
 	conf_str: &str,
 	coms: ActionCommons,
 ) -> Result<Config, Error> {
 	let mut conf: Config = match format {
-		ConfigFormat::Toml => toml::from_str(conf_str).map_err(|e| Error::Config(e.into()))?,
-		ConfigFormat::Json => {
-			serde_json::from_str(conf_str).map_err(|e| Error::Config(e.into()))?
-		}
+		Format::Toml => toml::from_str(conf_str).map_err(|e| Error::Config(e.into()))?,
+		Format::Json => serde_json::from_str(conf_str).map_err(|e| Error::Config(e.into()))?,
 	};
 	if coms.use_tui
 		&& matches!(&conf.log.output, Some(super::config::LogOutput::Stdout))
