@@ -245,6 +245,16 @@ pub struct Builder {
 }
 
 impl Builder {
+    #[inline]
+    #[must_use]
+	pub fn new_freedom() -> Self {
+		Self {
+			tag: Default::default(),
+			settings: DetailsBuilder::Freedom(Default::default()),
+			transport: Default::default(),
+		}
+	}
+
 	/// Creates a [`Outbound`].
 	///
 	/// # Errors

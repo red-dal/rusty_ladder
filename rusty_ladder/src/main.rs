@@ -23,8 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![allow(clippy::default_trait_access)]
 
 // TODO: log to TUI
-use config::Config;
-use std::{borrow::Cow, io, str::FromStr, sync::Arc};
+use config::{Config, LogOutput};
+use std::{io, str::FromStr, sync::Arc};
 use structopt::StructOpt;
 use tokio::runtime::Runtime;
 
@@ -90,13 +90,11 @@ pub struct AppOptions {
 	tui: bool,
 
 	/// Set the format of the config file. Can be 'toml' (default) or 'json'.
-	///
-	/// This only works if '--config' is specified.
 	#[cfg(feature = "parse-config")]
 	#[structopt(short, long, name = "CONF_FORMAT")]
 	format: Option<ConfigFormat>,
 
-	/// Read config from file. STDIN will be used if not specified.
+	/// Read config from file.
 	#[cfg(feature = "parse-config")]
 	#[structopt(short, long, name = "CONF_PATH")]
 	config: Option<String>,
@@ -106,137 +104,143 @@ pub struct AppOptions {
 	version: bool,
 
 	/// Set inbound URL.
-	///
-	/// Using this will ignore '--config'.
-	/// '--inbound' and '--outbound' must be both set or both empty.
 	#[cfg(feature = "parse-url")]
 	#[structopt(short, long, name = "INBOUND_URL")]
 	inbound: Option<String>,
 
 	/// Set outbound URL.
-	///
-	/// Using this will ignore '--config'.
-	/// '--inbound' and '--outbound' must be both set or both empty.
 	#[cfg(feature = "parse-url")]
 	#[structopt(short, long, name = "OUTBOUND_URL")]
 	outbound: Option<String>,
 
-	/// Block request to these addresees (separated by ',')
-	///
-	/// Each address can be either an IP or a subnet (like "127.0.0.1" or "127.0.0.0/8").
-	///
-	/// Special values:
-	/// - "@lan": 192.168.0.0/16, 172.16.0.0/12, 10.0.0.0/8, 100.64.0.0/10
-	/// - "@localhost": 127.0.0.0/8
-	///
-	/// "@lan,@localhost" will be used if not set.
-	///
-	/// Set to "" to use an empty block list.
-	///
-	/// This only works if '--inbound' and '--outbound' is set.
 	#[cfg(feature = "parse-url")]
-	#[structopt(long, verbatim_doc_comment, name = "BLOCK_LIST")]
-	block: Option<String>,
+	/// Block an IP, network (x.x.x.x/xx) or domain.
+	#[structopt(short, long, verbatim_doc_comment, name = "BLOCK_LIST")]
+	block: Vec<String>,
 
-	/// Set the log level. Must be one of ["debug", "info", "warn", "error"]
-	///
-	/// If not specified, "warn" will be used.
+	#[cfg(feature = "parse-url")]
+	/// Allow access to LAN and local IPs, which is forbidden by default.
+	#[structopt(long)]
+	allow_lan: bool,
+
+	/// Set the log level. Must be one of ["debug", "info", "warn" (default), "error"]
 	#[structopt(long, name = "LOG_LEVEL")]
 	log: Option<log::LevelFilter>,
 
-	/// Set the output for log.
-	///
-	/// If not specified, STDOUT will be used (if tui is not enabled).
+	/// Set the output file for log.
 	#[structopt(long, name = "LOG_FILE")]
 	log_out: Option<String>,
 }
 
-#[cfg(feature = "parse-config")]
-mod parse_config_impl {
-	use super::{Config, Error, FromStr};
-	use log::LevelFilter;
-	use std::borrow::Cow;
-	use std::{fs::File, io::Read};
-
-	#[derive(Clone, Copy)]
-	pub(super) enum ConfigFormat {
-		Toml,
-		Json,
-	}
-
-	impl FromStr for ConfigFormat {
-		type Err = Cow<'static, str>;
-
-		fn from_str(s: &str) -> Result<Self, Self::Err> {
-			let mut s = s.to_string();
-			s.make_ascii_lowercase();
-			Ok(match s.as_str() {
-				"toml" => Self::Toml,
-				"json" => Self::Json,
-				_ => return Err("must be either 'toml' or 'json'".into()),
-			})
+impl AppOptions {
+	fn into_action(self) -> Result<Action, BoxStdErr> {
+		if self.version {
+			return Ok(Action::CheckVersion);
 		}
-	}
 
-	impl Default for ConfigFormat {
-		fn default() -> Self {
-			ConfigFormat::Toml
-		}
-	}
-
-	fn read_conf_str(path: Option<&str>) -> Result<String, std::io::Error> {
-		let mut conf_str = String::with_capacity(1024);
-		if let Some(path) = path {
-			println!("Reading config file '{}'", path);
-			File::open(path)?.read_to_string(&mut conf_str)?;
+		let log_out = if let Some(log_out) = self.log_out {
+			LogOutput::from_str(&log_out)
+		} else if self.tui {
+			None
 		} else {
-			std::io::stdin().read_to_string(&mut conf_str)?;
-		}
-		Ok(conf_str)
-	}
-
-	#[cfg(feature = "parse-config")]
-	pub(super) fn make_config(
-		format: Option<ConfigFormat>,
-		use_tui: bool,
-		conf_path: Option<&str>,
-		log_level: Option<LevelFilter>,
-		log_output: Option<&str>,
-	) -> Result<Config, Error> {
-		let format = format.unwrap_or_default();
-		let conf_str = read_conf_str(conf_path)
-			.map_err(|e| Error::Input(format!("cannot read config: {}", e).into()))?;
-		let mut conf: Config = match format {
-			ConfigFormat::Toml => toml::from_str(&conf_str).map_err(|e| Error::Config(e.into()))?,
-			ConfigFormat::Json => {
-				serde_json::from_str(&conf_str).map_err(|e| Error::Config(e.into()))?
-			}
+			Some(LogOutput::Stdout)
 		};
-		if use_tui
-			&& matches!(&conf.log.output, Some(super::config::LogOutput::Stdout))
-			&& log_output.is_none()
-		{
-			conf.log.output = None;
-		} else {
-			if let Some(log_output) = log_output {
-				conf.log.output = super::config::LogOutput::from_str(log_output);
+
+		let coms = ActionCommons {
+			use_tui: self.tui,
+			log: self.log,
+			log_out,
+		};
+
+		if !cfg!(feature = "use-tui") && coms.use_tui {
+			return Err("feature 'use-tui' not enabled".into());
+		}
+
+		#[cfg(feature = "parse-url")]
+		match (self.inbound, self.outbound) {
+			(None, None) => {
+				// Do nothing
 			}
-			if let Some(log_level) = log_level {
-				conf.log.level = log_level;
+			(Some(_), None) => return Err("missing --outbound".into()),
+			(None, Some(_)) => return Err("missing --inbound".into()),
+			(Some(in_url), Some(out_url)) => {
+				#[cfg(feature = "parse-config")]
+				if self.config.is_some() {
+					return Err("option --inbound and --outbound incompatible with --config".into());
+				}
+				return Ok(Action::Serve(ServeAction::Url {
+					coms,
+					in_url,
+					out_url,
+					block_list: self.block,
+					allow_lan: self.allow_lan,
+				}));
 			}
 		}
-		Ok(conf)
+
+		#[cfg(feature = "parse-config")]
+		if let Some(path) = self.config {
+			let path = std::path::PathBuf::from(path);
+			let format = self.format.unwrap_or_else(|| {
+				let mut format = ConfigFormat::default();
+				if let Some(ext) = path.extension() {
+					if ext.eq_ignore_ascii_case("toml") {
+						format = ConfigFormat::Toml;
+					}
+				}
+				format
+			});
+			return Ok(Action::Serve(ServeAction::File { coms, path, format }));
+		}
+
+		Err("missing arguments".into())
 	}
 }
+
+enum Action {
+	CheckVersion,
+	Serve(ServeAction),
+}
+
+struct ActionCommons {
+	use_tui: bool,
+	log: Option<log::LevelFilter>,
+	log_out: Option<LogOutput>,
+}
+
+enum ServeAction {
+	#[cfg(feature = "parse-config")]
+	File {
+		coms: ActionCommons,
+		path: std::path::PathBuf,
+		format: ConfigFormat,
+	},
+	#[cfg(feature = "parse-url")]
+	Url {
+		coms: ActionCommons,
+		in_url: String,
+		out_url: String,
+		block_list: Vec<String>,
+		allow_lan: bool,
+	},
+}
+
+#[cfg(feature = "parse-config")]
+mod parse_config_impl;
 #[cfg(feature = "parse-config")]
 use parse_config_impl::{make_config, ConfigFormat};
+
+#[cfg(feature = "parse-url")]
+mod parse_url_impl;
+#[cfg(feature = "parse-url")]
+use parse_url_impl::make_config_from_args;
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
 	#[error("[IO error] {0}")]
 	Io(#[from] io::Error),
 	#[error("[input] {0}")]
-	Input(Cow<'static, str>),
+	Input(BoxStdErr),
 	#[allow(dead_code)]
 	#[error("[config] {0}")]
 	Config(BoxStdErr),
@@ -247,165 +251,49 @@ enum Error {
 impl Error {
 	#[allow(dead_code)]
 	#[inline]
-	pub fn input(s: impl Into<Cow<'static, str>>) -> Self {
+	pub fn input(s: impl Into<BoxStdErr>) -> Self {
 		Self::Input(s.into())
 	}
-}
 
-#[cfg(feature = "parse-url")]
-mod parse_url_impl {
-	use crate::config::LogOutput;
-
-	use super::{config, Config, Cow, Error, FromStr};
-	use ladder_lib::router;
-	use log::LevelFilter;
-
-	const DEFAULT_LOG_LEVEL: LevelFilter = LevelFilter::Info;
-
-	/// Make [`Config`] with arguments like `--inbound`, `--outbound`.
-	pub(super) fn make_config_from_args(
-		inbound: Option<&str>,
-		outbound: Option<&str>,
-		block: Option<&str>,
-		level: Option<LevelFilter>,
-		log_out: Option<&str>,
-		use_tui: bool,
-	) -> Result<Config, Error> {
-		let inbound = {
-			let s = inbound
-				.as_ref()
-				.ok_or_else(|| Error::input("--inbound not specified"))?;
-			let url = url::Url::from_str(s)
-				.map_err(|e| Error::input(format!("invalid inbound URL ({})", e)))?;
-			ladder_lib::server::inbound::Builder::parse_url(&url)
-				.map_err(|e| Error::input(format!("invalid inbound ({})", e)))?
-		};
-		let outbound = {
-			let s = outbound
-				.as_ref()
-				.ok_or_else(|| Error::input("--outbound not specified"))?;
-			let url = url::Url::from_str(s)
-				.map_err(|e| Error::input(format!("invalid outbound URL ({})", e)))?;
-			ladder_lib::server::outbound::Builder::parse_url(&url)
-				.map_err(|e| Error::input(format!("invalid outbound ({})", e)))?
-		};
-		let rules = make_blocklist(block)?;
-		let level_filter = level.unwrap_or(DEFAULT_LOG_LEVEL);
-		// Disable log output if using TUI by default
-		// instead of using stdout
-		let output = if let Some(val) = &log_out {
-			LogOutput::from_str(val)
-		} else if use_tui {
-			None
-		} else {
-			Some(LogOutput::Stdout)
-		};
-		Ok(Config {
-			log: config::Log {
-				level: level_filter,
-				output,
-			},
-			server: ladder_lib::server::Builder {
-				inbounds: vec![inbound],
-				outbounds: vec![outbound],
-				router: router::Builder { rules },
-				..Default::default()
-			},
-		})
-	}
-
-	fn make_blocklist(block_str: Option<&str>) -> Result<Vec<router::PlainRule>, Error> {
-		const LAN_STR: &str = "@lan";
-		const LOCALHOST_STR: &str = "@localhost";
-
-		let block = block_str.map_or_else(
-			|| Cow::Owned(format!("{},{}", LAN_STR, LOCALHOST_STR)),
-			Cow::Borrowed,
-		);
-
-		// Empty blocklist for ""
-		if block.is_empty() {
-			return Ok(Vec::new());
-		}
-
-		let mut dsts: Vec<router::Destination> = Vec::new();
-		for part in block.split(',') {
-			match part {
-				LAN_STR => dsts.extend(
-					Vec::from(router::Cidr::private_networks())
-						.into_iter()
-						.map(router::Destination::Cidr),
-				),
-				LOCALHOST_STR => {
-					dsts.push(router::Destination::Cidr(router::Cidr4::LOCALLOOP.into()));
-					dsts.push(router::Destination::Cidr(router::Cidr6::LOCALLOOP.into()));
-				}
-				_ => {
-					let ip = std::net::IpAddr::from_str(part).map_err(|_| {
-						Error::Input(format!("'{}' is not a valid IP address", part).into())
-					})?;
-					dsts.push(router::Destination::Ip(ip));
-				}
-			}
-		}
-		Ok(if dsts.is_empty() {
-			Vec::new()
-		} else {
-			vec![router::PlainRule {
-				dsts,
-				outbound_tag: None,
-				..Default::default()
-			}]
-		})
+	#[allow(dead_code)]
+	#[inline]
+	pub fn config(s: impl Into<BoxStdErr>) -> Self {
+		Self::Config(s.into())
 	}
 }
 
-#[cfg(feature = "parse-url")]
-use parse_url_impl::make_config_from_args;
+fn serve(act: ServeAction) -> Result<(), Error> {
+	#[cfg(feature = "use-tui")]
+	let mut use_tui = false;
 
-fn serve(opts: &AppOptions) -> Result<(), Error> {
-	let conf = {
-		#[cfg(all(feature = "parse-config", feature = "parse-url"))]
-		{
-			if opts.inbound.is_some() || opts.outbound.is_some() {
-				make_config_from_args(
-					opts.inbound.as_deref(),
-					opts.outbound.as_deref(),
-					opts.block.as_deref(),
-					opts.log,
-					opts.log_out.as_deref(),
-					opts.tui,
-				)?
-			} else {
-				make_config(
-					opts.format,
-					opts.tui,
-					opts.config.as_deref(),
-					opts.log,
-					opts.log_out.as_deref(),
-				)?
+	let conf = match act {
+		#[cfg(feature = "parse-config")]
+		ServeAction::File { coms, path, format } => {
+			use std::io::Read;
+			#[cfg(feature = "use-tui")]
+			if coms.use_tui {
+				use_tui = true;
 			}
+			let mut conf_str = String::new();
+			std::fs::File::open(path)
+				.map_err(Error::config)?
+				.read_to_string(&mut conf_str)
+				.map_err(Error::config)?;
+			make_config(format, &conf_str, coms)?
 		}
-		#[cfg(all(feature = "parse-config", not(feature = "parse-url")))]
-		{
-			make_config(
-				opts.format,
-				opts.tui,
-				opts.config.as_deref(),
-				opts.log,
-				opts.log_out.as_deref(),
-			)?
-		}
-		#[cfg(all(not(feature = "parse-config"), feature = "parse-url"))]
-		{
-			make_config_from_args(
-				opts.inbound.as_deref(),
-				opts.outbound.as_deref(),
-				opts.block.as_deref(),
-				opts.log,
-				opts.log_out.as_deref(),
-				opts.tui,
-			)?
+		#[cfg(feature = "parse-url")]
+		ServeAction::Url {
+			coms,
+			in_url,
+			out_url,
+			block_list,
+			allow_lan,
+		} => {
+			#[cfg(feature = "use-tui")]
+			if coms.use_tui {
+				use_tui = true;
+			}
+			make_config_from_args(&in_url, &out_url, allow_lan, &block_list, coms)?
 		}
 	};
 
@@ -413,17 +301,11 @@ fn serve(opts: &AppOptions) -> Result<(), Error> {
 
 	#[cfg(feature = "use-tui")]
 	{
-		let use_tui = opts.tui;
 		tui_utils::run_with_tui(use_tui, conf, rt).map_err(Error::Runtime)?;
 	}
 	#[cfg(not(feature = "use-tui"))]
 	{
 		use ladder_lib::protocol::DisplayInfo;
-		if opts.tui {
-			return Err(Error::Input(
-				"feature `use-tui` must be enabled to use TUI".into(),
-			));
-		}
 		// Initialize logger
 		conf.log.init_logger().map_err(Error::Config)?;
 		for inb in &conf.server.inbounds {
@@ -446,23 +328,28 @@ fn serve(opts: &AppOptions) -> Result<(), Error> {
 	Ok(())
 }
 
-fn main() {
-	let opts = AppOptions::from_args();
-	if opts.version {
-		let mut features_msg = String::new();
-		for (index, feature) in FEATURES.iter().enumerate() {
-			if index != 0 {
-				features_msg.push(',');
-			}
-			features_msg.push_str(feature);
+fn format_version() -> String {
+	let mut features_msg = String::new();
+	for (index, feature) in FEATURES.iter().enumerate() {
+		if index != 0 {
+			features_msg.push(',');
 		}
-		println!("{}\nFeatures: {}", VERSION, features_msg);
-		return;
+		features_msg.push_str(feature);
 	}
-	if let Err(err) = serve(&opts) {
-		println!("Error happened during initialization:\n {}\n", err);
-		std::process::exit(255);
-	}
+	format!("{}\nFeatures: {}", VERSION, features_msg)
+}
+
+fn main() -> Result<(), BoxStdErr> {
+	let action = AppOptions::from_args().into_action()?;
+	match action {
+		Action::CheckVersion => {
+			println!("{}", format_version());
+		}
+		Action::Serve(act) => {
+			serve(act)?;
+		}
+	};
+	Ok(())
 }
 
 #[cfg(feature = "use-tui")]
@@ -688,7 +575,7 @@ mod config {
 	}
 
 	#[allow(clippy::unnecessary_wraps)]
-    #[allow(dead_code)]
+	#[allow(dead_code)]
 	fn default_output() -> Option<LogOutput> {
 		Some(LogOutput::Stdout)
 	}
