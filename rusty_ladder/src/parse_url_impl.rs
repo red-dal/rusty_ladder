@@ -17,10 +17,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 **********************************************************************/
 
-use std::str::FromStr;
-use super::{config, Config, Error, args::ActionCommons};
+use super::{args::ActionCommons, config, BoxStdErr, Config, Error};
 use ladder_lib::{router, server};
 use log::LevelFilter;
+use std::str::FromStr;
 use url::Url;
 
 const DEFAULT_LOG_LEVEL: LevelFilter = LevelFilter::Info;
@@ -34,17 +34,32 @@ pub(super) fn make_config_from_args(
 	coms: ActionCommons,
 ) -> Result<Config, Error> {
 	let rules = make_blocklist(allow_lan, block_list.iter().map(String::as_str))?;
+
 	let inbound = {
-		let url = Url::from_str(in_url).map_err(Error::input)?;
-		server::inbound::Builder::parse_url(&url).map_err(Error::input)?
+		let url = in_url;
+		let func = || -> Result<_, BoxStdErr> {
+			if url.is_empty() {
+				return Err("empty string".into());
+			}
+			let builder = server::inbound::Builder::parse_url(&Url::from_str(url)?)?;
+			Ok(builder)
+		};
+		func().map_err(|e| Error::input(format!("cannot parse inbound ({e})")))?
 	};
+    
 	let outbound = {
-		if out_url == "freedom" {
-			server::outbound::Builder::new_freedom()
-		} else {
-			let url = Url::from_str(in_url).map_err(Error::input)?;
-			server::outbound::Builder::parse_url(&url).map_err(Error::input)?
-		}
+		let url = out_url;
+		let func = || -> Result<_, BoxStdErr> {
+			if url.is_empty() {
+				return Err("empty string".into());
+			}
+			if url == "freedom" {
+				return Ok(server::outbound::Builder::new_freedom());
+			}
+			let builder = server::outbound::Builder::parse_url(&Url::from_str(url)?)?;
+			Ok(builder)
+		};
+		func().map_err(|e| Error::input(format!("cannot parse outbound ({e})")))?
 	};
 
 	let config = Config {

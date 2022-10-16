@@ -18,13 +18,29 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::{config::LogOutput, BoxStdErr};
-use clap::{Parser, CommandFactory};
+use clap::{ArgGroup, CommandFactory, Parser};
 
 #[cfg(feature = "parse-config")]
 use super::config::Format;
 
+
 #[derive(Parser)]
-#[structopt(name = "rusty_ladder")]
+#[command(group(
+        ArgGroup::new("use_config")
+            .conflicts_with("use_url")
+            .multiple(true)
+))]
+#[command(group(
+        ArgGroup::new("use_url")
+            .multiple(true)
+))]
+#[command(about = "Rusty proxy client/server.")]
+#[command(long_about = "Rusty proxy client/server.
+
+Example:
+  rusty_ladder -i URL -o URL [-b ADDR]* [--allow-lan] [--log LEVEL] [--log-out OUT]
+  rusty_ladder -c CONFIG -f FORMAT [--log LEVEL] [--log-out OUT]
+")]
 pub struct AppOptions {
 	/// Enable TUI.
 	#[arg(long)]
@@ -33,11 +49,13 @@ pub struct AppOptions {
 	/// Set the format of the config file. Can be 'toml' (default) or 'json'.
 	#[cfg(feature = "parse-config")]
 	#[arg(short, long)]
+	#[arg(group = "use_config")]
 	format: Option<Format>,
 
 	/// Read config from file.
 	#[cfg(feature = "parse-config")]
 	#[arg(short, long, value_name = "FILE")]
+	#[arg(group = "use_config")]
 	config: Option<String>,
 
 	/// Print version.
@@ -47,21 +65,25 @@ pub struct AppOptions {
 	/// Set inbound URL.
 	#[cfg(feature = "parse-url")]
 	#[arg(short, long, value_name = "URL")]
+	#[arg(group = "use_url")]
 	inbound: Option<String>,
 
 	/// Set outbound URL.
 	#[cfg(feature = "parse-url")]
 	#[arg(short, long, name = "URL")]
+	#[arg(group = "use_url")]
 	outbound: Option<String>,
 
 	#[cfg(feature = "parse-url")]
 	/// Block an IP, network (x.x.x.x/xx) or domain.
 	#[arg(short, long, value_name = "BLOCKED")]
+	#[arg(group = "use_url")]
 	block: Vec<String>,
 
 	#[cfg(feature = "parse-url")]
 	/// Allow access to LAN and local IPs, which is forbidden by default.
 	#[arg(long)]
+	#[arg(group = "use_url")]
 	allow_lan: bool,
 
 	/// Set the log level. Must be one of ["debug", "info", "warn" (default), "error"]
