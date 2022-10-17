@@ -20,10 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 use super::{config::LogOutput, BoxStdErr};
 use clap::{ArgGroup, CommandFactory, Parser};
 
-#[cfg(feature = "parse-config")]
-use super::config::Format;
-
-
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Parser)]
 #[command(group(
         ArgGroup::new("use_config")
@@ -50,7 +47,7 @@ pub struct AppOptions {
 	#[cfg(feature = "parse-config")]
 	#[arg(short, long)]
 	#[arg(group = "use_config")]
-	format: Option<Format>,
+	format: Option<String>,
 
 	/// Read config from file.
 	#[cfg(feature = "parse-config")]
@@ -135,29 +132,27 @@ impl AppOptions {
 				if self.config.is_some() {
 					return Err("option --inbound and --outbound incompatible with --config".into());
 				}
-				return Ok(Action::Serve(ServeAction::Url {
+				return Ok(Action::Serve {
 					coms,
-					in_url,
-					out_url,
-					block_list: self.block,
-					allow_lan: self.allow_lan,
-				}));
+					input: ConfigInput::Url {
+						in_url,
+						out_url,
+						block_list: self.block,
+						allow_lan: self.allow_lan,
+					},
+				});
 			}
 		}
 
 		#[cfg(feature = "parse-config")]
 		if let Some(path) = self.config {
-			let path = std::path::PathBuf::from(path);
-			let format = self.format.unwrap_or_else(|| {
-				let mut format = Format::default();
-				if let Some(ext) = path.extension() {
-					if ext.eq_ignore_ascii_case("toml") {
-						format = Format::Toml;
-					}
-				}
-				format
+			return Ok(Action::Serve {
+				coms,
+				input: ConfigInput::File {
+					path: path.into(),
+					format: self.format,
+				},
 			});
-			return Ok(Action::Serve(ServeAction::File { coms, path, format }));
 		}
 
 		let mut cmd = Self::command();
@@ -168,7 +163,10 @@ impl AppOptions {
 
 pub enum Action {
 	CheckVersion,
-	Serve(ServeAction),
+	Serve {
+		coms: ActionCommons,
+		input: ConfigInput,
+	},
 }
 
 pub struct ActionCommons {
@@ -177,16 +175,14 @@ pub struct ActionCommons {
 	pub log_out: Option<LogOutput>,
 }
 
-pub enum ServeAction {
+pub enum ConfigInput {
 	#[cfg(feature = "parse-config")]
 	File {
-		coms: ActionCommons,
 		path: std::path::PathBuf,
-		format: Format,
+		format: Option<String>,
 	},
 	#[cfg(feature = "parse-url")]
 	Url {
-		coms: ActionCommons,
 		in_url: String,
 		out_url: String,
 		block_list: Vec<String>,

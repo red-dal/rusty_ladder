@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #![warn(clippy::pedantic)]
 #![allow(clippy::default_trait_access)]
 
+use args::{ActionCommons, ConfigInput};
 // TODO: log to TUI
 use config::Config;
 use std::{io, sync::Arc};
@@ -78,14 +79,21 @@ const FEATURES: &[&str] = &[
 #[cfg(all(not(feature = "parse-url"), not(feature = "parse-config")))]
 compile_error!("At least one of the features ['parse-url', 'parse-config'] must be enabled");
 
-fn main() -> Result<(), BoxStdErr> {
+fn main() {
+	if let Err(e) = run() {
+		eprintln!("{}", e);
+		std::process::exit(1);
+	}
+}
+
+fn run() -> Result<(), BoxStdErr> {
 	let action = args::AppOptions::new_from_args().into_action()?;
 	match action {
 		args::Action::CheckVersion => {
 			println!("{}", format_version());
 		}
-		args::Action::Serve(act) => {
-			serve(act)?;
+		args::Action::Serve { coms, input } => {
+			serve(coms, input)?;
 		}
 	};
 	Ok(())
@@ -97,7 +105,7 @@ mod tui;
 #[cfg(feature = "parse-config")]
 mod parse_config_impl;
 #[cfg(feature = "parse-config")]
-use parse_config_impl::make_config;
+use parse_config_impl::make_config_from_file;
 
 #[cfg(feature = "parse-url")]
 mod parse_url_impl;
@@ -134,39 +142,22 @@ impl Error {
 	}
 }
 
-fn serve(act: args::ServeAction) -> Result<(), Error> {
+fn serve(coms: ActionCommons, input: ConfigInput) -> Result<(), Error> {
 	#[cfg(feature = "use-tui")]
 	let mut use_tui = false;
 
-	let conf = match act {
+	let conf = match input {
 		#[cfg(feature = "parse-config")]
-		args::ServeAction::File { coms, path, format } => {
-			use std::io::Read;
+		args::ConfigInput::File { path, format } => {
 			#[cfg(feature = "use-tui")]
 			if coms.use_tui {
 				use_tui = true;
 			}
-			let mut conf_str = String::with_capacity(512);
-			std::fs::File::open(&path)
-				.map_err(|e| {
-					Error::config(format!(
-						"cannot open file '{}' ({e})",
-						path.to_string_lossy(),
-					))
-				})?
-				.read_to_string(&mut conf_str)
-				.map_err(|e| {
-					Error::config(format!(
-						"cannot read from file '{}' ({e})",
-						path.to_string_lossy()
-					))
-				})?;
-			make_config(format, &conf_str, coms)?
+			make_config_from_file(format, &path, coms)?
 		}
 
 		#[cfg(feature = "parse-url")]
-		args::ServeAction::Url {
-			coms,
+		args::ConfigInput::Url {
 			in_url,
 			out_url,
 			block_list,

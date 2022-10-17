@@ -21,34 +21,6 @@ use crate::BoxStdErr;
 use fern::colors::{Color, ColoredLevelConfig};
 use ladder_lib::ServerBuilder;
 use log::{Level, LevelFilter};
-use std::{borrow::Cow, str::FromStr};
-
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
-pub enum Format {
-	Toml,
-	Json,
-}
-
-impl FromStr for Format {
-	type Err = Cow<'static, str>;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		let mut s = s.to_string();
-		s.make_ascii_lowercase();
-		Ok(match s.as_str() {
-			"toml" => Self::Toml,
-			"json" => Self::Json,
-			_ => return Err("must be either 'toml' or 'json'".into()),
-		})
-	}
-}
-
-impl Default for Format {
-	fn default() -> Self {
-		Format::Toml
-	}
-}
 
 // ------------------- Logging -------------------
 const STR_STDOUT: &str = "@stdout";
