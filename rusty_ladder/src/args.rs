@@ -43,6 +43,10 @@ pub struct AppOptions {
 	#[arg(long)]
 	tui: bool,
 
+    /// Check config without running the server
+    #[arg(long)]
+    check: bool,
+
 	/// Set the format of the config file. Can be 'toml' (default) or 'json'.
 	#[cfg(feature = "parse-config")]
 	#[arg(short, long)]
@@ -112,6 +116,7 @@ impl AppOptions {
 
 		let coms = ActionCommons {
 			use_tui: self.tui,
+            check_only: self.check,
 			log: self.log,
 			log_out,
 		};
@@ -171,6 +176,7 @@ pub enum Action {
 
 pub struct ActionCommons {
 	pub use_tui: bool,
+    pub check_only: bool,
 	pub log: Option<log::LevelFilter>,
 	pub log_out: Option<LogOutput>,
 }

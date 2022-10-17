@@ -145,6 +145,7 @@ impl Error {
 fn serve(coms: ActionCommons, input: ConfigInput) -> Result<(), Error> {
 	#[cfg(feature = "use-tui")]
 	let mut use_tui = false;
+	let check_only = coms.check_only;
 
 	let conf = match input {
 		#[cfg(feature = "parse-config")]
@@ -175,7 +176,7 @@ fn serve(coms: ActionCommons, input: ConfigInput) -> Result<(), Error> {
 
 	#[cfg(feature = "use-tui")]
 	{
-		tui_utils::run_with_tui(use_tui, conf, rt).map_err(Error::Runtime)?;
+		tui_utils::run_with_tui(check_only, use_tui, conf, rt).map_err(Error::Runtime)?;
 	}
 	#[cfg(not(feature = "use-tui"))]
 	{
@@ -194,6 +195,9 @@ fn serve(coms: ActionCommons, input: ConfigInput) -> Result<(), Error> {
 				.build()
 				.map_err(|e| Error::Config(Box::new(e)))?,
 		);
+		if check_only {
+			return Ok(());
+		}
 		if let Err(err) = rt.block_on(server.serve(None)) {
 			return Err(Error::Runtime(err));
 		};
@@ -221,7 +225,12 @@ mod tui_utils {
 	use log::debug;
 	use std::{sync::mpsc, thread};
 
-	pub fn run_with_tui(use_tui: bool, conf: Config, rt: Runtime) -> Result<(), BoxStdErr> {
+	pub fn run_with_tui(
+		check_only: bool,
+		use_tui: bool,
+		conf: Config,
+		rt: Runtime,
+	) -> Result<(), BoxStdErr> {
 		if use_tui && matches!(&conf.log.output, Some(super::config::LogOutput::Stdout)) {
 			return Err("cannot use stdout for log when using TUI".into());
 		}
@@ -235,6 +244,10 @@ mod tui_utils {
 		}
 		log::info!("Found {} routing rules.", conf.server.router.rules.len());
 		let server = Arc::new(conf.server.build()?);
+
+		if check_only {
+			return Ok(());
+		}
 
 		if use_tui {
 			use futures::FutureExt;

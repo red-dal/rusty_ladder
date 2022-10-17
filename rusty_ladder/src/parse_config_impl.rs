@@ -28,7 +28,7 @@ enum Format {
 }
 
 impl Format {
-    fn as_str(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             Self::Toml => "toml",
             Self::Json => "json",
