@@ -43,18 +43,26 @@ pub struct AppOptions {
 	#[arg(long)]
 	tui: bool,
 
-    /// Check config without running the server
-    #[arg(long)]
-    check: bool,
+	/// Check config without running the server
+	#[arg(long)]
+	check: bool,
 
-	/// Set the format of the config file. Can be 'toml' (default) or 'json'.
-	#[cfg(feature = "parse-config")]
+	/// Set the format of the config file.
+	#[cfg(any(
+		feature = "parse-config-json",
+		feature = "parse-config-toml",
+		feature = "parse-config-yaml",
+	))]
 	#[arg(short, long)]
 	#[arg(group = "use_config")]
 	format: Option<String>,
 
 	/// Read config from file.
-	#[cfg(feature = "parse-config")]
+	#[cfg(any(
+		feature = "parse-config-json",
+		feature = "parse-config-toml",
+		feature = "parse-config-yaml",
+	))]
 	#[arg(short, long, value_name = "FILE")]
 	#[arg(group = "use_config")]
 	config: Option<String>,
@@ -116,7 +124,7 @@ impl AppOptions {
 
 		let coms = ActionCommons {
 			use_tui: self.tui,
-            check_only: self.check,
+			check_only: self.check,
 			log: self.log,
 			log_out,
 		};
@@ -133,7 +141,11 @@ impl AppOptions {
 			(Some(_), None) => return Err("missing --outbound".into()),
 			(None, Some(_)) => return Err("missing --inbound".into()),
 			(Some(in_url), Some(out_url)) => {
-				#[cfg(feature = "parse-config")]
+				#[cfg(any(
+					feature = "parse-config-json",
+					feature = "parse-config-toml",
+					feature = "parse-config-yaml",
+				))]
 				if self.config.is_some() {
 					return Err("option --inbound and --outbound incompatible with --config".into());
 				}
@@ -149,7 +161,11 @@ impl AppOptions {
 			}
 		}
 
-		#[cfg(feature = "parse-config")]
+		#[cfg(any(
+			feature = "parse-config-json",
+			feature = "parse-config-toml",
+			feature = "parse-config-yaml",
+		))]
 		if let Some(path) = self.config {
 			return Ok(Action::Serve {
 				coms,
@@ -176,13 +192,17 @@ pub enum Action {
 
 pub struct ActionCommons {
 	pub use_tui: bool,
-    pub check_only: bool,
+	pub check_only: bool,
 	pub log: Option<log::LevelFilter>,
 	pub log_out: Option<LogOutput>,
 }
 
 pub enum ConfigInput {
-	#[cfg(feature = "parse-config")]
+	#[cfg(any(
+		feature = "parse-config-json",
+		feature = "parse-config-toml",
+		feature = "parse-config-yaml",
+	))]
 	File {
 		path: std::path::PathBuf,
 		format: Option<String>,

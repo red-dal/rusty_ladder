@@ -18,27 +18,102 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 **********************************************************************/
 
 use super::{Config, Error};
-use crate::args::ActionCommons;
+use crate::{
+	args::ActionCommons,
+	config::{Log, LogOutput},
+};
+use ladder_lib::ServerBuilder;
+use log::LevelFilter;
 use std::{ffi::OsStr, io::Read};
+
+fn deserialize_output<'de, D>(deserializer: D) -> Result<Option<LogOutput>, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	let s = <&str as serde::Deserialize<'de>>::deserialize(deserializer)?;
+	Ok(LogOutput::from_str(s))
+}
+
+impl Default for SerdeLog {
+	fn default() -> Self {
+		Self {
+			level: default_log_level(),
+			output: default_output(),
+		}
+	}
+}
+
+#[allow(clippy::unnecessary_wraps)]
+fn default_output() -> Option<LogOutput> {
+	Some(LogOutput::Stdout)
+}
+
+fn default_log_level() -> LevelFilter {
+	LevelFilter::Info
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SerdeLog {
+    #[serde(default = "default_log_level")]
+	level: LevelFilter,
+	#[serde(deserialize_with = "deserialize_output")]
+    #[serde(default = "default_output")]
+	output: Option<LogOutput>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct SerdeConfig {
+    #[serde(default)]
+	pub log: SerdeLog,
+    #[serde(flatten)]
+	pub server: ServerBuilder,
+}
+
+impl From<SerdeConfig> for Config {
+	fn from(c: SerdeConfig) -> Self {
+		Self {
+			log: Log {
+				level: c.log.level,
+				output: c.log.output,
+			},
+			server: c.server,
+		}
+	}
+}
 
 #[derive(Clone, Copy)]
 enum Format {
+	#[cfg(feature = "parse-config-toml")]
 	Toml,
+	#[cfg(feature = "parse-config-yaml")]
+	Yaml,
+	#[cfg(feature = "parse-config-json")]
 	Json,
 }
 
 impl Format {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Toml => "toml",
-            Self::Json => "json",
-        }
-    }
+	fn as_str(self) -> &'static str {
+		match self {
+			#[cfg(feature = "parse-config-toml")]
+			Self::Toml => "toml",
+			#[cfg(feature = "parse-config-yaml")]
+			Self::Yaml => "yaml",
+			#[cfg(feature = "parse-config-json")]
+			Self::Json => "json",
+		}
+	}
 
 	fn from_str(s: &OsStr) -> Option<Self> {
+		#[cfg(feature = "parse-config-toml")]
 		if s.eq_ignore_ascii_case("toml") {
 			return Some(Self::Toml);
 		}
+		#[cfg(feature = "parse-config-yaml")]
+		if s.eq_ignore_ascii_case("yaml") || s.eq_ignore_ascii_case("yml") {
+			return Some(Self::Yaml);
+		}
+		#[cfg(feature = "parse-config-json")]
 		if s.eq_ignore_ascii_case("json") {
 			return Some(Self::Json);
 		}
@@ -65,7 +140,11 @@ pub(super) fn make_config_from_file(
 		ext.and_then(Format::from_str).unwrap_or_default()
 	};
 
-    println!("Reading {} config file '{}'...", format.as_str(), path.to_string_lossy());
+	println!(
+		"Reading {} config file '{}'...",
+		format.as_str(),
+		path.to_string_lossy()
+	);
 
 	let mut conf_str = String::with_capacity(512);
 	std::fs::File::open(&path)
@@ -86,10 +165,15 @@ pub(super) fn make_config_from_file(
 }
 
 fn make_config(format: Format, conf_str: &str, coms: ActionCommons) -> Result<Config, Error> {
-	let mut conf: Config = match format {
+	let conf: SerdeConfig = match format {
+		#[cfg(feature = "parse-config-toml")]
 		Format::Toml => toml::from_str(conf_str).map_err(Error::config)?,
+		#[cfg(feature = "parse-config-yaml")]
+		Format::Yaml => serde_yaml::from_str(conf_str).map_err(Error::config)?,
+		#[cfg(feature = "parse-config-json")]
 		Format::Json => serde_json::from_str(conf_str).map_err(Error::config)?,
 	};
+	let mut conf: Config = conf.into();
 	if coms.use_tui
 		&& matches!(&conf.log.output, Some(super::config::LogOutput::Stdout))
 		&& coms.log_out.is_none()

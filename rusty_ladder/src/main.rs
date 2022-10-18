@@ -42,7 +42,9 @@ macro_rules! make_feature_str {
 const FEATURES: &[&str] = &[
 	make_feature_str!("parse-url"),
 	make_feature_str!("parse-url-v2rayn"),
-	make_feature_str!("parse-config"),
+	make_feature_str!("parse-config-yaml"),
+	make_feature_str!("parse-config-json"),
+	make_feature_str!("parse-config-toml"),
 	make_feature_str!("use-tui"),
 	make_feature_str!("use-udp"),
 	make_feature_str!("use-webapi"),
@@ -76,7 +78,14 @@ const FEATURES: &[&str] = &[
 	make_feature_str!("trojan-outbound"),
 ];
 
-#[cfg(all(not(feature = "parse-url"), not(feature = "parse-config")))]
+#[cfg(all(
+	not(feature = "parse-url"),
+	not(any(
+		feature = "parse-config-json",
+		feature = "parse-config-toml",
+		feature = "parse-config-yaml",
+	)),
+))]
 compile_error!("At least one of the features ['parse-url', 'parse-config'] must be enabled");
 
 fn main() {
@@ -102,9 +111,17 @@ fn run() -> Result<(), BoxStdErr> {
 #[cfg(feature = "use-tui")]
 mod tui;
 
-#[cfg(feature = "parse-config")]
+#[cfg(any(
+	feature = "parse-config-json",
+	feature = "parse-config-toml",
+	feature = "parse-config-yaml",
+))]
 mod parse_config_impl;
-#[cfg(feature = "parse-config")]
+#[cfg(any(
+	feature = "parse-config-json",
+	feature = "parse-config-toml",
+	feature = "parse-config-yaml",
+))]
 use parse_config_impl::make_config_from_file;
 
 #[cfg(feature = "parse-url")]
@@ -148,7 +165,11 @@ fn serve(coms: ActionCommons, input: ConfigInput) -> Result<(), Error> {
 	let check_only = coms.check_only;
 
 	let conf = match input {
-		#[cfg(feature = "parse-config")]
+		#[cfg(any(
+			feature = "parse-config-json",
+			feature = "parse-config-toml",
+			feature = "parse-config-yaml",
+		))]
 		args::ConfigInput::File { path, format } => {
 			#[cfg(feature = "use-tui")]
 			if coms.use_tui {

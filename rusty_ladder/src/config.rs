@@ -48,29 +48,8 @@ impl LogOutput {
 	}
 }
 
-#[cfg(feature = "parse-config")]
-fn deserialize_output<'de, D>(deserializer: D) -> Result<Option<LogOutput>, D::Error>
-where
-	D: serde::Deserializer<'de>,
-{
-	let s = <&str as serde::Deserialize<'de>>::deserialize(deserializer)?;
-	Ok(LogOutput::from_str(s))
-}
-
-#[cfg_attr(
-	feature = "parse-config",
-	derive(serde::Deserialize),
-	serde(deny_unknown_fields)
-)]
 pub struct Log {
-	#[cfg_attr(feature = "parse-config", serde(default = "default_log_level"))]
 	pub level: LevelFilter,
-	#[cfg_attr(
-		feature = "parse-config",
-		serde(default = "default_output"),
-		serde(deserialize_with = "deserialize_output"),
-		serde(rename = "output")
-	)]
 	pub output: Option<LogOutput>,
 }
 
@@ -144,30 +123,8 @@ impl Log {
 	}
 }
 
-impl Default for Log {
-	fn default() -> Self {
-		Log {
-			level: default_log_level(),
-			output: Some(LogOutput::Stdout),
-		}
-	}
-}
 
-fn default_log_level() -> LevelFilter {
-	LevelFilter::Info
-}
-
-#[allow(clippy::unnecessary_wraps)]
-#[allow(dead_code)]
-fn default_output() -> Option<LogOutput> {
-	Some(LogOutput::Stdout)
-}
-
-// ------------------- Config -------------------
-#[cfg_attr(feature = "parse-config", derive(serde::Deserialize))]
 pub struct Config {
-	#[cfg_attr(feature = "parse-config", serde(default))]
 	pub log: Log,
-	#[cfg_attr(feature = "parse-config", serde(flatten))]
 	pub server: ServerBuilder,
 }

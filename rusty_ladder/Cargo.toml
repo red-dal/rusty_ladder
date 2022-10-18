@@ -21,8 +21,12 @@ parse-url = ["ladder_lib/parse-url"]
 # This feature only works on VMess proxy.
 parse-url-v2rayn = ["parse-url", "ladder_lib/parse-url-v2rayn"]
 
-# Enable commandline options that parses JSON or TOML config.
-parse-config = ["ladder_lib/use_serde", "serde", "serde_json", "toml"]
+# Enable config parsing.
+parse-config = ["parse-config-toml", "parse-config-yaml"]
+parse-config-json = ["ladder_lib/use_serde", "serde", "serde_json"]
+parse-config-toml = ["ladder_lib/use_serde", "serde", "toml"]
+parse-config-yaml = ["ladder_lib/use_serde", "serde", "serde_yaml"]
+
 
 local-dns = ["ladder_lib/local-dns"]
 local-dns-over-openssl = ["ladder_lib/local-dns-over-openssl"]
@@ -121,7 +125,9 @@ chain-outbound = ["ladder_lib/chain-outbound"]
 [dependencies]
 ladder_lib = { version = "*", path = "../ladder_lib", default-features = false, features = [] }
 serde = { version = "1.0", optional = true }
+serde_yaml = { version = "0.9", optional = true }
 serde_json = { version = "1.0", optional = true }
+
 toml = { version = "0.5", optional = true }
 clap = { version = "4", features = ["derive"] }
 
